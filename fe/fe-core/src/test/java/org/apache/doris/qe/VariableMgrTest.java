@@ -173,6 +173,12 @@ public class VariableMgrTest {
         setVar8.analyze(null);
         VariableMgr.setVar(var, setVar8);
         Assert.assertEquals(2L, var.getRuntimeFilterType());
+
+        SetVar setVar9 = new SetVar(SetType.SESSION, "runtime_filter_type", new StringLiteral(
+            RuntimeFilterTypeHelper.encode("IN_OR_BLOOM_FILTER").toString()));
+        setVar8.analyze(null);
+        VariableMgr.setVar(var, setVar9);
+        Assert.assertEquals(8L, var.getRuntimeFilterType());
     }
 
     @Test(expected = UserException.class)

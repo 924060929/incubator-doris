@@ -91,7 +91,7 @@ For query options related to Runtime Filter, please refer to the following secti
 
 - The first query option is to adjust the type of Runtime Filter used. In most cases, you only need to adjust this option, and keep the other options as default.
 
-  - `runtime_filter_type`: Including Bloom Filter, MinMax Filter and IN predicate. By default, only IN predicate will be used conservatively. In some cases, the performance will be higher when both Bloom Filter, MinMax Filter and IN predicate are used at the same time.
+  - `runtime_filter_type`: Including Bloom Filter, MinMax Filter, IN predicate and IN_OR_BLOOM Filter. By default, only IN_OR_BLOOM Filter will be used. In some cases, the performance will be higher when both Bloom Filter, MinMax Filter and IN predicate are used at the same time.
 
 - Other query options usually only need to be further adjusted in certain specific scenarios to achieve the best results. Usually only after performance testing, optimize for resource-intensive, long enough running time and high enough frequency queries.
 
@@ -114,7 +114,7 @@ The query options are further explained below.
 #### 1.runtime_filter_type
 Type of Runtime Filter used.
 
-**Type**: Number (1, 2, 4) or the corresponding mnemonic string (IN, BLOOM_FILTER, MIN_MAX), the default is 1 (IN predicate), use multiple commas to separate, pay attention to the need to add quotation marks , Or add any number of types, for example:
+**Type**: Number (1, 2, 4, 8) or the corresponding mnemonic string (IN, BLOOM_FILTER, MIN_MAX, IN_OR_BLOOM_FILTER), the default is 8 (IN_OR_BLOOM FILTER), use multiple commas to separate, pay attention to the need to add quotation marks , Or add any number of types, for example:
 ```
 set runtime_filter_type="BLOOM_FILTER,IN,MIN_MAX";
 ```
@@ -138,6 +138,9 @@ set runtime_filter_type=7;
     - By default, only the number of data rows in the right table is less than 1024 will be pushed down (can be adjusted by `runtime_filter_max_in_num` in the session variable).
     - Currently IN predicate already implement a merge method.
     - When IN predicate and other filters are specified at the same time, and the filtering value of IN predicate does not reach runtime_filter_max_in_num will try to remove other filters. The reason is that IN predicate is an accurate filtering condition. Even if there is no other filter, it can filter efficiently. If it is used at the same time, other filters will do useless work. Currently, only when the producer and consumer of the runtime filter are in the same fragment can there be logic to remove the Non-IN predicate.
+- **IN_OR_BLOOM FILTER**:
+    - By default, IN predict will be used when the number of data rows in the right table is less than 1024 (which can be adjusted by ` runtime_filter_max_in_num 'in the session variable)
+    - Otherwise, use bloom filter
 
 #### 2.runtime_filter_mode
 Used to control the transmission range of Runtime Filter between instances.

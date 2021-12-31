@@ -189,6 +189,8 @@ PFilterType get_type(RuntimeFilterType type) {
         return PFilterType::BLOOM_FILTER;
     case RuntimeFilterType::MINMAX_FILTER:
         return PFilterType::MINMAX_FILTER;
+    case RuntimeFilterType::IN_OR_BLOOM_FILTER:
+        return PFilterType::IN_OR_BLOOM_FILTER;
     default:
         return PFilterType::UNKNOW_FILTER;
     }
@@ -342,11 +344,37 @@ public:
             break;
         }
         case RuntimeFilterType::BLOOM_FILTER: {
+            _is_bloomfilter = true;
+            _bloomfilter_func.reset(create_bloom_filter(_tracker, _column_return_type));
+            return _bloomfilter_func->init_with_fixed_length(params->bloom_filter_size);
+        }
+        case RuntimeFilterType::IN_OR_BLOOM_FILTER: {
+            _hybrid_set.reset(create_set(_column_return_type));
             _bloomfilter_func.reset(create_bloom_filter(_tracker, _column_return_type));
             return _bloomfilter_func->init_with_fixed_length(params->bloom_filter_size);
         }
         default:
             return Status::InvalidArgument("Unknown Filter type");
+        }
+        return Status::OK();
+    }
+
+    Status change_to_bloom_filter() {
+        if (_filter_type != RuntimeFilterType::IN_OR_BLOOM_FILTER) {
+            std::stringstream msg;
+            msg << "Can not change to bloom filter because of runtime filter type is "
+                << to_string(_filter_type);
+            return Status::InvalidArgument(msg.str());
+        }
+        _is_bloomfilter = true;
+        if (_hybrid_set->size() > 0) {
+            auto it = _hybrid_set->begin();
+            while (it->has_next()) {
+                _bloomfilter_func->insert(it->get_value());
+                it->next();
+            }
+            // release in filter
+            _hybrid_set.reset(create_set(_column_return_type));
         }
         return Status::OK();
     }
@@ -368,6 +396,14 @@ public:
             _bloomfilter_func->insert(data);
             break;
         }
+        case RuntimeFilterType::IN_OR_BLOOM_FILTER: {
+            if (_is_bloomfilter) {
+                _bloomfilter_func->insert(data);
+            } else {
+                _hybrid_set->insert(data);
+            }
+            break;
+        }
         default:
             DCHECK(false);
             break;
@@ -381,7 +417,13 @@ public:
         DCHECK(_pool != nullptr);
         DCHECK(prob_expr->root()->type().type == _column_return_type);
 
-        switch (_filter_type) {
+        auto real_filter_type = _filter_type;
+        if (real_filter_type == RuntimeFilterType::IN_OR_BLOOM_FILTER) {
+            real_filter_type = _is_bloomfilter
+                                       ? RuntimeFilterType::BLOOM_FILTER
+                                       : RuntimeFilterType::IN_FILTER;
+        }
+        switch (real_filter_type) {
         case RuntimeFilterType::IN_FILTER: {
             if (!_is_ignored_in_filter) {
                 TTypeDesc type_desc = create_type_desc(_column_return_type);
@@ -439,9 +481,16 @@ public:
     }
 
     Status merge(const RuntimePredicateWrapper* wrapper) {
-        DCHECK(_filter_type == wrapper->_filter_type);
-        if (_filter_type != wrapper->_filter_type) {
-            return Status::InvalidArgument("invalid filter type");
+        bool can_merge_in_or_bloom
+            = _filter_type == RuntimeFilterType::IN_OR_BLOOM_FILTER &&
+                  (wrapper->_filter_type == RuntimeFilterType::IN_FILTER
+                   || wrapper->_filter_type == RuntimeFilterType::BLOOM_FILTER);
+        if (!can_merge_in_or_bloom && _filter_type != wrapper->_filter_type) {
+            std::stringstream msg;
+            msg << "fragment instance " << _fragment_instance_id.to_string()
+                << " can not merge runtime filter(id=" << _filter_id << "), current is filter type is"
+                << to_string(_filter_type) << ", other filter type is " << to_string(wrapper->_filter_type);
+            return Status::InvalidArgument(msg.str());
         }
         switch (_filter_type) {
         case RuntimeFilterType::IN_FILTER: {
@@ -483,6 +532,77 @@ public:
             _bloomfilter_func->merge(wrapper->_bloomfilter_func.get());
             break;
         }
+        case RuntimeFilterType::IN_OR_BLOOM_FILTER: {
+            auto real_filter_type = _is_bloomfilter
+                                       ? RuntimeFilterType::BLOOM_FILTER
+                                       : RuntimeFilterType::IN_FILTER;
+            if (real_filter_type == RuntimeFilterType::IN_FILTER) {
+                if (wrapper->_filter_type == RuntimeFilterType::IN_FILTER) { // in merge in
+                    if (wrapper->_is_ignored_in_filter) {
+                        std::stringstream msg;
+                        msg << "fragment instance " << _fragment_instance_id.to_string()
+                            << " can not ignore merge runtime filter(in filter id "
+                            << wrapper->_filter_id << ") when used IN_OR_BLOOM_FILTER, ignore msg: "
+                            << *(wrapper->get_ignored_in_filter_msg());
+                        return Status::InvalidArgument(msg.str());
+                    }
+                    _hybrid_set->insert(wrapper->_hybrid_set.get());
+                    if (_max_in_num >= 0 && _hybrid_set->size() >= _max_in_num) {
+                        std::stringstream msg;
+                        msg << "fragment instance " << _fragment_instance_id.to_string()
+                            << " change runtime filter to bloom filter(id=" << _filter_id
+                            << ") because: in_num(" << _hybrid_set->size()
+                            << ") >= max_in_num(" << _max_in_num << ")";
+                        LOG(INFO) << msg.str();
+                        change_to_bloom_filter();
+                    }
+                // in merge bloom filter
+                } else if (wrapper->_filter_type == RuntimeFilterType::BLOOM_FILTER) {
+                    std::stringstream msg;
+                    msg << "fragment instance " << _fragment_instance_id.to_string()
+                        << " change runtime filter to bloom filter(id=" << _filter_id
+                        << ") because: already exist a bloom filter";
+                    LOG(INFO) << msg.str();
+                    change_to_bloom_filter();
+                    _bloomfilter_func->merge(wrapper->_bloomfilter_func.get());
+                } else {
+                    std::stringstream msg;
+                    msg << "fragment instance " << _fragment_instance_id.to_string()
+                        << " can not merge runtime filter(" << to_string(wrapper->_filter_type)
+                        << " id " << wrapper->_filter_id << ") when used IN_OR_BLOOM_FILTER"
+                        << *(wrapper->get_ignored_in_filter_msg());
+                    return Status::InternalError(msg.str());
+                }
+            } else {
+                if (wrapper->_filter_type == RuntimeFilterType::IN_FILTER) { // bloom filter merge in
+                    if (wrapper->_is_ignored_in_filter) {
+                        std::stringstream msg;
+                        msg << "fragment instance " << _fragment_instance_id.to_string()
+                            << " can not ignore merge runtime filter(in filter id "
+                            << wrapper->_filter_id << ") when used IN_OR_BLOOM_FILTER, ignore msg: "
+                            << *(wrapper->get_ignored_in_filter_msg());
+                        return Status::InvalidArgument(msg.str());
+                    }
+                    auto it = wrapper->_hybrid_set->begin();
+                    while (it->has_next()) {
+                        auto value = it->get_value();
+                        _bloomfilter_func->insert(value);
+                        it->next();
+                    }
+                // bloom filter merge bloom filter
+                } else if (wrapper->_filter_type == RuntimeFilterType::BLOOM_FILTER) {
+                    _bloomfilter_func->merge(wrapper->_bloomfilter_func.get());
+                } else {
+                    std::stringstream msg;
+                    msg << "fragment instance " << _fragment_instance_id.to_string()
+                        << " can not merge runtime filter(" << to_string(wrapper->_filter_type)
+                        << " id " << wrapper->_filter_id << ") when used IN_OR_BLOOM_FILTER"
+                        << *(wrapper->get_ignored_in_filter_msg());
+                    return Status::InternalError(msg.str());
+                }
+            }
+            break;
+        }
         default:
             DCHECK(false);
             return Status::InternalError("unknown runtime filter");
@@ -495,7 +615,7 @@ public:
 
         PrimitiveType type = to_primitive_type(in_filter->column_type());
         if (in_filter->has_ignored_msg()) {
-            LOG(INFO) << "Ignore in filter because: " << in_filter->ignored_msg();
+            LOG(INFO) << "Ignore in filter(id=" << _filter_id << ") because: " << in_filter->ignored_msg();
             _is_ignored_in_filter = true;
             _ignored_in_filter_msg = _pool->add(new std::string(in_filter->ignored_msg()));
             return Status::OK();
@@ -596,6 +716,7 @@ public:
     // assign this filter by protobuf
     Status assign(const PBloomFilter* bloom_filter, const char* data) {
         DCHECK(_tracker != nullptr);
+        _is_bloomfilter = true;
         // we won't use this class to insert or find any data
         // so any type is ok
         _bloomfilter_func.reset(create_bloom_filter(_tracker, PrimitiveType::TYPE_INT));
@@ -737,6 +858,10 @@ public:
         }
     }
 
+    bool is_bloomfilter() const {
+        return _is_bloomfilter;
+    }
+
     bool is_ignored_in_filter() const {
         return _is_ignored_in_filter;
     }
@@ -762,6 +887,7 @@ private:
     std::unique_ptr<MinMaxFuncBase> _minmax_func;
     std::unique_ptr<HybridSetBase> _hybrid_set;
     std::unique_ptr<IBloomFilterFuncBase> _bloomfilter_func;
+    bool _is_bloomfilter = false;
     bool _is_ignored_in_filter = false;
     std::string *_ignored_in_filter_msg;
     UniqueId _fragment_instance_id;
@@ -870,6 +996,8 @@ Status IRuntimeFilter::init_with_desc(const TRuntimeFilterDesc* desc, const TQue
         _runtime_filter_type = RuntimeFilterType::MINMAX_FILTER;
     } else if (desc->type == TRuntimeFilterType::IN) {
         _runtime_filter_type = RuntimeFilterType::IN_FILTER;
+    } else if (desc->type == TRuntimeFilterType::IN_OR_BLOOM) {
+        _runtime_filter_type = RuntimeFilterType::IN_OR_BLOOM_FILTER;
     } else {
         return Status::InvalidArgument("unknown filter type");
     }
@@ -925,6 +1053,10 @@ Status IRuntimeFilter::create_wrapper(const UpdateRuntimeFilterParams* param, Me
                                       ObjectPool* pool,
                                       std::unique_ptr<RuntimePredicateWrapper>* wrapper) {
     return _create_wrapper(param, tracker, pool, wrapper);
+}
+
+Status IRuntimeFilter::change_to_bloom_filter() {
+    return _wrapper->change_to_bloom_filter();
 }
 
 template <class T>
@@ -1001,17 +1133,24 @@ void batch_copy(PInFilter* filter, HybridSetBase::IteratorBase* it,
 
 template <class T>
 Status IRuntimeFilter::_serialize(T* request, void** data, int* len) {
-    request->set_filter_type(get_type(_runtime_filter_type));
+    auto real_runtime_filter_type = _runtime_filter_type;
+    if (real_runtime_filter_type == RuntimeFilterType::IN_OR_BLOOM_FILTER) {
+        real_runtime_filter_type = _wrapper->is_bloomfilter()
+                                      ? RuntimeFilterType::BLOOM_FILTER
+                                      : RuntimeFilterType::IN_FILTER;
+    }
 
-    if (_runtime_filter_type == RuntimeFilterType::IN_FILTER) {
+    request->set_filter_type(get_type(real_runtime_filter_type));
+
+    if (real_runtime_filter_type == RuntimeFilterType::IN_FILTER) {
         auto in_filter = request->mutable_in_filter();
         to_protobuf(in_filter);
-    } else if (_runtime_filter_type == RuntimeFilterType::BLOOM_FILTER) {
+    } else if (real_runtime_filter_type == RuntimeFilterType::BLOOM_FILTER) {
         RETURN_IF_ERROR(_wrapper->get_bloom_filter_desc((char**)data, len));
         DCHECK(data != nullptr);
         request->mutable_bloom_filter()->set_filter_length(*len);
         request->mutable_bloom_filter()->set_always_true(false);
-    } else if (_runtime_filter_type == RuntimeFilterType::MINMAX_FILTER) {
+    } else if (real_runtime_filter_type == RuntimeFilterType::MINMAX_FILTER) {
         auto minmax_filter = request->mutable_minmax_filter();
         to_protobuf(minmax_filter);
     } else {
@@ -1195,6 +1334,10 @@ void IRuntimeFilter::to_protobuf(PMinMaxFilter* filter) {
         break;
     }
     }
+}
+
+bool IRuntimeFilter::is_bloomfilter() {
+    return _wrapper->is_bloomfilter();
 }
 
 Status IRuntimeFilter::update_filter(const UpdateRuntimeFilterParams* param) {

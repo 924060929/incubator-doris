@@ -74,6 +74,10 @@ public:
 
             bool is_in_filter = (runtime_filter->type() == RuntimeFilterType::IN_FILTER);
 
+            if (over_max_in_num && runtime_filter->type() == RuntimeFilterType::IN_OR_BLOOM_FILTER) {
+                runtime_filter->change_to_bloom_filter();
+            }
+
             // Note:
             // In the case that exist *remote target* and in filter and other filter,
             // we must merge other filter whatever in filter is over the max num in current node,
@@ -109,7 +113,8 @@ public:
             }
 
             has_in_filter[runtime_filter->expr_order()] =
-                    (runtime_filter->type() == RuntimeFilterType::IN_FILTER);
+                (runtime_filter->type() == RuntimeFilterType::IN_FILTER)
+                || (runtime_filter->type() == RuntimeFilterType::IN_OR_BLOOM_FILTER && !over_max_in_num);
             _runtime_filters[runtime_filter->expr_order()].push_back(runtime_filter);
         }
 
