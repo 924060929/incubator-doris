@@ -92,4 +92,9 @@ public abstract class AbstractPlan<OP_TYPE extends PlanOperator>
             treeString(lines, depth + 1, newLasts, children.get(i));
         }
     }
+
+    @Override
+    public String toString() {
+        return operator.toString();
+    }
 }
