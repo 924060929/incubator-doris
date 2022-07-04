@@ -20,7 +20,7 @@ package org.apache.doris.nereids.trees;
 import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.operators.Operator;
 
-import com.alibaba.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableList;
 
 import java.util.List;
 import java.util.Optional;

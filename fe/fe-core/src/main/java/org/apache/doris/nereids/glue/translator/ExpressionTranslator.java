@@ -148,7 +148,13 @@ public class ExpressionTranslator extends DefaultExpressionVisitor<Expr, PlanTra
         for (Expression expr : function.getArguments()) {
             paramList.add(expr.accept(this, context));
         }
-        return new FunctionCallExpr(function.getName(), paramList);
+        FunctionCallExpr functionCallExpr = new FunctionCallExpr(function.getName(), paramList);
+        try {
+            functionCallExpr.fin();
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
+        return functionCallExpr;
     }
 
     @Override

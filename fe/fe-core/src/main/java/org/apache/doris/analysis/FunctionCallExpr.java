@@ -1257,4 +1257,21 @@ public class FunctionCallExpr extends Expr {
         }
         return result.toString();
     }
+
+    public void fin() throws AnalysisException {
+        if (fnName.getFunction().equalsIgnoreCase("sum")) {
+            if (this.children.isEmpty()) {
+                throw new AnalysisException("The " + fnName + " function must has one input param");
+            }
+            // Prevent the cast type in vector exec engine
+            Type type = getChild(0).type;
+            if (!VectorizedUtil.isVectorized()) {
+                type = getChild(0).type.getMaxResolutionType();
+            }
+            fn = getBuiltinFunction(null, fnName.getFunction(), new Type[]{type},
+                Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);
+            this.type = fn.getReturnType();
+            isAnalyzed = true;
+        }
+    }
 }

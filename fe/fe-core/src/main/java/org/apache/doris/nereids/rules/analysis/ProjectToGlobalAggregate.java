@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.rules.analysis;
 
+import org.apache.doris.nereids.operators.plans.AggPhase;
 import org.apache.doris.nereids.operators.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
@@ -37,7 +38,8 @@ public class ProjectToGlobalAggregate extends OneAnalysisRuleFactory {
                        .anyMatch(this::hasNonWindowedAggregateFunction);
 
                if (needGlobalAggregate) {
-                   LogicalAggregate op = new LogicalAggregate(ImmutableList.of(), project.operator.getProjects());
+                   LogicalAggregate op = new LogicalAggregate(AggPhase.FIRST_MERGE,
+                            ImmutableList.of(), project.operator.getProjects());
                    return plan(op, project.child());
                } else {
                    return project;

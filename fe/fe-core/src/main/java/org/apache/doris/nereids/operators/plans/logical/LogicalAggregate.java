@@ -52,8 +52,10 @@ public class LogicalAggregate extends LogicalUnaryOperator {
     /**
      * Desc: Constructor for LogicalAggregation.
      */
-    public LogicalAggregate(List<Expression> groupByExprList, List<NamedExpression> outputExpressionList) {
+    public LogicalAggregate(AggPhase aggPhase,
+                            List<Expression> groupByExprList, List<NamedExpression> outputExpressionList) {
         super(OperatorType.LOGICAL_AGGREGATION);
+        this.aggPhase = aggPhase;
         this.groupByExprList = groupByExprList;
         this.outputExpressionList = outputExpressionList;
     }

@@ -60,6 +60,7 @@ import org.apache.doris.nereids.analyzer.UnboundFunction;
 import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundStar;
+import org.apache.doris.nereids.operators.plans.AggPhase;
 import org.apache.doris.nereids.operators.plans.JoinType;
 import org.apache.doris.nereids.operators.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.operators.plans.logical.LogicalFilter;
@@ -624,7 +625,8 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
         return input.optionalMap(aggCtx, () -> {
             List<Expression> groupByExpressions = visit(aggCtx.get().groupByItem().expression(), Expression.class);
             List<NamedExpression> namedExpressions = getNamedExpressions(selectCtx.namedExpressionSeq());
-            return new LogicalUnaryPlan(new LogicalAggregate(groupByExpressions, namedExpressions), input);
+            LogicalAggregate op = new LogicalAggregate(AggPhase.FIRST_MERGE, groupByExpressions, namedExpressions);
+            return new LogicalUnaryPlan(op, input);
         });
     }
 
