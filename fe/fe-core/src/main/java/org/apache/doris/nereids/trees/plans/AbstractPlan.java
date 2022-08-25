@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans;
 
+import org.apache.doris.nereids.analyzer.Unbound;
 import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.trees.AbstractTreeNode;
@@ -64,6 +65,13 @@ public abstract class AbstractPlan extends AbstractTreeNode<Plan> implements Pla
 
     public Optional<GroupExpression> getGroupExpression() {
         return groupExpression;
+    }
+
+    @Override
+    public boolean canResolve() {
+        return !resolved()
+                && !(this instanceof Unbound)
+                && childrenResolved();
     }
 
     /**

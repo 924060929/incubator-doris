@@ -61,9 +61,9 @@ public class ApplyRuleJob extends Job {
         GroupExpressionMatching groupExpressionMatching
                 = new GroupExpressionMatching(rule.getPattern(), groupExpression);
         for (Plan plan : groupExpressionMatching) {
-            List<Plan> newPlans = rule.transform(plan, context.getPlannerContext());
+            List<Plan> newPlans = rule.transform(plan, context.getCascadesContext());
             for (Plan newPlan : newPlans) {
-                Pair<Boolean, GroupExpression> pair = context.getPlannerContext().getMemo()
+                Pair<Boolean, GroupExpression> pair = context.getCascadesContext().getMemo()
                         .copyIn(newPlan, groupExpression.getOwnerGroup(), rule.isRewrite());
                 if (!pair.first) {
                     continue;

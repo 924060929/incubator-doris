@@ -44,6 +44,8 @@ public interface Plan extends TreeNode<Plan> {
 
     LogicalProperties getLogicalProperties();
 
+    boolean canResolve();
+
     default boolean resolved() {
         return !(getLogicalProperties() instanceof UnboundLogicalProperties);
     }

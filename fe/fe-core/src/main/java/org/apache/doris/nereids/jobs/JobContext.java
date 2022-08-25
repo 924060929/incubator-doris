@@ -34,7 +34,7 @@ public class JobContext {
         this.costUpperBound = costUpperBound;
     }
 
-    public CascadesContext getPlannerContext() {
+    public CascadesContext getCascadesContext() {
         return cascadesContext;
     }
 

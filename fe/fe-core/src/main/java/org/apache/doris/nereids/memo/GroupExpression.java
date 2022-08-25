@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.memo;
 
 import org.apache.doris.common.Pair;
+import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
@@ -64,12 +65,12 @@ public class GroupExpression {
     public GroupExpression(Plan plan, List<Group> children) {
         this.plan = Objects.requireNonNull(plan, "plan can not be null")
                 .withGroupExpression(Optional.of(this));
-        this.children = Objects.requireNonNull(children);
+        this.children = Lists.newArrayList(Objects.requireNonNull(children, "children can not be null"));
         this.ruleMasks = new BitSet(RuleType.SENTINEL.ordinal());
         this.statDerived = false;
         this.lowestCostTable = Maps.newHashMap();
         this.requestPropertiesMap = Maps.newHashMap();
-        children.forEach(childGroup -> childGroup.addParentExpression(this));
+        this.children.forEach(childGroup -> childGroup.addParentExpression(this));
     }
 
     // TODO: rename
@@ -142,6 +143,10 @@ public class GroupExpression {
         ruleMasks.set(rule.getRuleType().ordinal());
     }
 
+    public void propagateApplied(GroupExpression toGroupExpression) {
+        toGroupExpression.ruleMasks.or(ruleMasks);
+    }
+
     public boolean isStatDerived() {
         return statDerived;
     }
@@ -192,13 +197,14 @@ public class GroupExpression {
             return false;
         }
         GroupExpression that = (GroupExpression) o;
-        // if the plan is LogicalRelation or PhysicalRelation, this == that should be true,
+        // if the plan is UnboundRelation or LogicalRelation or PhysicalRelation, this == that should be true,
         // when if one relation appear in plan more than once,
         // we cannot distinguish them throw equals function, since equals function cannot use output info.
-        if (plan instanceof LogicalRelation || plan instanceof PhysicalRelation) {
+        if (plan instanceof UnboundRelation || plan instanceof LogicalRelation || plan instanceof PhysicalRelation) {
             return false;
         }
-        return children.equals(that.children) && plan.equals(that.plan);
+        return children.equals(that.children) && plan.equals(that.plan)
+                && plan.getLogicalProperties().equals(that.plan.getLogicalProperties());
     }
 
     @Override
@@ -208,5 +214,10 @@ public class GroupExpression {
 
     public StatsDeriveResult getCopyOfChildStats(int idx) {
         return child(idx).getStatistics().copy();
+    }
+
+    @Override
+    public String toString() {
+        return "GroupExpression(plan=" + plan.toString() + ")";
     }
 }

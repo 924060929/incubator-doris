@@ -43,7 +43,7 @@ import javax.annotation.Nullable;
 public class Memo {
     // generate group id in memo is better for test, since we can reproduce exactly same Memo.
     private final IdGenerator<GroupId> groupIdGenerator = GroupId.createGenerator();
-    private final List<Group> groups = Lists.newArrayList();
+    private final Map<GroupId, Group> groups = Maps.newLinkedHashMap();
     // we could not use Set, because Set does not have get method.
     private final Map<GroupExpression, GroupExpression> groupExpressions = Maps.newHashMap();
     private Group root;
@@ -57,7 +57,7 @@ public class Memo {
     }
 
     public List<Group> getGroups() {
-        return groups;
+        return ImmutableList.copyOf(groups.values());
     }
 
     public Map<GroupExpression, GroupExpression> getGroupExpressions() {
@@ -144,9 +144,6 @@ public class Memo {
         Preconditions.checkArgument(!plan.getGroupExpression().isPresent(),
                 "Cannot init memo by a plan which contains a groupExpression");
 
-        // create lower groupId for root plan first, then create higher groupId for children plans
-        GroupId newGroupId = groupIdGenerator.getNextId();
-
         // initialize children recursively
         List<Group> childrenGroups = plan.children()
                 .stream()
@@ -155,9 +152,12 @@ public class Memo {
 
         plan = replaceChildrenToGroupPlan(plan, childrenGroups);
         GroupExpression newGroupExpression = new GroupExpression(plan, childrenGroups);
-        Group group = new Group(newGroupId, newGroupExpression, plan.getLogicalProperties());
+        Group group = new Group(groupIdGenerator.getNextId(), newGroupExpression, plan.getLogicalProperties());
 
-        groups.add(group);
+        groups.put(group.getGroupId(), group);
+        if (groupExpressions.containsKey(newGroupExpression)) {
+            throw new IllegalStateException("groupExpression already exists in memo, maybe a bug");
+        }
         groupExpressions.put(newGroupExpression, newGroupExpression);
         return group;
     }
@@ -204,28 +204,12 @@ public class Memo {
         GroupExpression newGroupExpression = new GroupExpression(plan, childrenGroups);
 
         GroupExpression existedExpression = groupExpressions.get(newGroupExpression);
-        if (existedExpression != null) {
-            // at this position, exist the same plan and refer to same children groups,
-            // and the logicalProperties must be recomputed, so we should remove existed group expression
-            // and create a new group expression
-            if (targetGroup == null) {
-                // the existedExpression will be recycled and replaced to newGroupExpression in reInitGroup method
-                reInitGroup(existedExpression.getOwnerGroup(), newGroupExpression, logicalProperties);
-            } else {
-                if (!targetGroup.equals(existedExpression.getOwnerGroup())) {
-                    moveParentExpressionsReference(existedExpression.getOwnerGroup(), targetGroup);
-                    recycleGroup(existedExpression.getOwnerGroup());
-                }
-                // must recycleGroup first, then reInit
-                reInitGroup(targetGroup, newGroupExpression, logicalProperties);
-            }
-            return Pair.create(false, newGroupExpression);
-        } else {
+        if (existedExpression == null) {
             if (targetGroup == null) {
                 // if not exist target group and not exist the same group expression, then create new group
                 Group newGroup = new Group(groupIdGenerator.getNextId(), newGroupExpression,
                         logicalProperties);
-                groups.add(newGroup);
+                groups.put(newGroup.getGroupId(), newGroup);
             } else {
                 // if exist the target group, clear all origin group expressions in the
                 // existedExpression's owner group and reset logical properties, the
@@ -233,6 +217,17 @@ public class Memo {
                 reInitGroup(targetGroup, newGroupExpression, logicalProperties);
             }
             return Pair.create(true, newGroupExpression);
+        } else {
+            if (targetGroup != null && !targetGroup.equals(existedExpression.getOwnerGroup())) {
+                existedExpression.propagateApplied(newGroupExpression);
+                moveParentExpressionsReference(existedExpression.getOwnerGroup(), targetGroup);
+                recycleGroup(existedExpression.getOwnerGroup());
+                reInitGroup(targetGroup, newGroupExpression, logicalProperties);
+                return Pair.create(true, newGroupExpression);
+            } else {
+                recycleExpression(newGroupExpression);
+                return Pair.create(false, existedExpression);
+            }
         }
     }
 
@@ -260,7 +255,7 @@ public class Memo {
             target.addGroupExpression(groupExpression);
         } else {
             Group group = new Group(groupIdGenerator.getNextId(), groupExpression, logicalProperties);
-            groups.add(group);
+            groups.put(group.getGroupId(), group);
         }
         groupExpressions.put(groupExpression, groupExpression);
         return new Pair<>(true, groupExpression);
@@ -318,7 +313,7 @@ public class Memo {
             groupExpressions.remove(oldExpression);
         } else {
             Group group = new Group(groupIdGenerator.getNextId(), groupExpression, logicalProperties);
-            groups.add(group);
+            groups.put(group.getGroupId(), group);
         }
         groupExpressions.put(groupExpression, groupExpression);
         return new Pair<>(newGroupExpressionGenerated, groupExpression);
@@ -373,7 +368,7 @@ public class Memo {
         if (!source.equals(destination)) {
             source.moveLogicalExpressionOwnership(destination);
             source.movePhysicalExpressionOwnership(destination);
-            groups.remove(source);
+            groups.remove(source.getGroupId());
         }
         return destination;
     }
@@ -428,12 +423,27 @@ public class Memo {
 
     private void moveParentExpressionsReference(Group fromGroup, Group toGroup) {
         for (GroupExpression parentGroupExpression : fromGroup.getParentGroupExpressions()) {
-            parentGroupExpression.replaceChild(fromGroup, toGroup);
+            /*
+             * the scenarios that 'parentGroupExpression == toGroup': eliminate the root group.
+             * the fromGroup is group 1, the toGroup is group 2, we can not replace group2's
+             * groupExpressions reference the child group which is group 2 (reference itself).
+             *
+             *   A(group 2)            B(group 2)
+             *   |                     |
+             *   B(group 1)      =>    C(group 0)
+             *   |
+             *   C(group 0)
+             */
+            if (parentGroupExpression.getOwnerGroup() != toGroup) {
+                parentGroupExpression.replaceChild(fromGroup, toGroup);
+            }
         }
     }
 
     private void recycleGroup(Group group) {
-        groups.remove(group);
+        if (groups.get(group.getGroupId()) == group) {
+            groups.remove(group.getGroupId());
+        }
         recycleLogicalExpressions(group);
         recyclePhysicalExpressions(group);
     }
@@ -457,7 +467,9 @@ public class Memo {
     }
 
     private void recycleExpression(GroupExpression groupExpression) {
-        groupExpressions.remove(groupExpression);
+        if (groupExpressions.get(groupExpression) == groupExpression) {
+            groupExpressions.remove(groupExpression);
+        }
         for (Group childGroup : groupExpression.children()) {
             // if not any groupExpression reference child group, then recycle the child group
             if (childGroup.removeParentExpression(groupExpression) == 0) {

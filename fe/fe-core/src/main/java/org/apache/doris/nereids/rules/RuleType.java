@@ -75,6 +75,7 @@ public enum RuleType {
     REWRITE_SENTINEL(RuleTypeClass.REWRITE),
 
     // exploration rules
+    TEST_EXPLORATION(RuleTypeClass.EXPLORATION),
     LOGICAL_JOIN_COMMUTATIVE(RuleTypeClass.EXPLORATION),
     LOGICAL_LEFT_JOIN_ASSOCIATIVE(RuleTypeClass.EXPLORATION),
     LOGICAL_JOIN_L_ASSCOM(RuleTypeClass.EXPLORATION),
