@@ -125,8 +125,7 @@ public class BindSlotReference implements AnalysisRuleFactory {
 
             RuleType.BINDING_NON_LEAF_LOGICAL_PLAN.build(
                 logicalPlan()
-                        .when(plan -> plan.canResolve() && !(plan instanceof LeafPlan)
-                                && plan.getExpressions().isEmpty())
+                        .when(plan -> plan.canResolve() && !(plan instanceof LeafPlan))
                         .then(LogicalPlan::recomputeLogicalProperties)
             )
         );

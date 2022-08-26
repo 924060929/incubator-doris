@@ -1,9 +1,13 @@
 package org.apache.doris.nereids.memo;
 
+import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
+import org.apache.doris.nereids.jobs.JobContext;
 import org.apache.doris.nereids.properties.LogicalProperties;
+import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.properties.UnboundLogicalProperties;
+import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.plans.GroupPlan;
@@ -27,42 +31,375 @@ import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 public class MemoRewriteTest implements PatternMatchSupported {
     private ConnectContext connectContext = MemoTestUtils.createConnectContext();
 
-    @Test
-    public void testRewriteBottomPlanToOnePlan() {
-        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
-        LogicalOlapScan score = new LogicalOlapScan(PlanConstructor.score);
 
+    /*
+     * A -> A:
+     *
+     * unboundRelation(student) -> unboundRelation(student)
+     */
+    @Test
+    public void a2a() {
+        UnboundRelation student = new UnboundRelation(ImmutableList.of("student"));
         PlanChecker.from(connectContext, student)
                 .applyBottomUp(
-                        logicalOlapScan().when(scan -> Objects.equals(student, scan)).then(scan -> score)
+                        unboundRelation().then(scan -> scan)
                 )
                 .checkGroupNum(1)
-                .checkFirstRootLogicalPlan(score)
-                .matches(logicalOlapScan().when(score::equals));
+                .checkFirstRootLogicalPlan(student)
+                .matches(unboundRelation().when(student::equals));
     }
 
+    /*
+     * A -> B:
+     *
+     * unboundRelation(student) -> logicalOlapScan(student)
+     */
     @Test
-    public void testRewriteBottomPlanToMultiPlan() {
+    public void a2b() {
         LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
-        LogicalOlapScan score = new LogicalOlapScan(PlanConstructor.score);
-        LogicalLimit<LogicalOlapScan> limit = new LogicalLimit<>(1, 0, score);
+
+        PlanChecker.from(connectContext, new UnboundRelation(ImmutableList.of("student")))
+                .applyBottomUp(
+                        unboundRelation().then(scan -> student)
+                )
+                .checkGroupNum(1)
+                .checkFirstRootLogicalPlan(student)
+                .matches(logicalOlapScan().when(student::equals));
+    }
+
+    /*
+     * A -> new A:
+     *
+     * logicalOlapScan(student) -> new logicalOlapScan(student)
+     */
+    @Test
+    public void a2newA() {
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
 
         PlanChecker.from(connectContext, student)
                 .applyBottomUp(
-                        logicalOlapScan().when(scan -> Objects.equals(student, scan)).then(scan -> limit)
+                        logicalOlapScan()
+                                .when(scan -> student == scan)
+                                .then(scan -> new LogicalOlapScan(PlanConstructor.student))
+                )
+                .checkGroupNum(1)
+                .checkFirstRootLogicalPlan(student)
+                .matches(logicalOlapScan().when(student::equals));
+    }
+
+    /*
+     * A -> B(C): will run into dead loop
+     *
+     *  unboundRelation(student)               limit(1)
+     *                              ->           |
+     *                                    logicalOlapScan(student)
+     */
+    @Test
+    public void a2bc() {
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
+        LogicalLimit<LogicalOlapScan> limit = new LogicalLimit<>(1, 0, student);
+
+        PlanChecker.from(connectContext, new UnboundRelation(ImmutableList.of("student")))
+                .applyBottomUp(
+                        unboundRelation().then(unboundRelation -> limit.withChildren(student))
                 )
                 .checkGroupNum(2)
                 .checkFirstRootLogicalPlan(limit)
                 .matches(
                         logicalLimit(
-                                any().when(child -> Objects.equals(child, score))
+                                logicalOlapScan().when(student::equals)
                         ).when(limit::equals)
+                );
+    }
+
+    /*
+     * A -> B(A): will run into dead loop, so we detect it and throw exception.
+     *
+     *  unboundRelation(student)               limit(1)                          limit(1)
+     *                              ->           |                   ->             |                 ->    ...
+     *                                    unboundRelation(student)          unboundRelation(student)
+     *
+     * you should split A into some states:
+     * 1. A(not rewrite)
+     * 2. A'(already rewrite)
+     *
+     * then make sure the A' is new object and not equals to A (overwrite equals method and compare the states),
+     * so the case change to 'A -> B(C)', because C has different state with A
+     */
+    @Test
+    public void a2ba() {
+        // invalid case
+        Assertions.assertThrows(IllegalStateException.class, () -> {
+            UnboundRelation student = new UnboundRelation(ImmutableList.of("student"));
+            LogicalLimit<UnboundRelation> limit = new LogicalLimit<>(1, 0, student);
+
+            PlanChecker.from(connectContext, student)
+                    .applyBottomUp(
+                            unboundRelation().then(unboundRelation -> limit.withChildren(unboundRelation))
+                    )
+                    .checkGroupNum(2)
+                    .checkFirstRootLogicalPlan(limit)
+                    .matches(
+                            logicalLimit(
+                                    logicalOlapScan().when(student::equals)
+                            ).when(limit::equals)
+                    );
+        });
+
+
+        // valid case: 5 steps
+        class A extends UnboundRelation {
+            // 1: declare the Plan has some states
+            State state;
+
+            public A(List<String> nameParts, State state) {
+                this(nameParts, state, Optional.empty());
+            }
+
+            public A(List<String> nameParts, State state, Optional<GroupExpression> groupExpression) {
+                super(nameParts, groupExpression, Optional.empty());
+                this.state = state;
+            }
+
+            // 2: overwrite the 'equals' method that compare state
+            @Override
+            public boolean equals(Object o) {
+                return super.equals(o) && state == ((A) o).state;
+            }
+
+            // 3: declare 'withState' method, and clear groupExpression(means create new group when rewrite)
+            public A withState(State state) {
+                return new A(getNameParts(), state, Optional.empty());
+            }
+
+            @Override
+            public Plan withGroupExpression(Optional<GroupExpression> groupExpression) {
+                return new A(getNameParts(), state, groupExpression);
+            }
+
+            @Override
+            public String toString() {
+                return "A{namePart=" + getNameParts() + ", state=" + state + '}';
+            }
+        }
+
+        A a = new A(ImmutableList.of("student"), State.NOT_REWRITE);
+
+        A a2 = new A(ImmutableList.of("student"), State.ALREADY_REWRITE);
+        LogicalLimit<UnboundRelation> limit = new LogicalLimit<>(1, 0, a2);
+
+        PlanChecker.from(connectContext, a)
+                .applyBottomUp(
+                        unboundRelation()
+                                // 4: add state condition to the pattern's predicates
+                                .when(r -> (r instanceof A) && ((A) r).state == State.NOT_REWRITE)
+                                .then(unboundRelation -> {
+                                    // 5: new plan and change state, so this case equal to 'A -> B(C)', which C has
+                                    //    different state with A
+                                    A notRewritePlan = (A) unboundRelation;
+                                    return limit.withChildren(notRewritePlan.withState(State.ALREADY_REWRITE));
+                                }
+                        )
+                )
+                .checkGroupNum(2)
+                .checkFirstRootLogicalPlan(limit)
+                .matches(
+                        logicalLimit(
+                                unboundRelation().when(a2::equals)
+                        ).when(limit::equals)
+                );
+    }
+
+    /*
+     * A -> A(B): will run into dead loop, we can not detect it in the group tree, because B usually not equals
+     *            to other object (e.g. UnboundRelation), but can detect the rule's invoke times.
+     *
+     *  limit(student)                        limit(1)                          limit(1)
+     *       |                      ->           |                   ->             |                 ->    ...
+     *     any                            unboundRelation(student)          unboundRelation(student)
+     *
+     * you should split A into some states:
+     * 1. A(not rewrite)
+     * 2. A'(already rewrite)
+     *
+     * then make sure the A' is new object and not equals to A (overwrite equals method and compare the states),
+     * so the case change to 'A -> B(C)', because B has different state with A.
+     *
+     * the valid example like the 'a2ba' case.
+     */
+    @Test()
+    public void a2ab() {
+        UnboundRelation student = new UnboundRelation(ImmutableList.of("student"));
+        LogicalLimit<UnboundRelation> limit = new LogicalLimit<>(1, 0, student);
+        LogicalOlapScan boundStudent = new LogicalOlapScan(PlanConstructor.student);
+        CascadesContext cascadesContext = MemoTestUtils.createCascadesContext(connectContext, limit);
+        cascadesContext.setCurrentJobContext(new JobContext(cascadesContext, PhysicalProperties.ANY, 0) {
+            @Override
+            public void onInvokeRule(RuleType ruleType) {
+                // add invoke times
+                super.onInvokeRule(ruleType);
+
+                Integer invokeTimes = ruleInvokeTimes.get(ruleType);
+                int maxInvokeTimes = 10000;
+                if (invokeTimes > maxInvokeTimes) {
+                    throw new IllegalStateException(ruleType + " invoke too many times: " + maxInvokeTimes);
+                }
+            }
+        });
+
+        Assertions.assertThrows(IllegalStateException.class, () -> {
+            PlanChecker.from(cascadesContext)
+                    .applyBottomUp(
+                            logicalLimit().then(l -> l.withChildren(boundStudent))
+                    );
+        });
+    }
+
+    @Test
+    public void a2bcd() {
+        UnboundRelation student = new UnboundRelation(ImmutableList.of("student"));
+
+        LogicalOlapScan scan = new LogicalOlapScan(PlanConstructor.student);
+        LogicalLimit<LogicalOlapScan> limit5 = new LogicalLimit<>(5, 0, scan);
+        LogicalLimit<LogicalLimit<LogicalOlapScan>> limit10 = new LogicalLimit<>(10, 0, limit5);
+
+        PlanChecker.from(connectContext, limit10)
+                .applyBottomUp(
+                        unboundRelation().then(r -> limit10)
+                )
+                .checkGroupNum(3)
+                .checkFirstRootLogicalPlan(limit10)
+                .matches(
+                        logicalLimit(
+                                logicalLimit(
+                                        logicalOlapScan().when(scan::equals)
+                                ).when(limit5::equals)
+                        ).when(limit10::equals)
+                );
+    }
+
+    /*
+     * A -> A(B): will run into dead loop, we can not detect it in the group tree, because B usually not equals
+     *            to other object (e.g. UnboundRelation), but can detect the rule's invoke times.
+     *
+     *  limit(student)                        limit(1)                          limit(1)
+     *       |                      ->           |                   ->             |                 ->    ...
+     *     any                            unboundRelation(student)          unboundRelation(student)
+     *
+     * you should split A into some states:
+     * 1. A(not rewrite)
+     * 2. A'(already rewrite)
+     *
+     * then make sure the A' is new object and not equals to A (overwrite equals method and compare the states),
+     * so the case change to 'A -> B(C)', because B has different state with A.
+     *
+     * the valid example like the 'a2ba' case.
+     */
+    @Test()
+    public void a2abc() {
+        UnboundRelation student = new UnboundRelation(ImmutableList.of("student"));
+        LogicalLimit<UnboundRelation> limit1 = new LogicalLimit<>(1, 0, student);
+        CascadesContext cascadesContext = MemoTestUtils.createCascadesContext(connectContext, limit1);
+        cascadesContext.setCurrentJobContext(new JobContext(cascadesContext, PhysicalProperties.ANY, 0) {
+            @Override
+            public void onInvokeRule(RuleType ruleType) {
+                // add invoke times
+                super.onInvokeRule(ruleType);
+
+                Integer invokeTimes = ruleInvokeTimes.get(ruleType);
+                int maxInvokeTimes = 10000;
+                if (invokeTimes > maxInvokeTimes) {
+                    throw new IllegalStateException(ruleType + " invoke too many times: " + maxInvokeTimes);
+                }
+            }
+        });
+
+        Assertions.assertThrows(IllegalStateException.class, () -> {
+            PlanChecker.from(cascadesContext)
+                    .applyBottomUp(
+                            logicalLimit().when(limit1::equals).then(l -> l.withChildren(
+                                    new LogicalLimit<>(1, 0,
+                                            new LogicalOlapScan(PlanConstructor.student)
+                                    )
+                            ))
+                    );
+        });
+    }
+
+    /*
+     * A(B) -> C(B):
+     *
+     *       limit(10)                            limit(5)
+     *         |                        =>           |
+     *  logicalOlapScan(student)              logicalOlapScan(student)
+     */
+    @Test
+    public void ab2cb() {
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
+        LogicalLimit<LogicalOlapScan> limit10 = new LogicalLimit<>(10, 0, student);
+        LogicalLimit<LogicalOlapScan> limit5 = new LogicalLimit<>(5, 0, student);
+
+        PlanChecker.from(connectContext, limit10)
+                .applyBottomUp(
+                        logicalLimit().when(limit10::equals).then(limit -> limit5)
+                )
+                .checkGroupNum(2)
+                .checkFirstRootLogicalPlan(limit5)
+                .matches(
+                        logicalLimit(
+                                logicalOlapScan().when(student::equals)
+                        ).when(limit5::equals)
+                );
+    }
+
+    @Test
+    public void testRewriteBottomPlanToOnePlan() {
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
+        LogicalLimit<LogicalOlapScan> limit = new LogicalLimit<>(1, 0, student);
+
+        LogicalOlapScan score = new LogicalOlapScan(PlanConstructor.score);
+
+        PlanChecker.from(connectContext, limit)
+                .applyBottomUp(
+                        logicalOlapScan().when(scan -> Objects.equals(student, scan)).then(scan -> score)
+                )
+                .checkGroupNum(2)
+                .checkFirstRootLogicalPlan(limit)
+                .matches(
+                        logicalLimit(
+                                logicalOlapScan().when(score::equals)
+                        ).when(limit::equals)
+                );
+    }
+
+    @Test
+    public void testRewriteBottomPlanToMultiPlan() {
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
+        LogicalLimit<LogicalOlapScan> limit_10 = new LogicalLimit<>(10, 0, student);
+
+
+        LogicalOlapScan score = new LogicalOlapScan(PlanConstructor.score);
+        LogicalLimit<LogicalOlapScan> limit_1 = new LogicalLimit<>(1, 0, score);
+
+        PlanChecker.from(connectContext, limit_10)
+                .applyBottomUp(
+                        logicalOlapScan().when(scan -> Objects.equals(student, scan)).then(scan -> limit_1)
+                )
+                .checkGroupNum(3)
+                .checkFirstRootLogicalPlan(limit_10)
+                .matches(
+                        logicalLimit(
+                                logicalLimit(
+                                        any().when(score::equals)
+                                ).when(limit_1::equals)
+                        ).when(limit_10::equals)
                 );
     }
 
@@ -123,7 +460,7 @@ public class MemoRewriteTest implements PatternMatchSupported {
     }
 
     @Test
-    public void testEliminateRootWithChildGroup() {
+    public void testEliminateRootWithChildGroupInTwoLevels() {
         LogicalOlapScan scan = new LogicalOlapScan(PlanConstructor.score);
         LogicalLimit<Plan> limit = new LogicalLimit<>(1, 0, scan);
 
@@ -135,7 +472,7 @@ public class MemoRewriteTest implements PatternMatchSupported {
     }
 
     @Test
-    public void testEliminateRootWithChildPlan() {
+    public void testEliminateRootWithChildPlanInTwoLevels() {
         LogicalOlapScan scan = new LogicalOlapScan(PlanConstructor.score);
         LogicalLimit<Plan> limit = new LogicalLimit<>(1, 0, scan);
 
@@ -144,6 +481,57 @@ public class MemoRewriteTest implements PatternMatchSupported {
                 .checkGroupNum(1)
                 .checkGroupExpressionNum(1)
                 .checkFirstRootLogicalPlan(scan);
+    }
+
+    @Test
+    public void testEliminateTwoLevelsToOnePlan() {
+        LogicalOlapScan score = new LogicalOlapScan(PlanConstructor.score);
+        LogicalLimit<Plan> limit = new LogicalLimit<>(1, 0, score);
+
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
+
+        PlanChecker.from(connectContext, limit)
+                .applyBottomUp(logicalLimit(any()).then(l -> student))
+                .checkGroupNum(1)
+                .checkGroupExpressionNum(1)
+                .checkFirstRootLogicalPlan(student);
+
+        PlanChecker.from(connectContext, limit)
+                .applyBottomUp(logicalLimit(group()).then(l -> student))
+                .checkGroupNum(1)
+                .checkGroupExpressionNum(1)
+                .checkFirstRootLogicalPlan(student);
+    }
+
+    @Test
+    public void testEliminateTwoLevelsToTwoPlans() {
+        LogicalOlapScan score = new LogicalOlapScan(PlanConstructor.score);
+        LogicalLimit<Plan> limit_1 = new LogicalLimit<>(1, 0, score);
+
+        LogicalOlapScan student = new LogicalOlapScan(PlanConstructor.student);
+        LogicalLimit<Plan> limit_10 = new LogicalLimit<>(10, 0, student);
+
+        PlanChecker.from(connectContext, limit_1)
+                .applyBottomUp(logicalLimit(any()).when(limit_1::equals).then(l -> limit_10))
+                .checkGroupNum(2)
+                .checkGroupExpressionNum(2)
+                .checkFirstRootLogicalPlan(limit_10)
+                .matches(
+                        logicalLimit(
+                                logicalOlapScan().when(student::equals)
+                        ).when(limit_10::equals)
+                );
+
+        PlanChecker.from(connectContext, limit_1)
+                .applyBottomUp(logicalLimit(group()).when(limit_1::equals).then(l -> limit_10))
+                .checkGroupNum(2)
+                .checkGroupExpressionNum(2)
+                .checkFirstRootLogicalPlan(limit_10)
+                .matches(
+                        logicalLimit(
+                                logicalOlapScan().when(student::equals)
+                        ).when(limit_10::equals)
+                );
     }
 
     @Test
@@ -206,7 +594,7 @@ public class MemoRewriteTest implements PatternMatchSupported {
      *         |---UnboundRelation
      */
     @Test
-    public void testRewrite() {
+    public void testRewriteMiddlePlans() {
         UnboundRelation unboundRelation = new UnboundRelation(Lists.newArrayList("test"));
         LogicalProject insideProject = new LogicalProject<>(
                 ImmutableList.of(new SlotReference("name", StringType.INSTANCE, true, ImmutableList.of("test"))),
@@ -263,7 +651,7 @@ public class MemoRewriteTest implements PatternMatchSupported {
      * Group0: |---UnboundRelation
      */
     @Test
-    public void testRewriteByChild() {
+    public void testEliminateRootWithChildPlanThreeLevels() {
         UnboundRelation unboundRelation = new UnboundRelation(Lists.newArrayList("test"));
         LogicalProject<UnboundRelation> insideProject = new LogicalProject<>(
                 ImmutableList.of(new SlotReference("inside", StringType.INSTANCE, true, ImmutableList.of("test"))),
@@ -295,4 +683,7 @@ public class MemoRewriteTest implements PatternMatchSupported {
                 memo.getGroupExpressions().get(groupExpression).getOwnerGroup().getGroupId().asInt());
     }
 
+    private enum State {
+        NOT_REWRITE, ALREADY_REWRITE
+    }
 }

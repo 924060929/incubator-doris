@@ -80,7 +80,7 @@ public class Memo {
         }
 
         Optional<GroupExpression> groupExpr = node.getGroupExpression();
-        if (!rewrite && groupExpr.isPresent() && groupExpressions.containsKey(groupExpr.get())) {
+        if (groupExpr.isPresent() && groupExpressions.containsKey(groupExpr.get())) {
             return new Pair<>(false, groupExpr.get());
         }
         List<Group> childrenGroups = Lists.newArrayList();
@@ -91,17 +91,13 @@ public class Memo {
             } else if (child.getGroupExpression().isPresent()) {
                 childrenGroups.add(child.getGroupExpression().get().getOwnerGroup());
             } else {
-                childrenGroups.add(copyIn(child, null, rewrite).second.getOwnerGroup());
+                childrenGroups.add(copyIn(child, null, false).second.getOwnerGroup());
             }
         }
         node = replaceChildrenToGroupPlan(node, childrenGroups);
         GroupExpression newGroupExpression = new GroupExpression(node);
         newGroupExpression.setChildren(childrenGroups);
-        if (rewrite) {
-            return rewriteGroupExpression(newGroupExpression, target, node.getLogicalProperties());
-        } else {
-            return insertGroupExpression(newGroupExpression, target, node.getLogicalProperties());
-        }
+        return insertGroupExpression(newGroupExpression, target, node.getLogicalProperties());
         // TODO: need to derive logical property if generate new group. currently we not copy logical plan into
     }
 
@@ -165,7 +161,9 @@ public class Memo {
     /**
      * add or replace the plan into the target group
      * @param plan the plan which want to rewrite or added
-     * @param targetGroup target group to replace plan. null to generate new Group
+     * @param targetGroup target group to replace plan. null to generate new Group. It should be the ancestors
+     *                    of the plan's group, or equals to the plan's group, we do not check this constraint
+     *                    completely because of performance.
      * @return a pair, in which the first element is true if a newly generated groupExpression added into memo,
      *         and the second element is a reference of node in Memo
      */
@@ -173,61 +171,50 @@ public class Memo {
         Preconditions.checkArgument(plan != null, "plan can not be null");
         Preconditions.checkArgument(plan instanceof LogicalPlan, "only logical plan can be rewrite");
 
-        LogicalProperties logicalProperties = plan.getLogicalProperties();
+        // fast check the plan whether exist in the memo
         if (plan instanceof GroupPlan || plan.getGroupExpression().isPresent()) {
-            GroupExpression existedLogicalExpression = plan instanceof GroupPlan
-                    ? ((GroupPlan) plan).getGroup().getLogicalExpression()
-                    : plan.getGroupExpression().get();
-            if (targetGroup != null) {
-                Group fromGroup = existedLogicalExpression.getOwnerGroup();
-
-                // clear targetGroup, from exist group move all logical groupExpression
-                // and logicalProperties to target group
-                rewrite(fromGroup, targetGroup, logicalProperties);
-            }
-            return Pair.create(false, existedLogicalExpression);
+            return rewriteByExistsPlan(targetGroup, plan);
         }
 
+        // try to create a new group expression
+        List<Group> childrenGroups = rewriteChildrenPlansToGroups(plan, targetGroup);
+        GroupExpression newGroupExpression = new GroupExpression(plan, childrenGroups);
+
+        // slow check the groupExpression/plan whether exists in the memo
+        GroupExpression existedExpression = groupExpressions.get(newGroupExpression);
+        if (existedExpression == null) {
+            return rewriteByNewGroupExpression(targetGroup, plan, newGroupExpression);
+        } else {
+            return rewriteByExistedGroupExpression(targetGroup, plan, existedExpression, newGroupExpression);
+        }
+    }
+
+    private List<Group> rewriteChildrenPlansToGroups(Plan plan, Group targetGroup) {
         List<Group> childrenGroups = Lists.newArrayList();
         for (int i = 0; i < plan.children().size(); i++) {
             Plan child = plan.children().get(i);
             if (child instanceof GroupPlan) {
-                childrenGroups.add(((GroupPlan) child).getGroup());
+                GroupPlan childGroupPlan = (GroupPlan) child;
+                validateRewriteChildGroup(childGroupPlan.getGroup(), targetGroup);
+                childrenGroups.add(childGroupPlan.getGroup());
             } else if (child.getGroupExpression().isPresent()) {
-                childrenGroups.add(child.getGroupExpression().get().getOwnerGroup());
+                Group childGroup = child.getGroupExpression().get().getOwnerGroup();
+                validateRewriteChildGroup(childGroup, targetGroup);
+                childrenGroups.add(childGroup);
             } else {
                 childrenGroups.add(rewrite(child, null).second.getOwnerGroup());
             }
         }
+        return childrenGroups;
+    }
 
-        plan = replaceChildrenToGroupPlan(plan, childrenGroups);
-        GroupExpression newGroupExpression = new GroupExpression(plan, childrenGroups);
-
-        GroupExpression existedExpression = groupExpressions.get(newGroupExpression);
-        if (existedExpression == null) {
-            if (targetGroup == null) {
-                // if not exist target group and not exist the same group expression, then create new group
-                Group newGroup = new Group(groupIdGenerator.getNextId(), newGroupExpression,
-                        logicalProperties);
-                groups.put(newGroup.getGroupId(), newGroup);
-            } else {
-                // if exist the target group, clear all origin group expressions in the
-                // existedExpression's owner group and reset logical properties, the
-                // newGroupExpression is the init logical group expression
-                reInitGroup(targetGroup, newGroupExpression, logicalProperties);
-            }
-            return Pair.create(true, newGroupExpression);
-        } else {
-            if (targetGroup != null && !targetGroup.equals(existedExpression.getOwnerGroup())) {
-                existedExpression.propagateApplied(newGroupExpression);
-                moveParentExpressionsReference(existedExpression.getOwnerGroup(), targetGroup);
-                recycleGroup(existedExpression.getOwnerGroup());
-                reInitGroup(targetGroup, newGroupExpression, logicalProperties);
-                return Pair.create(true, newGroupExpression);
-            } else {
-                recycleExpression(newGroupExpression);
-                return Pair.create(false, existedExpression);
-            }
+    private void validateRewriteChildGroup(Group childGroup, Group targetGroup) {
+        /*
+         * 'A => B(A)' is invalid equivalent transform because of dead loop.
+         * see 'MemoRewriteTest.a2ba()'
+         */
+        if (childGroup == targetGroup) {
+            throw new IllegalStateException("Can not add plan which is ancestor of the target plan");
         }
     }
 
@@ -259,64 +246,6 @@ public class Memo {
         }
         groupExpressions.put(groupExpression, groupExpression);
         return new Pair<>(true, groupExpression);
-    }
-
-    /**
-     * Rewrite groupExpression to target group.
-     * If group expression is already in memo, we replace logical properties regardless the target group present or not
-     *     for replace UnboundLogicalProperties to LogicalProperties
-     * If target is null, generate new group.
-     * If target is not null, rewrite the groupExpression to target group.
-     *
-     * @param groupExpression groupExpression to rewrite old one
-     * @param target target group to rewrite groupExpression
-     * @return a pair, in which the first element is true if a newly generated groupExpression added into memo,
-     *         and the second element is a reference of node in Memo
-     */
-    private Pair<Boolean, GroupExpression> rewriteGroupExpression(
-            GroupExpression groupExpression, Group target, LogicalProperties logicalProperties) {
-        boolean newGroupExpressionGenerated = true;
-        GroupExpression existedGroupExpression = groupExpressions.get(groupExpression);
-        /*
-         * here we need to handle one situation that original target is not the same with
-         * existedGroupExpression.getOwnerGroup(). In this case, if we change target to
-         * existedGroupExpression.getOwnerGroup(), we could not rewrite plan as we expected and the plan
-         * will not be changed anymore.
-         * Think below example:
-         * We have a plan like this:
-         * Original (Group 2 is root):
-         * Group2: Project(outside)
-         * Group1: |---Project(inside)
-         * Group0:     |---UnboundRelation
-         *
-         * and we want to rewrite group 2 by Project(inside, GroupPlan(group 0))
-         *
-         * After rewriting we should get (Group 2 is root):
-         * Group2: Project(inside)
-         * Group0: |---UnboundRelation
-         *
-         * Group1: Project(inside)
-         *
-         * After rewriting, Group 1's GroupExpression is not in GroupExpressionsMap anymore and Group 1 is unreachable.
-         * Merge Group 1 into Group 2 is better, but in consideration of there is others way to let a Group take into
-         * unreachable. There's no need to complicate to add a merge step. Instead, we need to have a clear step to
-         * remove unreachable groups and GroupExpressions after rewrite.
-         * TODO: add a clear groups function to memo.
-         */
-        if (existedGroupExpression != null
-                && (target == null || target.equals(existedGroupExpression.getOwnerGroup()))) {
-            target = existedGroupExpression.getOwnerGroup();
-            newGroupExpressionGenerated = false;
-        }
-        if (target != null) {
-            GroupExpression oldExpression = target.rewriteLogicalExpression(groupExpression, logicalProperties);
-            groupExpressions.remove(oldExpression);
-        } else {
-            Group group = new Group(groupIdGenerator.getNextId(), groupExpression, logicalProperties);
-            groups.put(group.getGroupId(), group);
-        }
-        groupExpressions.put(groupExpression, groupExpression);
-        return new Pair<>(newGroupExpressionGenerated, groupExpression);
     }
 
     /**
@@ -380,20 +309,87 @@ public class Memo {
         groupExpression.setOwnerGroup(group);
     }
 
-    private void rewrite(Group fromGroup, Group toGroup, LogicalProperties logicalProperties) {
+    private Pair<Boolean, GroupExpression> rewriteByExistsPlan(Group targetGroup, Plan existsPlan) {
+        GroupExpression existedLogicalExpression = existsPlan instanceof GroupPlan
+                ? ((GroupPlan) existsPlan).getGroup().getLogicalExpression() // get first logicalGroupExpression
+                : existsPlan.getGroupExpression().get();
+        if (targetGroup != null) {
+            Group existedGroup = existedLogicalExpression.getOwnerGroup();
+            // clear targetGroup, from exist group move all logical groupExpression
+            // and logicalProperties to target group
+            eliminateFromGroupAndMoveToTargetGroup(existedGroup, targetGroup, existsPlan.getLogicalProperties());
+        }
+        return Pair.create(false, existedLogicalExpression);
+    }
+
+    private Pair<Boolean, GroupExpression> rewriteByNewGroupExpression(Group targetGroup, Plan newPlan,
+            GroupExpression newGroupExpression) {
+        if (targetGroup == null) {
+            // if not exist target group and not exist the same group expression,
+            // then create new group with the newGroupExpression
+            Group newGroup = new Group(groupIdGenerator.getNextId(), newGroupExpression,
+                    newPlan.getLogicalProperties());
+            groups.put(newGroup.getGroupId(), newGroup);
+            groupExpressions.put(newGroupExpression, newGroupExpression);
+        } else {
+            // if exist the target group, clear all origin group expressions in the
+            // existedExpression's owner group and reset logical properties, the
+            // newGroupExpression is the init logical group expression
+            reInitGroup(targetGroup, newGroupExpression, newPlan.getLogicalProperties());
+        }
+        return Pair.create(true, newGroupExpression);
+    }
+
+    private Pair<Boolean, GroupExpression> rewriteByExistedGroupExpression(Group targetGroup, Plan existedPlan,
+            GroupExpression existedExpression, GroupExpression newExpression) {
+        if (targetGroup != null && !targetGroup.equals(existedExpression.getOwnerGroup())) {
+            existedExpression.propagateApplied(newExpression);
+            moveParentExpressionsReference(existedExpression.getOwnerGroup(), targetGroup);
+            recycleGroup(existedExpression.getOwnerGroup());
+            reInitGroup(targetGroup, newExpression, existedPlan.getLogicalProperties());
+            return Pair.create(true, newExpression);
+        } else {
+            // if targetGroup is null or targetGroup equal to the existedExpression's ownerGroup,
+            // then recycle the temporary new group expression
+            recycleExpression(newExpression);
+            return Pair.create(false, existedExpression);
+        }
+    }
+
+    /**
+     * eliminate fromGroup, clear targetGroup, then move the logical group expressions in the fromGroup to the toGroup.
+     *
+     * the scenario is:
+     * ```
+     *  Group 1(project, the targetGroup)                  Group 1(logicalOlapScan, the targetGroup)
+     *               |                             =>
+     *  Group 0(logicalOlapScan, the fromGroup)
+     * ```
+     *
+     * we should recycle the group 0, and recycle all group expressions in group 1, then move the logicalOlapScan to
+     * the group 1, and reset logical properties of the group 1.
+     */
+    private void eliminateFromGroupAndMoveToTargetGroup(Group fromGroup, Group targetGroup,
+            LogicalProperties logicalProperties) {
+        if (fromGroup == targetGroup) {
+            return;
+        }
+        // simple check targetGroup is the ancestors of the fromGroup, not check completely because of performance
+        if (fromGroup == root) {
+            throw new IllegalStateException(
+                    "TargetGroup should be ancestors of fromGroup, but fromGroup is root. Maybe a bug");
+        }
+
         List<GroupExpression> logicalExpressions = fromGroup.clearLogicalExpressions();
         recycleGroup(fromGroup);
 
-        recycleLogicalExpressions(toGroup);
-        recyclePhysicalExpressions(toGroup);
+        recycleLogicalExpressions(targetGroup);
+        recyclePhysicalExpressions(targetGroup);
 
         for (GroupExpression logicalExpression : logicalExpressions) {
-            toGroup.addLogicalExpression(logicalExpression);
+            targetGroup.addLogicalExpression(logicalExpression);
         }
-        toGroup.setLogicalProperties(logicalProperties);
-        if (root == fromGroup) {
-            root = toGroup;
-        }
+        targetGroup.setLogicalProperties(logicalProperties);
     }
 
     private void reInitGroup(Group group, GroupExpression initLogicalExpression, LogicalProperties logicalProperties) {

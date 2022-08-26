@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.memo;
 
 import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.IntegerLiteral;
 import org.apache.doris.nereids.trees.plans.JoinType;
@@ -65,6 +66,39 @@ public class MemoInitTest implements PatternMatchSupported {
                         logicalProject(
                                 any().when(child -> Objects.equals(child, scan))
                         ).when(root -> Objects.equals(root, topProject))
+                );
+    }
+
+    @Test
+    public void initByJoinSameUnboundTable() {
+        UnboundRelation scanA = new UnboundRelation(ImmutableList.of("a"));
+
+        LogicalJoin<UnboundRelation, UnboundRelation> topJoin = new LogicalJoin<>(JoinType.INNER_JOIN, scanA, scanA);
+
+        PlanChecker.from(connectContext, topJoin)
+                .checkGroupNum(3)
+                .matches(
+                        logicalJoin(
+                                any().when(left -> Objects.equals(left, scanA)),
+                                any().when(right -> Objects.equals(right, scanA))
+                        ).when(root -> Objects.equals(root, topJoin))
+                );
+    }
+
+    @Test
+    public void initByJoinSameLogicalTable() {
+        OlapTable tableA = PlanConstructor.newOlapTable(0, "a", 1);
+        LogicalOlapScan scanA = new LogicalOlapScan(tableA);
+
+        LogicalJoin<LogicalOlapScan, LogicalOlapScan> topJoin = new LogicalJoin<>(JoinType.INNER_JOIN, scanA, scanA);
+
+        PlanChecker.from(connectContext, topJoin)
+                .checkGroupNum(3)
+                .matches(
+                        logicalJoin(
+                                any().when(left -> Objects.equals(left, scanA)),
+                                any().when(right -> Objects.equals(right, scanA))
+                        ).when(root -> Objects.equals(root, topJoin))
                 );
     }
 
