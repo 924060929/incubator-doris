@@ -37,6 +37,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.logical.LogicalHaving;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
+import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 
 import com.google.common.collect.ImmutableList;
 
@@ -96,6 +97,19 @@ public class BindFunction implements AnalysisRuleFactory {
                     List<Expression> predicates = bind(having.getExpressions(), ctx.connectContext.getEnv());
                     return new LogicalHaving<>(predicates.get(0), having.child());
                 })
+            ),
+            RuleType.BINDING_REPEAT_FUNCTION.build(
+                    logicalRepeat().thenApply(ctx -> {
+                        LogicalRepeat<GroupPlan> repeat = ctx.root;
+                        List<List<Expression>> groupingSets = repeat.getGroupingSets().stream()
+                                .map(expr -> bind(expr, ctx.connectContext.getEnv())).collect(Collectors.toList());
+                        List<NamedExpression> output =
+                                bind(repeat.getOutputExpressions(), ctx.connectContext.getEnv());
+                        return repeat.replace(groupingSets, repeat.getOriginalGroupByExpressions(), output,
+                                repeat.getGroupingIdList(), repeat.getVirtualSlotRefs(),
+                                repeat.getVirtualGroupingExprs(),
+                                repeat.hasChangedOutput(), repeat.isNormalized());
+                    })
             )
         );
     }

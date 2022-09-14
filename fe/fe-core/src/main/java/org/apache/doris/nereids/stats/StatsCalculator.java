@@ -33,17 +33,20 @@ import org.apache.doris.nereids.trees.plans.algebra.Filter;
 import org.apache.doris.nereids.trees.plans.algebra.Limit;
 import org.apache.doris.nereids.trees.plans.algebra.OneRowRelation;
 import org.apache.doris.nereids.trees.plans.algebra.Project;
+import org.apache.doris.nereids.trees.plans.algebra.Repeat;
 import org.apache.doris.nereids.trees.plans.algebra.Scan;
 import org.apache.doris.nereids.trees.plans.algebra.TopN;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAssertNumRows;
 import org.apache.doris.nereids.trees.plans.logical.LogicalEmptyRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
+import org.apache.doris.nereids.trees.plans.logical.LogicalGroupingSets;
 import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
 import org.apache.doris.nereids.trees.plans.logical.LogicalLimit;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOlapScan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
+import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSort;
 import org.apache.doris.nereids.trees.plans.logical.LogicalTopN;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalAggregate;
@@ -51,6 +54,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalAssertNumRows;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalDistribute;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalEmptyRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalFilter;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalGroupingSets;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalHashJoin;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalLimit;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalLocalQuickSort;
@@ -59,6 +63,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalOlapScan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalProject;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalQuickSort;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTopN;
 import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanVisitor;
 import org.apache.doris.nereids.util.Utils;
@@ -179,13 +184,35 @@ public class StatsCalculator extends DefaultPlanVisitor<StatsDeriveResult, Void>
     }
 
     @Override
+    public StatsDeriveResult visitLogicalRepeat(LogicalRepeat<? extends Plan> repeat, Void context) {
+        return computeGroupElement(repeat);
+    }
+
+    @Override
+    public StatsDeriveResult visitLogicalGroupingSets(LogicalGroupingSets<? extends Plan> groupingSets, Void context) {
+        return visitLogicalRepeat(groupingSets, context);
+    }
+
+    @Override
     public StatsDeriveResult visitPhysicalEmptyRelation(PhysicalEmptyRelation emptyRelation, Void context) {
         return computeEmptyRelation(emptyRelation);
     }
 
     @Override
+    public StatsDeriveResult visitPhysicalRepeat(
+            PhysicalRepeat<? extends Plan> repeat, Void context) {
+        return computeGroupElement(repeat);
+    }
+
+    @Override
     public StatsDeriveResult visitPhysicalAggregate(PhysicalAggregate<? extends Plan> agg, Void context) {
         return computeAggregate(agg);
+    }
+
+    @Override
+    public StatsDeriveResult visitPhysicalGroupingSets(
+            PhysicalGroupingSets<? extends Plan> groupingSets, Void context) {
+        return visitPhysicalRepeat(groupingSets, context);
     }
 
     @Override
@@ -346,6 +373,22 @@ public class StatsCalculator extends DefaultPlanVisitor<StatsDeriveResult, Void>
         statsDeriveResult.isReduced = true;
         // TODO: Update ColumnStats properly, add new mapping from output slot to ColumnStats
         return statsDeriveResult;
+    }
+
+    private StatsDeriveResult computeGroupElement(Repeat repeat) {
+        Map<Slot, ColumnStat> columnStatsMap = repeat.getOutputExpressions()
+                .stream()
+                .map(output -> {
+                    ColumnStat columnStats = new ColumnStat();
+                    columnStats.setNdv(0);
+                    columnStats.setMaxSizeByte(0);
+                    columnStats.setNumNulls(0);
+                    columnStats.setAvgSizeByte(0);
+                    return Pair.of(output.toSlot(), columnStats);
+                })
+                .collect(Collectors.toMap(Pair::key, Pair::value));
+        int rowCount = 0;
+        return new StatsDeriveResult(rowCount, columnStatsMap);
     }
 
     // TODO: do real project on column stats

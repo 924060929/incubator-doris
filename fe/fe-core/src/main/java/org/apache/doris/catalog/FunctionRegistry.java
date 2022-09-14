@@ -61,7 +61,8 @@ public class FunctionRegistry {
         }
 
         List<FunctionBuilder> candidateBuilders = functionBuilders.stream()
-                .filter(functionBuilder -> functionBuilder.arity == arity)
+                .filter(functionBuilder ->
+                        functionBuilder.isVar ? functionBuilder.arity > 0 : functionBuilder.arity == arity)
                 .collect(Collectors.toList());
         if (candidateBuilders.isEmpty()) {
             String candidateHints = getCandidateHint(name, candidateBuilders);

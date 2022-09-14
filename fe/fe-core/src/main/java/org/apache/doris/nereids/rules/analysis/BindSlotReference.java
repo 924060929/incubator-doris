@@ -37,7 +37,9 @@ import org.apache.doris.nereids.trees.expressions.Not;
 import org.apache.doris.nereids.trees.expressions.ScalarSubquery;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SubqueryExpr;
+import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.visitor.DefaultExpressionRewriter;
 import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.LeafPlan;
@@ -49,7 +51,9 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
+import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSort;
+import org.apache.doris.nereids.types.BigIntType;
 import org.apache.doris.planner.PlannerContext;
 
 import com.google.common.base.Preconditions;
@@ -57,6 +61,8 @@ import com.google.common.collect.ImmutableList;
 import org.apache.commons.lang.StringUtils;
 
 import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -129,6 +135,37 @@ public class BindSlotReference implements AnalysisRuleFactory {
                     return agg.withGroupByAndOutput(groupBy, output);
                 })
             ),
+            RuleType.BINDING_REPEAT_SLOT.build(
+                    logicalAggregate(logicalRepeat().when(Plan::canBind)).thenApply(ctx -> {
+                        LogicalAggregate<LogicalRepeat<GroupPlan>> aggregate = ctx.root;
+                        LogicalRepeat<GroupPlan> repeat = aggregate.child();
+
+                        List<List<Expression>> groupingSets = repeat.getGroupingSets().stream()
+                                .map(expr -> bind(expr, repeat.children(), repeat, ctx.cascadesContext))
+                                .collect(Collectors.toList());
+                        List<Expression> groupByExpressions =
+                                bind(repeat.getOriginalGroupByExpressions(),
+                                        repeat.children(), repeat, ctx.cascadesContext);
+                        List<NamedExpression> output =
+                                bind(repeat.getOutputExpressions(),
+                                        repeat.children(), repeat, ctx.cascadesContext);
+
+                        RepeatResult repeatResult = genRepeatResult(groupByExpressions, groupingSets, output, repeat);
+                        List<Expression> aggGroupByExpressions = new ArrayList<>(groupByExpressions);
+                        aggGroupByExpressions.addAll(repeatResult.getVirtualSlotRefs());
+                        if (aggGroupByExpressions.size() > LogicalRepeat.MAX_GROUPING_SETS_NUM) {
+                            throw new AnalysisException(
+                                    "Too many sets in GROUP BY clause, the max grouping sets item is "
+                                    + LogicalRepeat.MAX_GROUPING_SETS_NUM);
+                        }
+
+                        return new LogicalAggregate<>(aggGroupByExpressions, repeatResult.getGroupByNewOutput(),
+                                repeat.replace(groupingSets, groupByExpressions, repeatResult.getGroupByNewOutput(),
+                                repeatResult.getGroupingIdList(), repeatResult.getVirtualSlotRefs(),
+                                    new ArrayList<>(repeatResult.getVirtualSlotRefs()),
+                                repeat.hasChangedOutput(), repeat.isNormalized()));
+                    })
+            ),
             RuleType.BINDING_SORT_SLOT.build(
                 logicalSort().when(Plan::canBind).thenApply(ctx -> {
                     LogicalSort<GroupPlan> sort = ctx.root;
@@ -143,7 +180,7 @@ public class BindSlotReference implements AnalysisRuleFactory {
                 })
             ),
             RuleType.BINDING_HAVING_SLOT.build(
-                logicalHaving(logicalAggregate()).thenApply(ctx -> {
+                logicalHaving(logicalAggregate()).when(Plan::canBind).thenApply(ctx -> {
                     LogicalHaving<LogicalAggregate<GroupPlan>> having = ctx.root;
                     LogicalAggregate<GroupPlan> aggregate = having.child();
                     // We should deduplicate the slots, otherwise the binding process will fail due to the
@@ -516,6 +553,86 @@ public class BindSlotReference implements AnalysisRuleFactory {
                 return !((LogicalAggregate) logicalPlan).getGroupByExpressions().isEmpty();
             }
             return false;
+        }
+    }
+
+    private RepeatResult genRepeatResult(List<Expression> originGroupingExprs,
+            List<List<Expression>> groupingSets,
+            List<NamedExpression> output, LogicalRepeat<GroupPlan> repeat) {
+        Set<VirtualSlotReference> newVirtualSlotRefs = new LinkedHashSet<>(repeat.getVirtualSlotRefs());
+
+        // resolve grouping func in repeat
+        List<NamedExpression> groupByNewOutput =
+                output.stream()
+                        .map(e -> resolve(e, newVirtualSlotRefs))
+                        .map(NamedExpression.class::cast)
+                        .collect(Collectors.toList());
+
+        List<BitSet> groupingIdList = repeat.genGroupingIdList(originGroupingExprs, groupingSets);
+        return new RepeatResult(groupByNewOutput, newVirtualSlotRefs, groupingIdList);
+    }
+
+    private static class RepeatResult {
+        private final List<NamedExpression> groupByNewOutput;
+        private final Set<VirtualSlotReference> virtualSlotRefs;
+        private final List<BitSet> groupingIdList;
+
+        public RepeatResult(List<NamedExpression> groupByNewOutput,
+                Set<VirtualSlotReference> virtualSlotRefs,
+                List<BitSet> groupingIdList) {
+            this.virtualSlotRefs = Objects.requireNonNull(virtualSlotRefs, "virtualSlotRefs can not be null");
+            this.groupByNewOutput = Objects.requireNonNull(groupByNewOutput, "groupByNewOutput can not be null");
+            this.groupingIdList = Objects.requireNonNull(groupingIdList, "groupingIdList can not be null");
+        }
+
+        public List<NamedExpression> getGroupByNewOutput() {
+            return groupByNewOutput;
+        }
+
+        public Set<VirtualSlotReference> getVirtualSlotRefs() {
+            return virtualSlotRefs;
+        }
+
+        public List<BitSet> getGroupingIdList() {
+            return groupingIdList;
+        }
+
+    }
+
+    private Expression resolve(Expression expr, Set<VirtualSlotReference> virtualSlotRefs) {
+        return new GenVirtualSlotForMembersOfGroupingFunction(virtualSlotRefs).resolve(expr);
+    }
+
+    private static class GenVirtualSlotForMembersOfGroupingFunction
+            extends DefaultExpressionRewriter<PlannerContext> {
+        private final Set<VirtualSlotReference> virtualSlotRefs;
+
+        public GenVirtualSlotForMembersOfGroupingFunction(Set<VirtualSlotReference> virtualSlotRefs) {
+            this.virtualSlotRefs = Objects.requireNonNull(virtualSlotRefs, "virtualSlotRefs can not null");
+        }
+
+        public Expression resolve(Expression expr) {
+            return expr.accept(this, null);
+        }
+
+        @Override
+        public Expression visitGroupingScalarFunction(
+                GroupingScalarFunction groupingScalarFunction, PlannerContext ctx) {
+            if (groupingScalarFunction.child(0) instanceof VirtualSlotReference) {
+                return groupingScalarFunction;
+            }
+            return genVirtualSlotReference(groupingScalarFunction);
+        }
+
+        private Expression genVirtualSlotReference(GroupingScalarFunction groupingScalarFunction) {
+            String colName = groupingScalarFunction.children().stream()
+                    .map(Expression::toSql).collect(Collectors.joining("_"));
+            colName = LogicalRepeat.GROUPING_PREFIX + colName;
+            VirtualSlotReference virtualSlotReference = new VirtualSlotReference(
+                    colName, BigIntType.INSTANCE, groupingScalarFunction.children(), false);
+            virtualSlotRefs.add(virtualSlotReference);
+            return groupingScalarFunction.repeatChildrenWithVirtualRef(virtualSlotReference,
+                    Optional.of(groupingScalarFunction.children()));
         }
     }
 }
