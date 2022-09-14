@@ -22,6 +22,7 @@ import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Slot;
+import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
@@ -69,9 +70,14 @@ public class PushdownFilterThroughAggregation extends OneRewriteRuleFactory {
         return logicalFilter(logicalAggregate()).then(filter -> {
             LogicalAggregate<GroupPlan> aggregate = filter.child();
             Set<Slot> groupBySlots = new HashSet<>();
+            boolean hasRepeat = false;
             for (Expression groupByExpression : aggregate.getGroupByExpressions()) {
                 if (groupByExpression instanceof Slot) {
                     groupBySlots.add((Slot) groupByExpression);
+                }
+                if (groupByExpression instanceof VirtualSlotReference) {
+                    hasRepeat = true;
+                    break;
                 }
             }
             List<Expression> pushDownPredicates = Lists.newArrayList();
@@ -85,6 +91,9 @@ public class PushdownFilterThroughAggregation extends OneRewriteRuleFactory {
                 }
             });
 
+            if (hasRepeat) {
+                return filter;
+            }
             return pushDownPredicate(filter, aggregate, pushDownPredicates, filterPredicates);
         }).toRule(RuleType.PUSHDOWN_PREDICATE_THROUGH_AGGREGATION);
     }

@@ -27,6 +27,7 @@ import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -34,13 +35,15 @@ import java.util.stream.Collectors;
  */
 public class FunctionBuilder {
     public final int arity;
+    public final boolean isVar;
 
     // Concrete BoundFunction's constructor
     private final Constructor<BoundFunction> builderMethod;
 
-    public FunctionBuilder(Constructor<BoundFunction> builderMethod) {
+    public FunctionBuilder(Constructor<BoundFunction> builderMethod, boolean isVar) {
         this.builderMethod = Objects.requireNonNull(builderMethod, "builderMethod can not be null");
         this.arity = builderMethod.getParameterCount();
+        this.isVar = isVar;
     }
 
     /**
@@ -51,7 +54,21 @@ public class FunctionBuilder {
      */
     public BoundFunction build(String name, List<Expression> arguments) {
         try {
-            return builderMethod.newInstance(arguments.toArray(new Expression[0]));
+            Class<?>[] parameterTypes = builderMethod.getParameterTypes();
+            // is var argument
+            if (parameterTypes.length > 0
+                    && Expression[].class.isAssignableFrom(parameterTypes[parameterTypes.length - 1])) {
+
+                List<Expression> varArgs = arguments.subList(parameterTypes.length - 1, arguments.size());
+                Object[] constructorParams = new Object[parameterTypes.length];
+                for (int i = 0; i < parameterTypes.length - 1; ++i) {
+                    constructorParams[i] = arguments.get(i);
+                }
+                constructorParams[constructorParams.length - 1] = varArgs.stream().toArray(Expression[]::new);
+                return builderMethod.newInstance(constructorParams);
+            } else {
+                return builderMethod.newInstance(arguments.stream().toArray(Expression[]::new));
+            }
         } catch (Throwable t) {
             String argString = arguments.stream()
                     .map(arg -> arg == null ? "null" : arg.toSql())
@@ -77,14 +94,22 @@ public class FunctionBuilder {
         Preconditions.checkArgument(!Modifier.isAbstract(functionClass.getModifiers()),
                 "Can not resolve bind function which is abstract class: "
                         + functionClass.getSimpleName());
+        AtomicBoolean isVar = new AtomicBoolean(false);
         return Arrays.stream(functionClass.getConstructors())
                 .filter(constructor -> Modifier.isPublic(constructor.getModifiers()))
                 .filter(constructor ->
                         // all arguments must be Expression
                         Arrays.stream(constructor.getParameterTypes())
-                                .allMatch(Expression.class::isAssignableFrom)
+                                .allMatch(param -> Expression.class.isAssignableFrom(param)
+                                        || Expression[].class.isAssignableFrom(param))
                 )
-                .map(constructor -> new FunctionBuilder((Constructor<BoundFunction>) constructor))
+                .peek(constructor -> {
+                    if (Arrays.stream(constructor.getParameterTypes())
+                            .allMatch(param -> Expression[].class.isAssignableFrom(param))) {
+                        isVar.set(true);
+                    }
+                })
+                .map(constructor -> new FunctionBuilder((Constructor<BoundFunction>) constructor, isVar.get()))
                 .collect(ImmutableList.toImmutableList());
     }
 }

@@ -34,6 +34,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
+import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSort;
 import org.apache.doris.nereids.util.ExpressionUtils;
 
@@ -123,6 +124,19 @@ public class FillUpMissingSlots implements AnalysisRuleFactory {
                                 return new LogicalFilter<>(newPredicates, a);
                             });
                         })
+                ),
+                RuleType.FILL_UP_HAVING_AGGREGATE_REPEAT.build(
+                        logicalHaving(logicalAggregate(logicalRepeat())).then(having -> {
+                            LogicalAggregate<LogicalRepeat<GroupPlan>> agg = having.child();
+                            LogicalRepeat<GroupPlan> groupBy = agg.child();
+                            Resolver resolver = new Resolver(groupBy);
+                            resolver.resolve(having.getPredicates());
+                            return createPlan(resolver, agg, (r, a) -> {
+                                Expression newPredicates = ExpressionUtils.replace(
+                                        having.getPredicates(), r.getSubstitution());
+                                return new LogicalFilter<>(newPredicates, a);
+                            });
+                        })
                 )
         );
     }
@@ -130,13 +144,21 @@ public class FillUpMissingSlots implements AnalysisRuleFactory {
     static class Resolver {
 
         private final List<NamedExpression> outputExpressions;
+        private final List<List<Expression>> groupingSets;
         private final List<Expression> groupByExpressions;
         private final Map<Expression, Slot> substitution = Maps.newHashMap();
         private final List<NamedExpression> newOutputSlots = Lists.newArrayList();
 
-        Resolver(LogicalAggregate<? extends Plan> aggregate) {
-            outputExpressions = aggregate.getOutputExpressions();
-            groupByExpressions = aggregate.getGroupByExpressions();
+        Resolver(LogicalRepeat<? extends Plan> groupBy) {
+            outputExpressions = groupBy.getOutputExpressions();
+            groupingSets = groupBy.getGroupingSets();
+            groupByExpressions = groupBy.getNonVirtualGroupByExpressions();
+        }
+
+        Resolver(LogicalAggregate<? extends Plan> agg) {
+            outputExpressions = agg.getOutputExpressions();
+            groupingSets = Lists.newArrayList();
+            groupByExpressions = agg.getGroupByExpressions();
         }
 
         public void resolve(Expression expression) {

@@ -20,6 +20,7 @@ package org.apache.doris.catalog;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.FunctionBuilder;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ScalarFunction;
 
 import com.google.common.collect.ImmutableList;
@@ -59,6 +60,20 @@ public interface FunctionHelper {
      * @return ScalaFunc which contains the functionName and the FunctionBuilder
      */
     default ScalarFunc scalar(Class<? extends ScalarFunction> functionClass, String... functionNames) {
+        return new ScalarFunc(functionClass, functionNames);
+    }
+
+    default ScalarFunc groupingScalar(Class<? extends GroupingScalarFunction> functionClass) {
+        String functionName = functionClass.getSimpleName();
+        return groupingScalar(functionClass, functionName);
+    }
+
+    /**
+     * Resolve groupingScalaFunction class, convert to FunctionBuilder and wrap to ScalarFunc
+     * @param functionClass the groupingScalaFunction class
+     * @return ScalaFunc which contains the functionName and the FunctionBuilder
+     */
+    default ScalarFunc groupingScalar(Class<? extends GroupingScalarFunction> functionClass, String... functionNames) {
         return new ScalarFunc(functionClass, functionNames);
     }
 

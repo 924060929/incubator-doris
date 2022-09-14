@@ -59,9 +59,11 @@ import org.apache.doris.nereids.trees.expressions.StringRegexPredicate;
 import org.apache.doris.nereids.trees.expressions.SubqueryExpr;
 import org.apache.doris.nereids.trees.expressions.Subtract;
 import org.apache.doris.nereids.trees.expressions.TimestampArithmetic;
+import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.WhenClause;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ScalarFunction;
 import org.apache.doris.nereids.trees.expressions.literal.BigIntLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
@@ -316,6 +318,14 @@ public abstract class ExpressionVisitor<R, C>
 
     public R visitAssertNumRowsElement(AssertNumRowsElement assertNumRowsElement, C context) {
         return visit(assertNumRowsElement, context);
+    }
+
+    public R visitGroupingScalarFunction(GroupingScalarFunction groupingScalarFunction, C context) {
+        return visit(groupingScalarFunction, context);
+    }
+
+    public R visitVirtualReference(VirtualSlotReference virtualSlotReference, C context) {
+        return visit(virtualSlotReference, context);
     }
 
     /* ********************************************************************************************

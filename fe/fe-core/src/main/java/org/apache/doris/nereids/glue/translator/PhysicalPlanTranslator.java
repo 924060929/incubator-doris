@@ -22,6 +22,7 @@ import org.apache.doris.analysis.BaseTableRef;
 import org.apache.doris.analysis.BinaryPredicate;
 import org.apache.doris.analysis.Expr;
 import org.apache.doris.analysis.FunctionCallExpr;
+import org.apache.doris.analysis.GroupingInfo;
 import org.apache.doris.analysis.SlotDescriptor;
 import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
@@ -42,6 +43,7 @@ import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
+import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.plans.AggPhase;
@@ -63,6 +65,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalPlan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalProject;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalQuickSort;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTopN;
 import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanVisitor;
 import org.apache.doris.nereids.util.ExpressionUtils;
@@ -79,6 +82,7 @@ import org.apache.doris.planner.HashJoinNode.DistributionMode;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanNode;
+import org.apache.doris.planner.RepeatNode;
 import org.apache.doris.planner.SortNode;
 import org.apache.doris.planner.UnionNode;
 import org.apache.doris.thrift.TPartitionType;
@@ -90,9 +94,12 @@ import com.google.common.collect.Sets;
 import org.apache.commons.collections.CollectionUtils;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -133,6 +140,26 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         return rootFragment;
     }
 
+    private List<SlotReference> genGroupBySlotList(List<Expression> groupByExpressionList,
+            List<NamedExpression> outputExpressionList) {
+        List<SlotReference> groupSlotList = Lists.newArrayList();
+        Set<VirtualSlotReference> virtualSlotReferences = groupByExpressionList.stream()
+                .filter(VirtualSlotReference.class::isInstance)
+                .map(VirtualSlotReference.class::cast)
+                .collect(Collectors.toSet());
+        for (Expression e : groupByExpressionList) {
+            if (e instanceof SlotReference && outputExpressionList.stream().anyMatch(o -> o.anyMatch(e::equals))) {
+                groupSlotList.add((SlotReference) e);
+            } else if (e instanceof SlotReference && !virtualSlotReferences.isEmpty()) {
+                // When there is a virtualSlot, it is a groupingSets scenario,
+                // and the original exprId should be retained at this time.
+                groupSlotList.add((SlotReference) e);
+            } else {
+                groupSlotList.add(new SlotReference(e.toSql(), e.getDataType(), e.nullable(), Collections.emptyList()));
+            }
+        }
+        return groupSlotList;
+    }
 
     /**
      * Translate Agg.
@@ -157,15 +184,8 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         List<NamedExpression> outputExpressionList = aggregate.getOutputExpressions();
 
         // 1. generate slot reference for each group expression
-        List<SlotReference> groupSlotList = Lists.newArrayList();
-        for (Expression e : groupByExpressionList) {
-            if (e instanceof SlotReference && outputExpressionList.stream().anyMatch(o -> o.anyMatch(e::equals))) {
-                groupSlotList.add((SlotReference) e);
-            } else {
-                // TODO: review this, should not
-                groupSlotList.add(new SlotReference(e.toSql(), e.getDataType(), e.nullable(), Collections.emptyList()));
-            }
-        }
+        List<SlotReference> groupSlotList = genGroupBySlotList(groupByExpressionList, outputExpressionList);
+
         ArrayList<Expr> execGroupingExpressions = groupByExpressionList.stream()
                 .map(e -> ExpressionTranslator.translate(e, context)).collect(Collectors.toCollection(ArrayList::new));
         // 2. collect agg functions and generate agg function to slot reference map
@@ -198,6 +218,10 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             slotList.addAll(groupSlotList);
             slotList.addAll(aggFunctionOutput);
             outputTupleDesc = generateTupleDesc(slotList, null, context);
+
+            if (slotList.stream().anyMatch(VirtualSlotReference.class::isInstance)) {
+                setSlotNullable(outputTupleDesc, slotList);
+            }
         } else {
             // In the distinct agg scenario, global shares local's desc
             AggregationNode localAggNode;
@@ -255,6 +279,184 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             aggregationNode.setCardinality((long) aggregate.getStats().getRowCount());
         }
         return currentFragment;
+    }
+
+    /**
+     * Translate physicalRepeat to RepeatNode.
+     *
+     * eg: select k1 from t1 group by grouping sets ((k1), (k2, k3), (k3));
+     * groupingInfo:
+     *      Contains:
+     *      virtualTupleDesc: the tupleDescriptor generated for the virtual column
+     *      preRepeatExprs: Expr used in repeatNode. eg: [k1, k2, k3]
+     *
+     * repeatSlotIdList: According to the bitmap corresponding to the original group by
+     *                   and the slotId information contained in the slotDescriptor,
+     *                   the bitmap corresponding to the slotId is obtained.
+     * eg: groupingSetsBitSet: [{0}, {1, 2}, {2}]. slotIdList:[5, 6, 7]
+     *     ==> [{5}, {6, 7}, {7}].
+     *
+     * groupingList: The value of the virtual column generated by each group by.
+     * eg: [3, 4, 6]
+     *
+     * allSlotId: slotId of all used columns. eg: [5, 6, 7]
+     */
+    @Override
+    public PlanFragment visitPhysicalRepeat(PhysicalRepeat repeat, PlanTranslatorContext context) {
+        PlanFragment inputPlanFragment = repeat.child(0).accept(this, context);
+        List<Expression> groupByExpressions = repeat.getGroupByExpressions();
+        List<NamedExpression> outputExpressionList = repeat.getOutputExpressions();
+        List<Expression> virtualGroupByExpressions = repeat.getVirtualGroupByExpressions();
+        List<Expression> nonVirtualGroupByExpressions = repeat.getNonVirtualGroupByExpressions();
+
+        // 1.create GroupingInfo
+        /*
+         * finalSlots: grouping sets the final output column.
+         * preExpressions: Fields required by groupInfo, all fields that need to be used.
+         *
+         * eg: select sum(k2), grouping(k1) from t1 group by grouping sets((k1));
+         * finalSlots: k1, k2, GROUPING_ID(), GROUPING_PREFIX_k1
+         * prePressions: k1, k2
+         */
+        // create virtual tupleDesc
+        List<VirtualSlotReference> virtualSlotList = virtualGroupByExpressions.stream()
+                .filter(VirtualSlotReference.class::isInstance)
+                .map(VirtualSlotReference.class::cast)
+                .collect(Collectors.toList());
+        List<Slot> virtualSlots = Lists.newArrayList(virtualSlotList);
+        TupleDescriptor virtualTupleDesc = generateTupleDesc(virtualSlots, null, context);
+
+        // create repeat slots and PreExpressions
+        List<SlotReference> groupBySlot = genGroupBySlotList(groupByExpressions, outputExpressionList);
+        List<Slot> finalSlots = genOutputSlots(groupBySlot, outputExpressionList, virtualSlots);
+
+        List<Expression> preExpressions = genPreExpressions(nonVirtualGroupByExpressions, outputExpressionList);
+        ArrayList<Expr> preRepeatExprs = preExpressions.stream()
+                .map(e -> ExpressionTranslator.translate(e, context)).collect(Collectors.toCollection(ArrayList::new));
+
+        // create output TupleDesc
+        TupleResult tupleResult = genTupleDescAndDescList(finalSlots, null, context);
+        TupleDescriptor outputTupleDesc = tupleResult.getTupleDescriptor();
+        setSlotNullable(outputTupleDesc, finalSlots);
+
+        GroupingInfo groupingInfo = new GroupingInfo(ExpressionTranslator.translateGroupingType(repeat),
+                virtualTupleDesc, outputTupleDesc, preRepeatExprs);
+
+        // 2.create repeat node
+        // Replace the bitset of groupingsets with the bitset corresponding to slotId
+        List<Set<Integer>> repeatSlotIdList = genGroupingIdList(
+                repeat.useBitsetsToRepresentGroupingSets(), tupleResult.getSlotDescriptors());
+        Set<Integer> allSlotId = genAllSlotId(repeatSlotIdList);
+
+        RepeatNode repeatNode = new RepeatNode(context.nextPlanNodeId(),
+                inputPlanFragment.getPlanRoot(), groupingInfo, repeatSlotIdList,
+                allSlotId, repeat.getVirtualSlotValues());
+        repeatNode.setNumInstances(inputPlanFragment.getPlanRoot().getNumInstances());
+        inputPlanFragment.addPlanRoot(repeatNode);
+        inputPlanFragment.updateDataPartition(DataPartition.RANDOM);
+        return inputPlanFragment;
+    }
+
+    /**
+     * Generate outputSlot based on groupBy and output information.
+     * The generated outputSlot needs to guarantee the order,
+     * first slotReference and then virtualSlotReference.
+     *
+     * First collect the slot and then collect the virtualSlot.
+     * 1. Put the columns in groupBy into the slot
+     * 2. Put the columns in the output into the slot
+     * 3. Put slot and virtualSlot into finalSLots in turn.
+     *
+     * eg: select sum(k2) grouping(k1) from t1 group by grouping sets((k1));
+     * 1. slots:[k1]
+     * 2. slots:[k1, k2]
+     * 3. finalSlots: [k1, k2, GROUPING_PREFIX_k1]
+     */
+    private List<Slot> genOutputSlots(
+            List<SlotReference> groupBySlot,
+            List<NamedExpression> outputExpressionList,
+            List<Slot> virtualSlots) {
+
+        Map<Boolean, List<Slot>> allSlots = groupBySlot.stream()
+                .collect(Collectors.groupingBy(VirtualSlotReference.class::isInstance,
+                        LinkedHashMap::new, Collectors.toList()));
+        List<Slot> nonVirtualSlots = allSlots.get(false);
+        Map<Boolean, List<NamedExpression>> allOutput = outputExpressionList.stream()
+                .collect(Collectors.groupingBy(VirtualSlotReference.class::isInstance,
+                        LinkedHashMap::new, Collectors.toList()));
+        List<NamedExpression> nonVirtualOutput = allOutput.get(false);
+
+        nonVirtualSlots.addAll(nonVirtualOutput.stream()
+                .filter(e -> !nonVirtualSlots.contains(e))
+                .filter(SlotReference.class::isInstance)
+                .map(NamedExpression::toSlot)
+                .collect(Collectors.toSet()));
+        List<Slot> finalSlots = Lists.newArrayList();
+        finalSlots.addAll(nonVirtualSlots);
+        finalSlots.addAll(virtualSlots);
+        return finalSlots;
+    }
+
+    /**
+     * Get all the used columns that appear in repeatNode according to the column of groupBy
+     * and the column of aggFunc in output.
+     *
+     * eg: select sum(k2) grouping(k1) from t1 group by grouping sets((k1));
+     * preExpressions: [k1, k2].
+     */
+    private List<Expression> genPreExpressions(
+            List<Expression> nonVirtualGroupByExpressions, List<NamedExpression> outputExpressionList) {
+        List<Expression> preExpressions = Lists.newArrayList();
+        preExpressions.addAll(nonVirtualGroupByExpressions);
+        Map<Boolean, List<NamedExpression>> allOutput = outputExpressionList.stream()
+                .collect(Collectors.groupingBy(VirtualSlotReference.class::isInstance,
+                        LinkedHashMap::new, Collectors.toList()));
+        List<NamedExpression> nonVirtualOutput = allOutput.get(false);
+        nonVirtualOutput.stream()
+                .filter(e -> !preExpressions.contains(e))
+                .forEach(preExpressions::add);
+        return preExpressions;
+    }
+
+    /**
+     * Generate bitSets corresponding to SlotId according to the original groupBy bitSets and the actual SlotId.
+     * eg:
+     * groupingSetsList: [(k1), (k2, k3), (k3)]
+     * originalGroupingIdList: [{0}, {1,2}, {2}]
+     * SlotIds in groupingSlotDescs: [3, 4, 5]
+     *
+     * return: [{3}, {4, 5}, {5}]
+     */
+    private List<Set<Integer>> genGroupingIdList(
+            List<BitSet> originalGroupingIdList, List<SlotDescriptor> groupingSlotDescs) {
+        List<Set<Integer>> groupingIdList = Lists.newArrayList();
+        for (BitSet bitSet : originalGroupingIdList) {
+            Set<Integer> slotIdSet = new HashSet<>();
+            for (int i = 0; i < groupingSlotDescs.size(); i++) {
+                if (bitSet.get(i)) {
+                    slotIdSet.add(groupingSlotDescs.get(i).getId().asInt());
+                }
+            }
+            groupingIdList.add(slotIdSet);
+        }
+        return groupingIdList;
+    }
+
+    private static Set<Integer> genAllSlotId(List<Set<Integer>> repeatSlotIdList) {
+        Set<Integer> allSlotId = new LinkedHashSet<>();
+        for (Set<Integer> s : repeatSlotIdList) {
+            allSlotId.addAll(s);
+        }
+        return allSlotId;
+    }
+
+    private void setSlotNullable(TupleDescriptor tupleDescriptor, List<Slot> slots) {
+        for (int i = 0; i < slots.size(); ++i) {
+            if (!(slots.get(i) instanceof VirtualSlotReference)) {
+                SlotDescriptor slotDescriptor = tupleDescriptor.getSlots().get(i);
+                slotDescriptor.setIsNullable(true);
+            }
+        }
     }
 
     @Override
@@ -826,6 +1028,9 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         // TODO: fix the project alias of an aliased relation.
         List<Slot> slotList = project.getOutput();
         TupleDescriptor tupleDescriptor = generateTupleDesc(slotList, null, context);
+        if (slotList.stream().anyMatch(VirtualSlotReference.class::isInstance)) {
+            setSlotNullable(tupleDescriptor, slotList);
+        }
         PlanNode inputPlanNode = inputFragment.getPlanRoot();
         // For hash join node, use vSrcToOutputSMap to describe the expression calculation, use
         // vIntermediateTupleDescList as input, and set vOutputTupleDesc as the final output.
@@ -1009,6 +1214,20 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         return tupleDescriptor;
     }
 
+    private TupleResult genTupleDescAndDescList(List<Slot> slotList, Table table, PlanTranslatorContext context) {
+        TupleDescriptor tupleDescriptor = context.generateTupleDesc();
+        tupleDescriptor.setTable(table);
+        List<SlotDescriptor> slotDescriptors = Lists.newArrayList();
+        for (Slot slot : slotList) {
+            if (slot instanceof VirtualSlotReference) {
+                context.createSlotDesc(tupleDescriptor, (VirtualSlotReference) slot);
+            } else {
+                slotDescriptors.add(context.createSlotDesc(tupleDescriptor, (SlotReference) slot));
+            }
+        }
+        return new TupleResult(tupleDescriptor, slotDescriptors);
+    }
+
     private PlanFragment createParentFragment(PlanFragment childFragment, DataPartition parentPartition,
             PlanTranslatorContext context) {
         ExchangeNode exchangeNode = new ExchangeNode(context.nextPlanNodeId(), childFragment.getPlanRoot(), false);
@@ -1132,5 +1351,23 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         rightFragment.setOutputPartition(rhsJoinPartition);
 
         return joinFragment;
+    }
+
+    private static class TupleResult {
+        private final TupleDescriptor tupleDescriptor;
+        private final List<SlotDescriptor> slotDescriptors;
+
+        public TupleResult(TupleDescriptor tupleDescriptor, List<SlotDescriptor> slotDescriptors) {
+            this.tupleDescriptor = Objects.requireNonNull(tupleDescriptor, "tupleDescriptor can not be null");
+            this.slotDescriptors = Objects.requireNonNull(slotDescriptors, "slotDescriptors can not be null");
+        }
+
+        public TupleDescriptor getTupleDescriptor() {
+            return tupleDescriptor;
+        }
+
+        public List<SlotDescriptor> getSlotDescriptors() {
+            return slotDescriptors;
+        }
     }
 }
