@@ -220,6 +220,14 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             slotList.addAll(groupSlotList);
             slotList.addAll(aggFunctionOutput);
             outputTupleDesc = generateTupleDesc(slotList, null, context);
+
+            Set<VirtualSlotReference> virtualSlotReferences = groupByExpressionList.stream()
+                    .filter(VirtualSlotReference.class::isInstance)
+                    .map(VirtualSlotReference.class::cast)
+                    .collect(Collectors.toSet());
+            if (!virtualSlotReferences.isEmpty()) {
+                setSlotNullable(outputTupleDesc, slotList);
+            }
         } else {
             // In the distinct agg scenario, global shares local's desc
             AggregationNode localAggNode;
@@ -336,6 +344,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         // create output TupleDesc
         TupleResult tupleResult = genTupleDescAndDescList(finalSlots, null, context);
         TupleDescriptor outputTupleDesc = tupleResult.getTupleDescriptor();
+        setSlotNullable(outputTupleDesc, finalSlots);
 
         GroupingInfo groupingInfo = new GroupingInfo(ExpressionTranslator.translateGroupingType(repeat),
                 virtualTupleDesc, outputTupleDesc, preRepeatExprs);
@@ -522,6 +531,15 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             allSlotId.addAll(s);
         }
         return allSlotId;
+    }
+
+    private void setSlotNullable(TupleDescriptor tupleDescriptor, List<Slot> slots) {
+        for (int i = 0; i < slots.size(); ++i) {
+            if (!(slots.get(i) instanceof VirtualSlotReference)) {
+                SlotDescriptor slotDescriptor = tupleDescriptor.getSlots().get(i);
+                slotDescriptor.setIsNullable(true);
+            }
+        }
     }
 
     @Override
