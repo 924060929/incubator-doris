@@ -17,11 +17,12 @@
 
 package org.apache.doris.nereids.trees.expressions.functions.scalar;
 
+import org.apache.doris.catalog.FunctionSignature;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
+import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
 import org.apache.doris.nereids.types.BigIntType;
-import org.apache.doris.nereids.types.DataType;
 
 import com.google.common.collect.ImmutableList;
 
@@ -31,7 +32,12 @@ import java.util.Optional;
 /**
  * Functions used by all groupingSets.
  */
-public abstract class GroupingScalarFunction extends ScalarFunction {
+public abstract class GroupingScalarFunction extends ScalarFunction implements ExplicitlyCastableSignature {
+
+    public static final List<FunctionSignature> SIGNATURES = ImmutableList.of(
+            FunctionSignature.ret(BigIntType.INSTANCE).varArgs(BigIntType.INSTANCE)
+    );
+
     protected final Optional<List<Expression>> realChildren;
 
     public GroupingScalarFunction(String name, Expression... arguments) {
@@ -50,8 +56,13 @@ public abstract class GroupingScalarFunction extends ScalarFunction {
     }
 
     @Override
-    public DataType getDataType() {
-        return BigIntType.INSTANCE;
+    public boolean nullable() {
+        return false;
+    }
+
+    @Override
+    public List<FunctionSignature> getSignatures() {
+        return SIGNATURES;
     }
 
     public Optional<List<Expression>> getRealChildren() {

@@ -20,12 +20,8 @@ package org.apache.doris.nereids.trees.expressions.functions.scalar;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.shape.UnaryExpression;
-import org.apache.doris.nereids.trees.expressions.typecoercion.ImplicitCastInputTypes;
-import org.apache.doris.nereids.types.coercion.AbstractDataType;
-import org.apache.doris.nereids.types.coercion.NumericType;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 
 import java.util.List;
 import java.util.Optional;
@@ -33,8 +29,7 @@ import java.util.Optional;
 /**
  * Grouping Expression.
  */
-public class Grouping extends GroupingScalarFunction implements UnaryExpression, ImplicitCastInputTypes {
-    private static final List<AbstractDataType> EXPECTED_INPUT_TYPES = ImmutableList.of(NumericType.INSTANCE);
+public class Grouping extends GroupingScalarFunction implements UnaryExpression {
 
     public Grouping(Expression child) {
         super("Grouping", child);
@@ -45,13 +40,8 @@ public class Grouping extends GroupingScalarFunction implements UnaryExpression,
     }
 
     @Override
-    public List<AbstractDataType> expectedInputTypes() {
-        return EXPECTED_INPUT_TYPES;
-    }
-
-    @Override
     public boolean nullable() {
-        return child().nullable();
+        return false;
     }
 
     @Override

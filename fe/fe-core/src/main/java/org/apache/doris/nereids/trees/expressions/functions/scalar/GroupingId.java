@@ -19,11 +19,6 @@ package org.apache.doris.nereids.trees.expressions.functions.scalar;
 
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
-import org.apache.doris.nereids.trees.expressions.typecoercion.ImplicitCastInputTypes;
-import org.apache.doris.nereids.types.coercion.AbstractDataType;
-import org.apache.doris.nereids.types.coercion.NumericType;
-
-import com.google.common.collect.ImmutableList;
 
 import java.util.List;
 import java.util.Optional;
@@ -31,8 +26,7 @@ import java.util.Optional;
 /**
  * GroupingId Expression.
  */
-public class GroupingId extends GroupingScalarFunction implements ImplicitCastInputTypes {
-    private static final List<AbstractDataType> EXPECTED_INPUT_TYPES = ImmutableList.of(NumericType.INSTANCE);
+public class GroupingId extends GroupingScalarFunction {
 
     public GroupingId(Expression... children) {
         super("Grouping_Id", children);
@@ -40,16 +34,6 @@ public class GroupingId extends GroupingScalarFunction implements ImplicitCastIn
 
     public GroupingId(Optional<List<Expression>> realChildren, Expression... children) {
         super("Grouping_Id", realChildren, children);
-    }
-
-    @Override
-    public List<AbstractDataType> expectedInputTypes() {
-        return EXPECTED_INPUT_TYPES;
-    }
-
-    @Override
-    public boolean nullable() {
-        return false;
     }
 
     @Override
