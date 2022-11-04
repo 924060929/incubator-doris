@@ -221,11 +221,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             slotList.addAll(aggFunctionOutput);
             outputTupleDesc = generateTupleDesc(slotList, null, context);
 
-            Set<VirtualSlotReference> virtualSlotReferences = groupByExpressionList.stream()
-                    .filter(VirtualSlotReference.class::isInstance)
-                    .map(VirtualSlotReference.class::cast)
-                    .collect(Collectors.toSet());
-            if (!virtualSlotReferences.isEmpty()) {
+            if (slotList.stream().anyMatch(VirtualSlotReference.class::isInstance)) {
                 setSlotNullable(outputTupleDesc, slotList);
             }
         } else {
@@ -1013,6 +1009,9 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         // TODO: fix the project alias of an aliased relation.
         List<Slot> slotList = project.getOutput();
         TupleDescriptor tupleDescriptor = generateTupleDesc(slotList, null, context);
+        if (slotList.stream().anyMatch(VirtualSlotReference.class::isInstance)) {
+            setSlotNullable(tupleDescriptor, slotList);
+        }
         PlanNode inputPlanNode = inputFragment.getPlanRoot();
         // For hash join node, use vSrcToOutputSMap to describe the expression calculation, use
         // vIntermediateTupleDescList as input, and set vOutputTupleDesc as the final output.
