@@ -960,7 +960,7 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
                         .collect(Collectors.toList());
                 return new LogicalGroupingSets<>(sets, namedExpressions, input);
             }
-            throw new ParseException("Not support this group by type.", aggCtx.get());
+            return null;
         });
     }
 
