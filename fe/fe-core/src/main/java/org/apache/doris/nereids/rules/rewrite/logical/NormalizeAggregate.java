@@ -23,26 +23,33 @@ import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
+import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.util.ExpressionUtils;
 import org.apache.doris.nereids.util.Utils;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * normalize aggregate's group keys and AggregateFunction's child to SlotReference
@@ -60,7 +67,7 @@ import java.util.stream.Collectors;
  * After rule:
  * Project(k1#1, Alias(SR#9)#4, Alias(k1#1 + 1)#5, Alias(SR#10))#6, Alias(SR#11))#7, Alias(SR#10 + 1)#8)
  * +-- Aggregate(keys:[k1#1, SR#9], outputs:[k1#1, SR#9, Alias(SUM(v1#3))#10, Alias(SUM(v1#3 + 1))#11])
- * +-- Project(k1#1, Alias(K2#2 + 1)#9, v1#3)
+ *     +-- Project(k1#1, Alias(K2#2 + 1)#9, v1#3)
  * <p>
  * More example could get from UT {NormalizeAggregateTest}
  */
@@ -68,6 +75,8 @@ public class NormalizeAggregate extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalAggregate().whenNot(LogicalAggregate::isNormalized).then(aggregate -> {
+            LogicalAggregate<? extends Plan> aggWithBottomProject = normalizeWithBottomProject(aggregate);
+
             // substitution map used to substitute expression in aggregate's output to use it as top projections
             Map<Expression, Expression> substitutionMap = Maps.newHashMap();
             List<Expression> keys = aggregate.getGroupByExpressions();
@@ -193,5 +202,134 @@ public class NormalizeAggregate extends OneRewriteRuleFactory {
 
             return root;
         }).toRule(RuleType.NORMALIZE_AGGREGATE);
+    }
+
+    private LogicalAggregate<? extends Plan> normalizeWithBottomProject(LogicalAggregate<GroupPlan> aggregate) {
+        List<Expression> aggKeys = aggregate.getGroupByExpressions();
+
+        List<Expression> needBottomProjectKeys = aggKeys.stream()
+                .filter(key -> !(key instanceof SlotReference) || key instanceof VirtualSlotReference)
+                .collect(Collectors.toList());
+
+        if (needBottomProjectKeys.isEmpty()) {
+            return aggregate;
+        }
+
+        ReplaceExpression replaceExpression = new ReplaceExpression(needBottomProjectKeys.stream()
+                .flatMap(expr -> {
+                    if (expr instanceof VirtualSlotReference) {
+                        return ((VirtualSlotReference) expr).getRealSlots().stream();
+                    } else {
+                        return Stream.of(expr);
+                    }
+                })
+                .distinct()
+                .map(key -> {
+                    if (key instanceof Slot) {
+                        Slot keySlot = (Slot) key;
+                        return new ReferToNamedExpression(key, keySlot, keySlot);
+                    } else {
+                        Alias alias = new Alias(key, key.toSql());
+                        return new ReferToNamedExpression(key, alias.toSlot(), alias);
+                    }
+                }).collect(Collectors.toMap(
+                        ReferToNamedExpression::getOriginExpr, Function.identity(),
+                        (origin, duplicate) -> origin, LinkedHashMap::new
+                ))
+        );
+
+        List<Expression> newAggKeys = aggregate.getGroupByExpressions()
+                .stream()
+                .map(key -> {
+                    if (key instanceof VirtualSlotReference) {
+                        VirtualSlotReference virtualSlotReference = (VirtualSlotReference) key;
+                        List<Expression> newRealSlots = virtualSlotReference.getRealSlots()
+                                .stream()
+                                .map(replaceExpression::replace)
+                                .collect(Collectors.toList());
+                        return virtualSlotReference.withRealSlots(newRealSlots);
+                    } else {
+                        return replaceExpression.replace(key);
+                    }
+                })
+                .collect(Collectors.toList());
+
+        List<NamedExpression> newAggOutput = aggregate.getOutputExpressions()
+                .stream()
+                .map(output -> (NamedExpression) output.rewriteDownShortCircuit(replaceExpression::replace))
+                .collect(Collectors.toList());
+
+        List<NamedExpression> originAggKeyProjects = replaceExpression.replaceContext.values()
+                .stream()
+                .map(ReferToNamedExpression::getReferredExpression)
+                .collect(Collectors.toList());
+
+        Set<Slot> newAggKeyUsedSlots = newAggKeys.stream()
+                .flatMap(key -> key.getInputSlots().stream())
+                .collect(Collectors.toSet());
+
+        List<Slot> otherOriginOutputUsedSlots = newAggOutput
+                .stream()
+                .flatMap(output -> output.getInputSlots().stream())
+                .filter(slot -> !newAggKeyUsedSlots.contains(slot))
+                .collect(Collectors.toList());
+
+        List<NamedExpression> bottomProjects = ImmutableList.<NamedExpression>builder()
+                .addAll(originAggKeyProjects)
+                .addAll(otherOriginOutputUsedSlots)
+                .build()
+                .stream()
+                .distinct()
+                .collect(Collectors.toList());
+
+        LogicalProject<GroupPlan> bottomProject = new LogicalProject<>(
+                Utils.reorderProjections(bottomProjects), aggregate.child());
+
+        return new LogicalAggregate<>(newAggKeys, Utils.reorderProjections(newAggOutput), aggregate.isDisassembled(),
+                true, aggregate.isDisassembled(), aggregate.getAggPhase(), bottomProject);
+    }
+
+    // replace an expression to slotRef and Alias
+    //
+    // for example: a + 1
+    //
+    // originExpr: a + 1
+    // replacedSlot: SlotReference#9
+    // referredExpression: Alias(a + 1)#9
+    class ReferToNamedExpression {
+        final Expression originExpr;
+        final Slot replacedSlot;
+        final NamedExpression referredExpression;
+
+        public ReferToNamedExpression(Expression originExpr, Slot replacedSlot, NamedExpression referredExpression) {
+            this.originExpr = originExpr;
+            this.replacedSlot = replacedSlot;
+            this.referredExpression = referredExpression;
+        }
+
+        public Expression getOriginExpr() {
+            return originExpr;
+        }
+
+        public Slot getReplacedSlot() {
+            return replacedSlot;
+        }
+
+        public NamedExpression getReferredExpression() {
+            return referredExpression;
+        }
+    }
+
+    class ReplaceExpression {
+        final Map<Expression, ReferToNamedExpression> replaceContext;
+
+        public ReplaceExpression(Map<Expression, ReferToNamedExpression> replaceContext) {
+            this.replaceContext = replaceContext;
+        }
+
+        public Expression replace(Expression expression) {
+            ReferToNamedExpression referToNamedExpression = replaceContext.get(expression);
+            return referToNamedExpression == null ? expression : referToNamedExpression.replacedSlot;
+        }
     }
 }

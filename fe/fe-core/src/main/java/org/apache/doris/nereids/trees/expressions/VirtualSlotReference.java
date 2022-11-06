@@ -91,8 +91,13 @@ public class VirtualSlotReference extends SlotReference {
     }
 
     @Override
-    public SlotReference withChildren(List<Expression> children) {
+    public VirtualSlotReference withChildren(List<Expression> children) {
         Preconditions.checkArgument(children.size() == 0);
         return this;
+    }
+
+    public VirtualSlotReference withRealSlots(List<Expression> realSlots) {
+        return new VirtualSlotReference(getExprId(), getName(), getDataType(),
+                nullable(), getQualifier(), realSlots, hasCast);
     }
 }
