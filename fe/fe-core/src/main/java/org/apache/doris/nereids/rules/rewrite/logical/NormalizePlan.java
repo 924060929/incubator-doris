@@ -33,6 +33,7 @@ import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -191,5 +192,21 @@ public interface NormalizePlan {
             }
         }
         return ImmutableList.copyOf(bottomProjections);
+    }
+
+    /**
+     * Rearrange the order of the projects to ensure that
+     * slotReference is in the front and virtualSlotReference is in the back.
+     */
+    default List<NamedExpression> reorderProjections(List<NamedExpression> projections) {
+        Map<Boolean, List<NamedExpression>> partitionProjections = projections.stream()
+                .collect(Collectors.groupingBy(VirtualSlotReference.class::isInstance,
+                        LinkedHashMap::new, Collectors.toList()));
+        List<NamedExpression> newProjections = partitionProjections.containsKey(false)
+                ? partitionProjections.get(false) : new ArrayList<NamedExpression>();
+        if (partitionProjections.containsKey(true)) {
+            newProjections.addAll(partitionProjections.get(true));
+        }
+        return newProjections;
     }
 }

@@ -35,7 +35,6 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.util.ExpressionUtils;
-import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -126,10 +125,10 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
                     // 8. Ensure that the columns are in order,
                     //   first slotReference and then virtualSlotReference
                     List<NamedExpression> projects = project.getProjects();
-                    List<NamedExpression> newProjects = Utils.reorderProjections(projects);
+                    List<NamedExpression> newProjects = reorderProjections(projects);
                     List<NamedExpression> newBottomProjections =
-                            Utils.reorderProjections(new ArrayList<>(bottomProjections));
-                    List<NamedExpression> finalOutputs = Utils.reorderProjections(newOutputs);
+                            reorderProjections(new ArrayList<>(bottomProjections));
+                    List<NamedExpression> finalOutputs = reorderProjections(newOutputs);
 
                     return generateNewPlan(agg, repeat,
                             needBottomProjections, newBottomProjections,

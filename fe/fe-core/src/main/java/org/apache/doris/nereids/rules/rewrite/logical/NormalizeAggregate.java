@@ -33,7 +33,6 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.util.ExpressionUtils;
-import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -116,9 +115,9 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
 
             // assemble
             List<NamedExpression> newBottomProjections =
-                    Utils.reorderProjections(new ArrayList<>(bottomProjections));
+                    reorderProjections(new ArrayList<>(bottomProjections));
             List<NamedExpression> finalOutput =
-                    Utils.reorderProjections(newOutputs);
+                    reorderProjections(newOutputs);
             LogicalPlan root = aggregate.child();
             if (needBottomProjects) {
                 root = new LogicalProject<>(newBottomProjections, root);
