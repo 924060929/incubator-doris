@@ -63,10 +63,9 @@ import java.util.stream.Collectors;
  *
  * eg:
  * select k1, grouping(k1), grouping(k1, k2) from t1 group by grouping sets ((k1), (k1, k2), (k3) ());
- * originalGroupingExprs: [k1, k2, k3]
- * virtualSlotRefs: GROUPING_ID(), GROUPING_PREFIX_K1(k1), GROUPING_PREFIX_K1_K2(k1, k2)
- * bitSetAll: {0, 1, 2}
- * groupingIdList: [{0}, {0, 1}, {2}, {}]
+ * nonVirtualGroupingByExpressions: [k1, k2, k3]
+ * virtualGroupingByExpressions: GROUPING_ID(), GROUPING_PREFIX_K1(k1), GROUPING_PREFIX_K1_K2(k1, k2)
+ * genBitSetsForNullSlot(): [{0}, {0, 1}, {2}, {}]
  *
  * GROUPING_ID():
  * For {0}: k1 is set to 0, k2 and k3 are set to 1.

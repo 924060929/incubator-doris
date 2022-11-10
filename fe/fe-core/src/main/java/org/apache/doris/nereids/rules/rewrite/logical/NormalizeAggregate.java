@@ -105,7 +105,7 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
                             newVirSlotRef, partitionedOutputs, aggFuncInnerAlias, aggFuncOuterAlias);
 
             // 5. Check if needed BottomProjects
-            boolean needBottomProjects = needBottomProjections(outputs, groupByExpressions);
+            boolean needBottomProjects = needBottomProjections(outputs, groupByExpressions, aggregateFunctions);
 
             // 6. generate bottomProjections
             List<NamedExpression> bottomProjections = new ArrayList<>();
@@ -302,13 +302,28 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
 
     private boolean needBottomProjections(
             List<NamedExpression> outputs,
-            List<Expression> groupByExpressions) {
+            List<Expression> groupByExpressions,
+            Set<AggregateFunction> aggregateFunctions) {
         boolean hasVirtualSlot = !outputs.stream()
                 .filter(e -> e.anyMatch(VirtualSlotReference.class::isInstance))
                 .collect(Collectors.toList()).isEmpty();
         boolean hasAlias = !groupByExpressions.stream()
                 .filter(e -> !(e instanceof SlotReference))
                 .collect(Collectors.toList()).isEmpty();
-        return hasAlias || hasVirtualSlot;
+        boolean aggHasAlias = aggregateFunctionsHasAlias(aggregateFunctions);
+        return hasAlias || hasVirtualSlot || aggHasAlias;
+    }
+
+    private boolean aggregateFunctionsHasAlias(Set<AggregateFunction> aggregateFunctions) {
+        boolean hasAlias = false;
+        for (AggregateFunction aggregateFunction : aggregateFunctions) {
+            for (Expression child : aggregateFunction.getArguments()) {
+                if (!(child instanceof SlotReference
+                        || child instanceof Literal)) {
+                    hasAlias = true;
+                }
+            }
+        }
+        return hasAlias;
     }
 }
