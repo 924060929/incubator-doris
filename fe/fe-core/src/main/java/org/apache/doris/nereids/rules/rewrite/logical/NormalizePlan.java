@@ -30,7 +30,7 @@ import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
-import org.glassfish.jersey.internal.guava.Sets;
+import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
 import java.util.HashMap;
