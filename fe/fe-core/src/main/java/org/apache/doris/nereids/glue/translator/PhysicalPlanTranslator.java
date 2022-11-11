@@ -37,6 +37,7 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.properties.DistributionSpecHash;
 import org.apache.doris.nereids.properties.DistributionSpecHash.ShuffleType;
 import org.apache.doris.nereids.properties.OrderKey;
+import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.ExprId;
 import org.apache.doris.nereids.trees.expressions.Expression;
@@ -45,6 +46,7 @@ import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.plans.AggPhase;
 import org.apache.doris.nereids.trees.plans.JoinType;
@@ -219,7 +221,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             slotList.addAll(aggFunctionOutput);
             outputTupleDesc = generateTupleDesc(slotList, null, context);
 
-            if (slotList.stream().anyMatch(VirtualSlotReference.class::isInstance)) {
+            if (needSetSlotToNullable(outputExpressionList)) {
                 setSlotNullable(outputTupleDesc, slotList);
             }
         } else {
@@ -457,6 +459,15 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                 slotDescriptor.setIsNullable(true);
             }
         }
+    }
+
+    private boolean needSetSlotToNullable(List<NamedExpression> slots) {
+        boolean hasVirtualSlotReference = slots.stream().anyMatch(VirtualSlotReference.class::isInstance);
+        boolean hasGroupingFunc = slots.stream()
+                .filter(Alias.class::isInstance)
+                .map(Alias.class::cast)
+                .anyMatch(s -> s.child().anyMatch(GroupingScalarFunction.class::isInstance));
+        return hasGroupingFunc || hasVirtualSlotReference;
     }
 
     @Override
@@ -1028,7 +1039,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         // TODO: fix the project alias of an aliased relation.
         List<Slot> slotList = project.getOutput();
         TupleDescriptor tupleDescriptor = generateTupleDesc(slotList, null, context);
-        if (slotList.stream().anyMatch(VirtualSlotReference.class::isInstance)) {
+        if (needSetSlotToNullable(project.getProjects())) {
             setSlotNullable(tupleDescriptor, slotList);
         }
         PlanNode inputPlanNode = inputFragment.getPlanRoot();
