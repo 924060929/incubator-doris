@@ -461,6 +461,23 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         }
     }
 
+    private void setSlotNullable(TupleDescriptor tupleDescriptor, List<Slot> slots, List<NamedExpression> projects) {
+        Preconditions.checkState(projects.size() == slots.size());
+        Set<Integer> notSetSlotNullable = new HashSet<>();
+        for (int i = 0; i < projects.size(); i++) {
+            if (projects.get(i) instanceof Alias
+                    && ((Alias) projects.get(i)).child() instanceof GroupingScalarFunction) {
+                notSetSlotNullable.add(i);
+            }
+        }
+        for (int i = 0; i < slots.size(); ++i) {
+            if (!notSetSlotNullable.contains(i)) {
+                SlotDescriptor slotDescriptor = tupleDescriptor.getSlots().get(i);
+                slotDescriptor.setIsNullable(true);
+            }
+        }
+    }
+
     private boolean needSetSlotToNullable(List<NamedExpression> slots) {
         boolean hasVirtualSlotReference = slots.stream().anyMatch(VirtualSlotReference.class::isInstance);
         boolean hasGroupingFunc = slots.stream()
@@ -1040,7 +1057,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         List<Slot> slotList = project.getOutput();
         TupleDescriptor tupleDescriptor = generateTupleDesc(slotList, null, context);
         if (needSetSlotToNullable(project.getProjects())) {
-            setSlotNullable(tupleDescriptor, slotList);
+            setSlotNullable(tupleDescriptor, slotList, project.getProjects());
         }
         PlanNode inputPlanNode = inputFragment.getPlanRoot();
         // For hash join node, use vSrcToOutputSMap to describe the expression calculation, use
