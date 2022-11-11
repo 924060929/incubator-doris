@@ -30,6 +30,7 @@ import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import org.glassfish.jersey.internal.guava.Sets;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -43,6 +44,36 @@ import java.util.stream.Collectors;
  * Normalize Plan.
  */
 public interface NormalizePlan {
+    /**
+     * get AggFunc from outputExpressions
+     */
+    default Set<AggregateFunction> getAggregateFunctions(List<NamedExpression> outputs) {
+        Map<Boolean, List<NamedExpression>> partitionedOutputs = outputs.stream()
+                .collect(Collectors.groupingBy(e -> e.anyMatch(AggregateFunction.class::isInstance)
+                        || e.anyMatch(GroupingScalarFunction.class::isInstance)));
+        return partitionedOutputs.containsKey(true)
+                ? partitionedOutputs.get(true).stream()
+                .flatMap(e -> e.<Set<AggregateFunction>>collect(
+                        AggregateFunction.class::isInstance).stream())
+                .collect(Collectors.toSet())
+                : Sets.newHashSet();
+    }
+
+    /**
+     * get groupingFunc from outputExpressions
+     */
+    default Set<GroupingScalarFunction> getGroupingFunctions(List<NamedExpression> outputs) {
+        Map<Boolean, List<NamedExpression>> partitionedOutputs = outputs.stream()
+                .collect(Collectors.groupingBy(e -> e.anyMatch(GroupingScalarFunction.class::isInstance)
+                        || e.anyMatch(GroupingScalarFunction.class::isInstance)));
+        return partitionedOutputs.containsKey(true)
+                ? partitionedOutputs.get(true).stream()
+                .flatMap(e -> e.<Set<GroupingScalarFunction>>collect(
+                        GroupingScalarFunction.class::isInstance).stream())
+                .collect(Collectors.toSet())
+                : Sets.newHashSet();
+    }
+
     /**
      * Generate Alias for non-slotReference in groupByExpressions
      */
@@ -123,15 +154,11 @@ public interface NormalizePlan {
      * @return List(Pair(old, new))
      */
     default List<Pair<Expression, VirtualSlotReference>> genNewVirSlotRef(
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<GroupingScalarFunction> groupingSetsFunctions,
             List<Expression> groupByExpressions,
             Map<Expression, Alias> groupByNewSlot) {
         Map<Expression, Expression> substitutionMap =
                 genSubstitutionMapWithGroupByExpressions(groupByExpressions, groupByNewSlot);
-        Set<GroupingScalarFunction> groupingSetsFunctions = partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<GroupingScalarFunction>>collect(
-                        GroupingScalarFunction.class::isInstance).stream())
-                .collect(Collectors.toSet());
         List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPair = new ArrayList<>();
         for (GroupingScalarFunction groupingSetsFunction : groupingSetsFunctions) {
             for (Expression child : groupingSetsFunction.getArguments()) {
@@ -171,13 +198,9 @@ public interface NormalizePlan {
      * bottom: k1#0
      */
     default List<NamedExpression> genBottomProjectionsWithAggFunc(
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggNewSlot) {
         List<NamedExpression> bottomProjections = new ArrayList<>();
-        Set<AggregateFunction> aggregateFunctions = partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<AggregateFunction>>collect(
-                        AggregateFunction.class::isInstance).stream())
-                .collect(Collectors.toSet());
 
         // replace all non-slot expression in agg functions children.
         for (AggregateFunction aggregateFunction : aggregateFunctions) {

@@ -80,14 +80,11 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
                     List<Expression> groupByExpressions = repeat.getGroupByExpressions();
                     Map<Expression, Alias> groupByNewAlias = genAliasChildToSlotForGroupBy(groupByExpressions);
                     List<NamedExpression> outputs = repeat.getOutputExpressions();
-                    Map<Boolean, List<NamedExpression>> partitionedOutputs = outputs.stream()
-                            .collect(Collectors.groupingBy(e -> e.anyMatch(AggregateFunction.class::isInstance)
-                                    || e.anyMatch(GroupingScalarFunction.class::isInstance)));
-                    Set<AggregateFunction> aggregateFunctions = partitionedOutputs.get(true).stream()
-                            .flatMap(e -> e.<Set<AggregateFunction>>collect(
-                                    AggregateFunction.class::isInstance).stream())
-                            .collect(Collectors.toSet());
+
+                    Set<AggregateFunction> aggregateFunctions = getAggregateFunctions(outputs);
                     Map<Expression, Alias> aggNewAlias = genInnerAliasForAggFunc(aggregateFunctions);
+
+                    Set<GroupingScalarFunction> groupingSetsFunctions = getGroupingFunctions(outputs);
 
                     // 1. generate new groupByExpression
                     List<Expression> newGroupByExpressions = generateNewGroupByExpressions(
@@ -96,27 +93,28 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
                     // 2. generate NewVirSlotRef
                     // For groupingFunc, you need to replace the real column corresponding to its virtual column.
                     List<Pair<Expression, VirtualSlotReference>> newVirSlotRef =
-                            genNewVirSlotRef(partitionedOutputs, groupByExpressions, groupByNewAlias);
+                            genNewVirSlotRef(groupingSetsFunctions, groupByExpressions, groupByNewAlias);
 
                     // 3. generate new substituteMap
                     // substitution map used to substitute expression in repeat's output to use it as top projections
                     Map<Expression, Expression> substitutionMap =
                             genSubstitutionMap(groupByExpressions, groupByNewAlias,
-                                    partitionedOutputs, aggNewAlias, newVirSlotRef);
+                                    aggregateFunctions, aggNewAlias, newVirSlotRef);
 
                     // 4. generate new outputs
                     List<NamedExpression> newOutputs =
                             genNewOutputs(groupByExpressions, substitutionMap,
-                                    newVirSlotRef, partitionedOutputs, aggNewAlias);
+                                    newVirSlotRef, aggregateFunctions, aggNewAlias);
 
                     // 5. Check if needed BottomProjects
-                    boolean needBottomProjections = needBottomProjections(groupByExpressions, partitionedOutputs);
+                    boolean needBottomProjections = needBottomProjections(
+                            groupByExpressions, aggregateFunctions, groupingSetsFunctions);
 
                     // 6. generate bottomProjections
                     List<NamedExpression> bottomProjections = new ArrayList<>();
                     if (needBottomProjections) {
                         bottomProjections = genBottomProjections(groupByExpressions,
-                                groupByNewAlias, partitionedOutputs, aggNewAlias);
+                                groupByNewAlias, aggregateFunctions, aggNewAlias);
                     }
 
                     // 7. Build a map that replaces the project
@@ -141,7 +139,7 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
             List<Expression> groupByExpressions,
             Map<Expression, Expression> substitutionMap,
             List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPairs,
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> newAggAlias) {
 
         return new ImmutableList.Builder<NamedExpression>()
@@ -150,7 +148,7 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
                 // 2. Generate new Outputs in GroupingFunction.
                 .addAll(newVirtualSlotRefPairs.stream().map(e -> e.second).collect(Collectors.toList()))
                 // 3. Generate new Outputs in AggFunction.
-                .addAll(genNewOutputsWithAggFunc(partitionedOutputs, newAggAlias))
+                .addAll(genNewOutputsWithAggFunc(aggregateFunctions, newAggAlias))
                 .build();
     }
 
@@ -170,13 +168,9 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
     }
 
     private List<NamedExpression> genNewOutputsWithAggFunc(
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggFuncNewSlot) {
         List<NamedExpression> newOutputs = new ArrayList<>();
-        Set<AggregateFunction> aggregateFunctions = partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<AggregateFunction>>collect(
-                        AggregateFunction.class::isInstance).stream())
-                .collect(Collectors.toSet());
 
         // replace all non-slot expression in agg functions children.
         for (AggregateFunction aggregateFunction : aggregateFunctions) {
@@ -196,27 +190,23 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
     private Map<Expression, Expression> genSubstitutionMap(
             List<Expression> groupByExpressions,
             Map<Expression, Alias> groupByNewSlot,
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggFuncNewSlot,
             List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPair) {
         return new ImmutableMap.Builder<Expression, Expression>()
                 // 1. Fill the expression in groupBy into the map
                 .putAll(genSubstitutionMapWithGroupByExpressions(groupByExpressions, groupByNewSlot))
                 // 2. Fill the expression in aggFunc into the map
-                .putAll(genSubstitutionMapWithAggFunc(partitionedOutputs, aggFuncNewSlot))
+                .putAll(genSubstitutionMapWithAggFunc(aggregateFunctions, aggFuncNewSlot))
                 // 3. Fill the expression in groupingFunc into the map
                 .putAll(genSubstitutionMapWithGroupingFunc(newVirtualSlotRefPair))
                 .build();
     }
 
     private Map<Expression, Expression> genSubstitutionMapWithAggFunc(
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> newSlot) {
         Map<Expression, Expression> substitutionMap = new HashMap<>();
-        Set<AggregateFunction> aggregateFunctions = partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<AggregateFunction>>collect(
-                        AggregateFunction.class::isInstance).stream())
-                .collect(Collectors.toSet());
 
         // replace all non-slot expression in agg functions children.
         for (AggregateFunction aggregateFunction : aggregateFunctions) {
@@ -232,13 +222,13 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
     private List<NamedExpression> genBottomProjections(
             List<Expression> groupByExpressions,
             Map<Expression, Alias> groupByNewSlot,
-            Map<Boolean, List<NamedExpression>> partitionedOutputs,
+            Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggNewSlot) {
         return new ImmutableList.Builder<NamedExpression>()
                 // 1. generate in groupByExpressions
                 .addAll(genBottomProjectionsWithGroupByExpressions(groupByExpressions, groupByNewSlot))
                 // 2. generate in AggregateFunction
-                .addAll(genBottomProjectionsWithAggFunc(partitionedOutputs, aggNewSlot))
+                .addAll(genBottomProjectionsWithAggFunc(aggregateFunctions, aggNewSlot))
                 .build();
     }
 
@@ -266,10 +256,11 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
 
     private boolean needBottomProjections(
             List<Expression> groupByExpressions,
-            Map<Boolean, List<NamedExpression>> partitionedOutputs) {
+            Set<AggregateFunction> aggregateFunctions,
+            Set<GroupingScalarFunction> groupingSetsFunctions) {
         return checkInGroupByExpressions(groupByExpressions)
-                || checkInGroupingFunc(partitionedOutputs)
-                || checkInAggFunc(partitionedOutputs);
+                || checkInGroupingFunc(groupingSetsFunctions)
+                || checkInAggFunc(aggregateFunctions);
     }
 
     private boolean checkInGroupByExpressions(List<Expression> groupByExpressions) {
@@ -278,13 +269,8 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
                 .collect(Collectors.toList()).isEmpty();
     }
 
-    private boolean checkInGroupingFunc(
-            Map<Boolean, List<NamedExpression>> partitionedOutputs) {
+    private boolean checkInGroupingFunc(Set<GroupingScalarFunction> groupingSetsFunctions) {
         boolean needBottomProjects = false;
-        Set<GroupingScalarFunction> groupingSetsFunctions = partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<GroupingScalarFunction>>collect(
-                        GroupingScalarFunction.class::isInstance).stream())
-                .collect(Collectors.toSet());
 
         for (GroupingScalarFunction groupingSetsFunction : groupingSetsFunctions) {
             for (Expression child : groupingSetsFunction.getArguments()) {
@@ -298,12 +284,8 @@ public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizeP
         return needBottomProjects;
     }
 
-    private boolean checkInAggFunc(Map<Boolean, List<NamedExpression>> partitionedOutputs) {
+    private boolean checkInAggFunc(Set<AggregateFunction> aggregateFunctions) {
         boolean needBottomProjects = false;
-        Set<AggregateFunction> aggregateFunctions = partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<AggregateFunction>>collect(
-                        AggregateFunction.class::isInstance).stream())
-                .collect(Collectors.toSet());
 
         // replace all non-slot expression in agg functions children.
         for (AggregateFunction aggregateFunction : aggregateFunctions) {
