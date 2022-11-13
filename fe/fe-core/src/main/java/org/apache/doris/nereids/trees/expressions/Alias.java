@@ -62,7 +62,7 @@ public class Alias extends NamedExpression implements UnaryExpression {
     }
 
     @Override
-    public Slot toSlot() throws UnboundException {
+    public SlotReference toSlot() throws UnboundException {
         return new SlotReference(exprId, name, child().getDataType(), child().nullable(), qualifier);
     }
 

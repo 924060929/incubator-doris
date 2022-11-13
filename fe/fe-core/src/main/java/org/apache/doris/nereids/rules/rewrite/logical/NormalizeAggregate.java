@@ -36,6 +36,7 @@ import org.apache.doris.nereids.util.ExpressionUtils;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableMap.Builder;
 import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
@@ -70,34 +71,36 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
     public Rule build() {
         return logicalAggregate().whenNot(LogicalAggregate::isNormalized).then(aggregate -> {
             List<Expression> groupByExpressions = aggregate.getGroupByExpressions();
-            Map<Expression, Alias> groupByNewAlias = genAliasChildToSlotForGroupBy(groupByExpressions);
 
             List<NamedExpression> outputs = aggregate.getOutputExpressions();
-            Set<AggregateFunction> aggregateFunctions = getAggregateFunctions(outputs);
-            Map<Expression, Alias> aggFuncInnerAlias = genInnerAliasForAggFunc(aggregateFunctions);
-            Map<Expression, Alias> aggFuncOuterAlias = genOuterAliasForAggFunc(aggregateFunctions, aggFuncInnerAlias);
+            Set<AggregateFunction> aggregateFunctions = collect(outputs, AggregateFunction.class);
+            Map<Expression, Alias> aggFunArgumentToAlias = aggregateFunctionArgumentToAlias(aggregateFunctions);
+            Map<AggregateFunction, Alias> aggregateFunctionToAlias =
+                    aggregateFunctionToAlias(aggregateFunctions, aggFunArgumentToAlias);
 
-            Set<GroupingScalarFunction> groupingSetsFunctions = getGroupingFunctions(outputs);
+            Set<GroupingScalarFunction> groupingSetsFunctions =
+                    collect(outputs, GroupingScalarFunction.class);
 
-            // 1. generate new groupByExpression
-            List<Expression> newGroupByExpressions = generateNewGroupByExpressions(
-                    groupByExpressions, groupByNewAlias);
+            Map<Expression, Alias> nonSlotGroupByToAlias = nonSlotRefToAlias(groupByExpressions);
+
+            // 1. generate new groupByExpression: keep slot, other to alias
+            List<Expression> newGroupByExpressions = replaceToAlias(groupByExpressions, nonSlotGroupByToAlias);
 
             // 2. generate NewVirSlotRef
             // For groupingFunc, you need to replace the real column corresponding to its virtual column.
             List<Pair<Expression, VirtualSlotReference>> newVirSlotRef =
-                    genNewVirSlotRef(groupingSetsFunctions, groupByExpressions, groupByNewAlias);
+                    wrapArgumentToVirtualSlot(groupingSetsFunctions, groupByExpressions, nonSlotGroupByToAlias);
 
             // 3. generate new substituteMap
             // substitution map used to substitute expression in repeat's output to use it as top projections
             Map<Expression, Expression> substitutionMap =
-                    genSubstitutionMap(groupByExpressions, groupByNewAlias,
-                            aggregateFunctions, aggFuncInnerAlias, aggFuncOuterAlias, newVirSlotRef);
+                    genSubstitutionMap(groupByExpressions, nonSlotGroupByToAlias,
+                            aggregateFunctions, aggFunArgumentToAlias, aggregateFunctionToAlias, newVirSlotRef);
 
             // 4. generate new outputs
             List<NamedExpression> newOutputs =
                     genNewOutputs(groupByExpressions, outputs, substitutionMap,
-                            newVirSlotRef, aggregateFunctions, aggFuncInnerAlias, aggFuncOuterAlias);
+                            newVirSlotRef, aggregateFunctions, aggFunArgumentToAlias, aggregateFunctionToAlias);
 
             // 5. Check if needed BottomProjects
             boolean needBottomProjects = needBottomProjections(outputs, groupByExpressions, aggregateFunctions);
@@ -105,15 +108,15 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
             // 6. generate bottomProjections
             List<NamedExpression> bottomProjections = new ArrayList<>();
             if (needBottomProjects) {
-                bottomProjections = genBottomProjections(groupByExpressions, groupByNewAlias,
-                        aggregateFunctions, aggFuncInnerAlias, newVirSlotRef);
+                bottomProjections = genBottomProjections(groupByExpressions, nonSlotGroupByToAlias,
+                        aggregateFunctions, aggFunArgumentToAlias, newVirSlotRef);
             }
 
             // assemble
             List<NamedExpression> newBottomProjections =
-                    reorderProjections(new ArrayList<>(bottomProjections));
+                    orderByVirtualSlotsLast(new ArrayList<>(bottomProjections));
             List<NamedExpression> finalOutput =
-                    reorderProjections(newOutputs);
+                    orderByVirtualSlotsLast(newOutputs);
             LogicalPlan root = aggregate.child();
             if (needBottomProjects) {
                 root = new LogicalProject<>(newBottomProjections, root);
@@ -136,25 +139,18 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
      *      Alias: sum(k1#0)#1 as sum(k1)#2
      *      Map: (sum(k1#0)#1, Ailas)
      */
-    private Map<Expression, Alias> genOuterAliasForAggFunc(
+    private Map<AggregateFunction, Alias> aggregateFunctionToAlias(
             Set<AggregateFunction> aggregateFunctions,
-            Map<Expression, Alias> aggFuncInnerNewSlot) {
-        Map<Expression, Alias> aggFuncOuterNewSlot = new HashMap<>();
-
+            Map<Expression, Alias> argumentToAlias) {
+        Builder<AggregateFunction, Alias> functionToAlias = ImmutableMap.builder();
         for (AggregateFunction aggregateFunction : aggregateFunctions) {
-            List<Expression> newChildren = Lists.newArrayList();
-            for (Expression child : aggregateFunction.getArguments()) {
-                if (child instanceof SlotReference || child instanceof Literal) {
-                    newChildren.add(child);
-                } else {
-                    newChildren.add(aggFuncInnerNewSlot.get(child).toSlot());
-                }
-            }
-            AggregateFunction newFunction = aggregateFunction.withChildren(newChildren);
-            Alias alias = new Alias(newFunction, newFunction.toSql());
-            aggFuncOuterNewSlot.put(newFunction, alias);
+            aggregateFunction = (AggregateFunction) aggregateFunction.withChildren(arg -> {
+                Alias alias = argumentToAlias.get(arg);
+                return alias == null ? arg : alias;
+            });
+            functionToAlias.put(aggregateFunction, new Alias(aggregateFunction, aggregateFunction.toSql()));
         }
-        return ImmutableMap.copyOf(aggFuncOuterNewSlot);
+        return functionToAlias.build();
     }
 
     private List<NamedExpression> genNewOutputs(
@@ -164,7 +160,7 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
             List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPairs,
             Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggFuncInnerNewSlot,
-            Map<Expression, Alias> aggFuncOuterNewSlot) {
+            Map<AggregateFunction, Alias> aggFuncOuterNewSlot) {
         return new ImmutableList.Builder<NamedExpression>()
                 // 1. Extract slotReference and additionally generated dummy columns in GroupByExpressions
                 .addAll(genNewOutputsWithGroupByExpressions(groupByExpressions, outputs, substitutionMap))
@@ -189,7 +185,7 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
     private List<NamedExpression> genNewOutputsWithAggFunc(
             Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggFuncInnerNewSlot,
-            Map<Expression, Alias> aggFuncOuterNewSlot) {
+            Map<AggregateFunction, Alias> aggFuncOuterNewSlot) {
         List<NamedExpression> newOutputs = new ArrayList<>();
 
         for (AggregateFunction aggregateFunction : aggregateFunctions) {
@@ -212,7 +208,7 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
             Map<Expression, Alias> groupByNewSlot,
             Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggFuncInnerNewSlot,
-            Map<Expression, Alias> aggFuncOuterNewSlot,
+            Map<AggregateFunction, Alias> aggFuncOuterNewSlot,
             List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPair) {
         return new ImmutableMap.Builder<Expression, Expression>()
                 .putAll(genSubstitutionMapWithGroupByExpressions(groupByExpressions, groupByNewSlot))
@@ -224,7 +220,7 @@ public class NormalizeAggregate extends OneRewriteRuleFactory implements Normali
     private Map<Expression, Expression> genSubstitutionMapWithAggFunc(
             Set<AggregateFunction> aggregateFunctions,
             Map<Expression, Alias> aggFuncInnerNewSlot,
-            Map<Expression, Alias> aggFuncOuterNewSlot) {
+            Map<AggregateFunction, Alias> aggFuncOuterNewSlot) {
         Map<Expression, Expression> substitutionMap = new HashMap<>();
 
         // replace all non-slot expression in agg functions children.

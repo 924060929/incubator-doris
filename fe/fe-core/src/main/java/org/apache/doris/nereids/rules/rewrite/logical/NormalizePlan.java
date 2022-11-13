@@ -21,6 +21,7 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
@@ -29,15 +30,18 @@ import org.apache.doris.nereids.trees.expressions.literal.Literal;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableMap.Builder;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -47,41 +51,61 @@ public interface NormalizePlan {
     /**
      * get AggFunc from outputExpressions
      */
-    default Set<AggregateFunction> getAggregateFunctions(List<NamedExpression> outputs) {
-        Map<Boolean, List<NamedExpression>> partitionedOutputs = outputs.stream()
-                .collect(Collectors.groupingBy(e -> e.anyMatch(AggregateFunction.class::isInstance)
-                        || e.anyMatch(GroupingScalarFunction.class::isInstance)));
-        return partitionedOutputs.containsKey(true)
-                ? partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<AggregateFunction>>collect(
-                        AggregateFunction.class::isInstance).stream())
-                .collect(Collectors.toSet())
-                : Sets.newHashSet();
+    default <E extends Expression> Set<E> collect(Collection<? extends Expression> expressions,
+            Class<E> type) {
+        return expressions.stream()
+                .flatMap(e -> e.<Set<E>>collect(type::isInstance).stream())
+                .collect(ImmutableSet.toImmutableSet());
     }
 
-    /**
-     * get groupingFunc from outputExpressions
-     */
-    default Set<GroupingScalarFunction> getGroupingFunctions(List<NamedExpression> outputs) {
-        Map<Boolean, List<NamedExpression>> partitionedOutputs = outputs.stream()
-                .collect(Collectors.groupingBy(e -> e.anyMatch(GroupingScalarFunction.class::isInstance)
-                        || e.anyMatch(GroupingScalarFunction.class::isInstance)));
-        return partitionedOutputs.containsKey(true)
-                ? partitionedOutputs.get(true).stream()
-                .flatMap(e -> e.<Set<GroupingScalarFunction>>collect(
-                        GroupingScalarFunction.class::isInstance).stream())
-                .collect(Collectors.toSet())
-                : Sets.newHashSet();
+    default Set<Expression> collectNonSlot(List<Expression> expressions) {
+        return expressions.stream()
+                .filter(e -> !(e instanceof SlotReference))
+                .collect(ImmutableSet.toImmutableSet());
+    }
+
+    default Set<Expression> combine(Collection<? extends Expression>... exprLists) {
+        ImmutableSet.Builder<Expression> appendList = ImmutableSet.builder();
+        for (Collection<? extends Expression> exprList : exprLists) {
+            appendList.addAll(exprList);
+        }
+        return appendList.build();
+    }
+
+    default Set<Expression> collectNamedExpression(Collection<? extends Expression> expressions) {
+        return expressions.stream()
+                .filter(NamedExpression.class::isInstance)
+                .collect(Collectors.toSet());
+    }
+
+    default Set<Expression> collectArgumentsOfAggregateFunction(Collection<? extends AggregateFunction> expressions) {
+        return collect(expressions, AggregateFunction.class)
+                .stream()
+                .flatMap(agg -> agg.getArguments().stream())
+                .collect(ImmutableSet.toImmutableSet());
+    }
+
+    default Set<Expression> collectRealSlotsOfVirtualSlots(Collection<? extends Expression> expressions) {
+        return expressions.stream()
+                .flatMap(o ->o.<Set<VirtualSlotReference>>collect(VirtualSlotReference.class::isInstance).stream())
+                .flatMap(v -> v.getRealSlots().stream())
+                .collect(ImmutableSet.toImmutableSet());
+    }
+
+    default Set<Expression> collectNonSlotAndNonLiteral(Set<Expression> expressions) {
+        return expressions.stream()
+                .filter(e -> !(e instanceof Slot) && !(e instanceof Literal))
+                .collect(ImmutableSet.toImmutableSet());
     }
 
     /**
      * Generate Alias for non-slotReference in groupByExpressions
      */
-    default Map<Expression, Alias> genAliasChildToSlotForGroupBy(List<Expression> groupByExpressions) {
-        Map<Expression, Alias> expressionToAlias = new HashMap<>();
-        groupByExpressions.stream().filter(e -> !(e instanceof SlotReference))
-                .forEach(e -> expressionToAlias.put(e, (new Alias(e, e.toSql()))));
-        return ImmutableMap.copyOf(expressionToAlias);
+
+    default Map<Expression, Alias> nonSlotRefToAlias(List<Expression> expressions) {
+        return expressions.stream()
+                .filter(e -> !(e instanceof SlotReference))
+                .collect(ImmutableMap.toImmutableMap(Function.identity(), e -> new Alias(e, e.toSql())));
     }
 
     /**
@@ -90,36 +114,28 @@ public interface NormalizePlan {
      *     Alias: k1#0 + 1 -> (k1 + 1)#1
      * Map((k1#0 + 1), ((k1 + 1)#1
      */
-    default Map<Expression, Alias> genInnerAliasForAggFunc(
-            Set<AggregateFunction> aggregateFunctions) {
-        Map<Expression, Alias> aggFuncSlot = new HashMap<>();
-
+    default Map<Expression, Alias> aggregateFunctionArgumentToAlias(Set<AggregateFunction> aggregateFunctions) {
+        Builder<Expression, Alias> argToAlias = ImmutableMap.builder();
         for (AggregateFunction aggregateFunction : aggregateFunctions) {
-            for (Expression child : aggregateFunction.getArguments()) {
-                if (!(child instanceof SlotReference || child instanceof Literal)) {
-                    Alias alias = new Alias(child, child.toSql());
-                    aggFuncSlot.put(child, alias);
+            for (Expression arg : aggregateFunction.getArguments()) {
+                if (!(arg instanceof SlotReference || arg instanceof Literal)) {
+                    argToAlias.put(arg, new Alias(arg, arg.toSql()));
                 }
             }
         }
-        return ImmutableMap.copyOf(aggFuncSlot);
+        return argToAlias.build();
     }
 
     /**
      * generate new groupByExpressions.
      */
-    default List<Expression> generateNewGroupByExpressions(
-            List<Expression> groupByExpressions,
-            Map<Expression, Alias> newGroupByAlias) {
-        List<Expression> newGroupByExpressions = new ArrayList<>();
-        for (Expression groupByExpression : groupByExpressions) {
-            if (groupByExpression instanceof SlotReference) {
-                newGroupByExpressions.add(groupByExpression);
-            } else {
-                newGroupByExpressions.add(newGroupByAlias.get(groupByExpression).toSlot());
-            }
+    default List<Expression> replaceToAlias(List<Expression> expressions, Map<Expression, Alias> exprToAlias) {
+        ImmutableList.Builder<Expression> replaced = ImmutableList.builder();
+        for (Expression expression : expressions) {
+            Alias alias = exprToAlias.get(expression);
+            replaced.add(alias == null ? expression : alias);
         }
-        return newGroupByExpressions;
+        return replaced.build();
     }
 
     /**
@@ -149,11 +165,11 @@ public interface NormalizePlan {
      * replacing non-slotReference internal expressions with alisa.
      *
      * eg:
-     *      old: GROUPING_PREFIX_k1(k1#0 + 1)
-     *      new: GROUPING_PREFIX_k1((k1 + 1)#2)
+     *      old: GROUPING_PREFIX_k1(k1#0 + 1), the argument: k1#0 + 1
+     *      new: GROUPING_PREFIX_k1((k1 + 1)#2), the argument: VirtualSlotReference(realSlots=k1#0 + 1)
      * @return List(Pair(old, new))
      */
-    default List<Pair<Expression, VirtualSlotReference>> genNewVirSlotRef(
+    default List<Pair<Expression, VirtualSlotReference>> wrapArgumentToVirtualSlot(
             Set<GroupingScalarFunction> groupingSetsFunctions,
             List<Expression> groupByExpressions,
             Map<Expression, Alias> groupByNewSlot) {
@@ -221,15 +237,18 @@ public interface NormalizePlan {
      * Rearrange the order of the projects to ensure that
      * slotReference is in the front and virtualSlotReference is in the back.
      */
-    default List<NamedExpression> reorderProjections(List<NamedExpression> projections) {
+    default List<NamedExpression> orderByVirtualSlotsLast(Collection<? extends NamedExpression> projections) {
         Map<Boolean, List<NamedExpression>> partitionProjections = projections.stream()
-                .collect(Collectors.groupingBy(VirtualSlotReference.class::isInstance,
+                .collect(Collectors.groupingBy(
+                        VirtualSlotReference.class::isInstance,
                         LinkedHashMap::new, Collectors.toList()));
-        List<NamedExpression> newProjections = partitionProjections.containsKey(false)
-                ? partitionProjections.get(false) : new ArrayList<NamedExpression>();
-        if (partitionProjections.containsKey(true)) {
-            newProjections.addAll(partitionProjections.get(true));
-        }
-        return newProjections;
+
+        List<NamedExpression> nonVirtualSlotOutput = partitionProjections.get(false);
+        List<NamedExpression> virtualSlotOutput = partitionProjections.get(true);
+
+        return ImmutableList.<NamedExpression>builder()
+                .addAll(nonVirtualSlotOutput == null ? ImmutableList.of() : nonVirtualSlotOutput)
+                .addAll(virtualSlotOutput == null ? ImmutableList.of() : virtualSlotOutput)
+                .build();
     }
 }

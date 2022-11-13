@@ -33,8 +33,7 @@ import org.apache.doris.nereids.rules.rewrite.logical.ExtractSingleTableExpressi
 import org.apache.doris.nereids.rules.rewrite.logical.FindHashConditionForJoin;
 import org.apache.doris.nereids.rules.rewrite.logical.InferPredicates;
 import org.apache.doris.nereids.rules.rewrite.logical.LimitPushDown;
-import org.apache.doris.nereids.rules.rewrite.logical.NormalizeAggregate;
-import org.apache.doris.nereids.rules.rewrite.logical.NormalizeRepeat;
+import org.apache.doris.nereids.rules.rewrite.logical.NormalizeAgg;
 import org.apache.doris.nereids.rules.rewrite.logical.PruneOlapScanPartition;
 import org.apache.doris.nereids.rules.rewrite.logical.PushFilterInsideJoin;
 import org.apache.doris.nereids.rules.rewrite.logical.ReorderJoin;
@@ -66,8 +65,9 @@ public class NereidsRewriteJobExecutor extends BatchRulesJob {
                 .add(topDownBatch(ImmutableList.of(new ExpressionNormalization(cascadesContext.getConnectContext()))))
                 .add(topDownBatch(ImmutableList.of(new ExpressionOptimization())))
                 .add(topDownBatch(ImmutableList.of(new ExtractSingleTableExpressionFromDisjunction())))
-                .add(topDownBatch(ImmutableList.of(new NormalizeAggregate())))
-                .add(topDownBatch(ImmutableList.of(new NormalizeRepeat())))
+                .add(topDownBatch(ImmutableList.of(new NormalizeAgg())))
+//                .add(topDownBatch(ImmutableList.of(new NormalizeAggregate())))
+//                .add(topDownBatch(ImmutableList.of(new NormalizeRepeat())))
                 .add(topDownBatch(RuleSet.PUSH_DOWN_FILTERS, false))
                 .add(visitorJob(new InferPredicates()))
                 .add(topDownBatch(ImmutableList.of(new ReorderJoin())))

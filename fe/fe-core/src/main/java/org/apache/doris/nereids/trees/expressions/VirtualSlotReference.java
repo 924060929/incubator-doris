@@ -95,4 +95,12 @@ public class VirtualSlotReference extends SlotReference {
         Preconditions.checkArgument(children.size() == 0);
         return this;
     }
+
+    public VirtualSlotReference withRealSlots(List<Expression> realSlots) {
+        if (this.realSlots.equals(realSlots)) {
+            return this;
+        }
+        return new VirtualSlotReference(getExprId(), getName(), getDataType(),
+                nullable(), getQualifier(), realSlots, hasCast);
+    }
 }

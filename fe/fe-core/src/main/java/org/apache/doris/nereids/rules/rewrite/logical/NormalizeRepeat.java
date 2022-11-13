@@ -24,29 +24,32 @@ import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.VirtualSlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.GroupingScalarFunction;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
-import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
-import org.apache.doris.nereids.util.ExpressionUtils;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
+ * What does normalize meaning here?
+ * 1: some expressions will be converted to Alias and push down to bottom plan.
+ * 2: up plan reference the Alias by some slot references
+ *
+ * Q1: What expression should be normalized here?
+ *
  * normalize output, aggFunc and groupingFunc in grouping sets.
  * This rule is executed after NormalizeAggregate.
  *
@@ -68,313 +71,227 @@ import java.util.stream.Collectors;
  *         +-- GropingSets(
  *             keys:[k1#1, grouping_id()#0, grouping_prefix(k1#1)#7]
  *             outputs:k1#1, (k2 + 1)#10, grouping_prefix(k1#1)#7
+ *
+ *
+ *
+ * 1. normalize groupByExpression: group by slot or alias
+ * e.g.
+ * group by                                 ->           group by
+ *    a#1          -> keep as slot a        ->              a#1,
+ *    a#1 + 1      -> new Alias(a#1 + 1)#2  ->              slot(#2)
+ *
+ *
+ * 2. normalize virtual slot reference
+ * We should keep the realSlots in virtualSlotReference which is argument of grouping set functions
+ * as slot or literal, if no slot or literal, we will convert to slot by new Alias(expr).toSlot().
+ * e.g.
+ * VirtualSlotReference(realSlots=[                  ->  VirtualSlotReference(realSlots=[
+ *     a#1,        -> keep as slot a                 ->      a#1,
+ *     10,         -> keep as literal 10             ->      10,
+ *     a#1 + 1     -> new Alias(#a + 1).toSlot()#2   ->      slot(#2)
+ * ])                                                ->  ])
  */
 public class NormalizeRepeat extends OneRewriteRuleFactory implements NormalizePlan {
     @Override
     public Rule build() {
         return logicalAggregate(logicalProject(logicalRepeat().whenNot(LogicalRepeat::isNormalized)))
                 .then(agg -> {
-                    LogicalProject<LogicalRepeat<GroupPlan>> project = agg.child();
-                    LogicalRepeat<GroupPlan> repeat = project.child();
-
-                    List<Expression> groupByExpressions = repeat.getGroupByExpressions();
-                    Map<Expression, Alias> groupByNewAlias = genAliasChildToSlotForGroupBy(groupByExpressions);
-                    List<NamedExpression> outputs = repeat.getOutputExpressions();
-
-                    Set<AggregateFunction> aggregateFunctions = getAggregateFunctions(outputs);
-                    Map<Expression, Alias> aggNewAlias = genInnerAliasForAggFunc(aggregateFunctions);
-
-                    Set<GroupingScalarFunction> groupingSetsFunctions = getGroupingFunctions(outputs);
-
-                    // 1. generate new groupByExpression
-                    List<Expression> newGroupByExpressions = generateNewGroupByExpressions(
-                            groupByExpressions, groupByNewAlias);
-
-                    // 2. generate NewVirSlotRef
-                    // For groupingFunc, you need to replace the real column corresponding to its virtual column.
-                    List<Pair<Expression, VirtualSlotReference>> newVirSlotRef =
-                            genNewVirSlotRef(groupingSetsFunctions, groupByExpressions, groupByNewAlias);
-
-                    // 3. generate new substituteMap
-                    // substitution map used to substitute expression in repeat's output to use it as top projections
-                    Map<Expression, Expression> substitutionMap =
-                            genSubstitutionMap(groupByExpressions, groupByNewAlias,
-                                    aggregateFunctions, aggNewAlias, newVirSlotRef);
-
-                    // 4. generate new outputs
-                    List<NamedExpression> newOutputs =
-                            genNewOutputs(groupByExpressions, substitutionMap,
-                                    newVirSlotRef, aggregateFunctions, aggNewAlias);
-
-                    // 5. Check if needed BottomProjects
-                    boolean needBottomProjections = needBottomProjections(
-                            groupByExpressions, aggregateFunctions, groupingSetsFunctions);
-
-                    // 6. generate bottomProjections
-                    List<NamedExpression> bottomProjections = new ArrayList<>();
-                    if (needBottomProjections) {
-                        bottomProjections = genBottomProjections(groupByExpressions,
-                                groupByNewAlias, aggregateFunctions, aggNewAlias);
-                    }
-
-                    // 7. Build a map that replaces the project
-                    Map<Expression, Expression> projectMap = genProjectMap(project.getProjects());
-
-                    // 8. Ensure that the columns are in order,
-                    //   first slotReference and then virtualSlotReference
-                    List<NamedExpression> projects = project.getProjects();
-                    List<NamedExpression> newProjects = reorderProjections(projects);
-                    List<NamedExpression> newBottomProjections =
-                            reorderProjections(new ArrayList<>(bottomProjections));
-                    List<NamedExpression> finalOutputs = reorderProjections(newOutputs);
-
-                    return generateNewPlan(agg, repeat,
-                            needBottomProjections, newBottomProjections,
-                            newGroupByExpressions, finalOutputs,
-                            newProjects, projectMap, substitutionMap);
+                    LogicalRepeat<Plan> normalizedRepeat = normalizeRepeatAndBottom((LogicalProject) agg.child());
+                    return normalizeAggregateAndProject((LogicalAggregate) agg, normalizedRepeat);
                 }).toRule(RuleType.NORMALIZE_REPEAT);
     }
 
-    private List<NamedExpression> genNewOutputs(
-            List<Expression> groupByExpressions,
-            Map<Expression, Expression> substitutionMap,
-            List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPairs,
-            Set<AggregateFunction> aggregateFunctions,
-            Map<Expression, Alias> newAggAlias) {
+    private LogicalAggregate<LogicalProject<Plan>> normalizeAggregateAndProject(
+            LogicalAggregate<LogicalProject<Plan>> agg, Plan normalizedChildOfProject) {
+        LogicalProject<Plan> project = agg.child();
 
-        return new ImmutableList.Builder<NamedExpression>()
-                // 1. Extract slotReference and additionally generated dummy columns in GroupByExpressions
-                .addAll(genNewOutputsWithGroupByExpressions(groupByExpressions, substitutionMap))
-                // 2. Generate new Outputs in GroupingFunction.
-                .addAll(newVirtualSlotRefPairs.stream().map(e -> e.second).collect(Collectors.toList()))
-                // 3. Generate new Outputs in AggFunction.
-                .addAll(genNewOutputsWithAggFunc(aggregateFunctions, newAggAlias))
-                .build();
-    }
+        ImmutableMap<NamedExpression, Slot> aliasToSlot = project.getProjects()
+                .stream()
+                .filter(output -> output instanceof Alias)
+                .distinct()
+                .map(output -> Pair.of(output, output.toSlot()))
+                .collect(ImmutableMap.toImmutableMap(Pair::key, Pair::value));
 
-    private List<NamedExpression> genNewOutputsWithGroupByExpressions(
-            List<Expression> groupByExpressions,
-            Map<Expression, Expression> substitutionMap) {
-        List<NamedExpression> newOutputs = new ArrayList<>();
-        groupByExpressions.stream().filter(k -> !(k instanceof VirtualSlotReference))
-                .map(substitutionMap::get)
-                .map(NamedExpression.class::cast)
-                .forEach(newOutputs::add);
-        groupByExpressions.stream().filter(VirtualSlotReference.class::isInstance)
-                .filter(k -> ((VirtualSlotReference) k).getRealSlots().isEmpty())
-                .map(NamedExpression.class::cast)
-                .forEach(newOutputs::add);
-        return ImmutableList.copyOf(newOutputs);
-    }
-
-    private List<NamedExpression> genNewOutputsWithAggFunc(
-            Set<AggregateFunction> aggregateFunctions,
-            Map<Expression, Alias> aggFuncNewSlot) {
-        List<NamedExpression> newOutputs = new ArrayList<>();
-
-        // replace all non-slot expression in agg functions children.
-        for (AggregateFunction aggregateFunction : aggregateFunctions) {
-            for (Expression child : aggregateFunction.getArguments()) {
-                if (child instanceof SlotReference || child instanceof Literal) {
-                    if (child instanceof SlotReference) {
-                        newOutputs.add((NamedExpression) child);
-                    }
-                } else {
-                    newOutputs.add(aggFuncNewSlot.get(child).toSlot());
-                }
-            }
-        }
-        return ImmutableList.copyOf(newOutputs);
-    }
-
-    private Map<Expression, Expression> genSubstitutionMap(
-            List<Expression> groupByExpressions,
-            Map<Expression, Alias> groupByNewSlot,
-            Set<AggregateFunction> aggregateFunctions,
-            Map<Expression, Alias> aggFuncNewSlot,
-            List<Pair<Expression, VirtualSlotReference>> newVirtualSlotRefPair) {
-        return new ImmutableMap.Builder<Expression, Expression>()
-                // 1. Fill the expression in groupBy into the map
-                .putAll(genSubstitutionMapWithGroupByExpressions(groupByExpressions, groupByNewSlot))
-                // 2. Fill the expression in aggFunc into the map
-                .putAll(genSubstitutionMapWithAggFunc(aggregateFunctions, aggFuncNewSlot))
-                // 3. Fill the expression in groupingFunc into the map
-                .putAll(genSubstitutionMapWithGroupingFunc(newVirtualSlotRefPair))
-                .build();
-    }
-
-    private Map<Expression, Expression> genSubstitutionMapWithAggFunc(
-            Set<AggregateFunction> aggregateFunctions,
-            Map<Expression, Alias> newSlot) {
-        Map<Expression, Expression> substitutionMap = new HashMap<>();
-
-        // replace all non-slot expression in agg functions children.
-        for (AggregateFunction aggregateFunction : aggregateFunctions) {
-            for (Expression child : aggregateFunction.getArguments()) {
-                if (!(child instanceof SlotReference || child instanceof Literal)) {
-                    substitutionMap.put(child, newSlot.get(child).toSlot());
-                }
-            }
-        }
-        return ImmutableMap.copyOf(substitutionMap);
-    }
-
-    private List<NamedExpression> genBottomProjections(
-            List<Expression> groupByExpressions,
-            Map<Expression, Alias> groupByNewSlot,
-            Set<AggregateFunction> aggregateFunctions,
-            Map<Expression, Alias> aggNewSlot) {
-        return new ImmutableList.Builder<NamedExpression>()
-                // 1. generate in groupByExpressions
-                .addAll(genBottomProjectionsWithGroupByExpressions(groupByExpressions, groupByNewSlot))
-                // 2. generate in AggregateFunction
-                .addAll(genBottomProjectionsWithAggFunc(aggregateFunctions, aggNewSlot))
-                .build();
-    }
-
-    /**
-     * generate bottom projections with groupByExpressions.
-     * eg:
-     * groupByExpressions: k1#0, k2#1 + 1;
-     * bottom: k1#0, (k2#1 + 1) AS (k2 + 1)#2;
-     */
-    private List<NamedExpression> genBottomProjectionsWithGroupByExpressions(
-            List<Expression> groupByExpressions,
-            Map<Expression, Alias> groupByNewSlot) {
-        List<NamedExpression> bottomProjections = new ArrayList<>();
-        for (Expression groupByExpression : groupByExpressions) {
-            if (groupByExpression instanceof VirtualSlotReference) {
-                continue;
-            } else if (groupByExpression instanceof SlotReference) {
-                bottomProjections.add((NamedExpression) groupByExpression);
-            } else {
-                bottomProjections.add(groupByNewSlot.get(groupByExpression));
-            }
-        }
-        return ImmutableList.copyOf(bottomProjections);
-    }
-
-    private boolean needBottomProjections(
-            List<Expression> groupByExpressions,
-            Set<AggregateFunction> aggregateFunctions,
-            Set<GroupingScalarFunction> groupingSetsFunctions) {
-        return checkInGroupByExpressions(groupByExpressions)
-                || checkInGroupingFunc(groupingSetsFunctions)
-                || checkInAggFunc(aggregateFunctions);
-    }
-
-    private boolean checkInGroupByExpressions(List<Expression> groupByExpressions) {
-        return !groupByExpressions.stream()
-                .filter(e -> !(e instanceof SlotReference))
-                .collect(Collectors.toList()).isEmpty();
-    }
-
-    private boolean checkInGroupingFunc(Set<GroupingScalarFunction> groupingSetsFunctions) {
-        boolean needBottomProjects = false;
-
-        for (GroupingScalarFunction groupingSetsFunction : groupingSetsFunctions) {
-            for (Expression child : groupingSetsFunction.getArguments()) {
-                for (Expression realChild : ((VirtualSlotReference) child).getRealSlots()) {
-                    if (!(realChild instanceof SlotReference || realChild instanceof Literal)) {
-                        needBottomProjects = true;
-                    }
-                }
-            }
-        }
-        return needBottomProjects;
-    }
-
-    private boolean checkInAggFunc(Set<AggregateFunction> aggregateFunctions) {
-        boolean needBottomProjects = false;
-
-        // replace all non-slot expression in agg functions children.
-        for (AggregateFunction aggregateFunction : aggregateFunctions) {
-            for (Expression child : aggregateFunction.getArguments()) {
-                if (!(child instanceof SlotReference || child instanceof Literal)) {
-                    needBottomProjects = true;
-                }
-            }
-        }
-        return needBottomProjects;
-    }
-
-    private Map<Expression, Expression> genProjectMap(List<NamedExpression> projections) {
-        Map<Expression, Expression> projectMap = new HashMap<>();
-        for (NamedExpression project : projections) {
-            if (project instanceof SlotReference) {
-                if (!(project instanceof VirtualSlotReference)) {
-                    projectMap.put(project, project);
-                }
-            } else {
-                projectMap.put(((Alias) project).child(), project.toSlot());
-            }
-        }
-        return ImmutableMap.copyOf(projectMap);
-    }
-
-    /**
-     * Replace children in virtualSlotReference.
-     */
-    private Expression replaceVirtualSlot(
-            Expression repeat, Map<Expression, Expression> substitutionMap) {
-        if (repeat instanceof VirtualSlotReference) {
-            if (!((VirtualSlotReference) repeat).getRealSlots().isEmpty()) {
-                List<Expression> newChildren = ((VirtualSlotReference) repeat).getRealSlots().stream()
-                        .map(child -> {
-                            if (substitutionMap.containsKey(child)) {
-                                return substitutionMap.get(child);
-                            } else {
-                                return child;
-                            }
+        // after normalized the child of project, all alias in the top project already exists in the
+        // output of child, so we can simply rewrite to slotRef.
+        LogicalProject<Plan> normalizedTopProject = new LogicalProject<>(
+                project.getProjects()
+                        .stream()
+                        .map(output -> {
+                            Slot slot = aliasToSlot.get(output);
+                            // if slot == null, the output would be a slot, so not replace
+                            return slot == null ? output : slot;
                         })
-                        .collect(Collectors.toList());
-                return new VirtualSlotReference(((VirtualSlotReference) repeat).getExprId(),
-                        ((VirtualSlotReference) repeat).getName(), repeat.getDataType(),
-                        repeat.nullable(), ((VirtualSlotReference) repeat).getQualifier(),
-                        newChildren, ((VirtualSlotReference) repeat).hasCast());
-            }
-        }
-        return repeat;
+                        .collect(ImmutableList.toImmutableList()),
+                normalizedChildOfProject
+        );
+
+        // finally the realSlots in the top aggregate should be replaced to slot
+        return new LogicalAggregate<>(
+                agg.getGroupByExpressions(),
+                agg.getOutputExpressions(),
+                agg.isDisassembled(),
+                agg.isNormalized(),
+                agg.isFinalPhase(),
+                agg.getAggPhase(),
+                normalizedTopProject
+        );
     }
 
-    private LogicalPlan generateNewPlan(
-            LogicalAggregate<LogicalProject<LogicalRepeat<GroupPlan>>> agg,
-            LogicalRepeat<GroupPlan> repeat,
-            boolean needBottomProjections,
-            List<NamedExpression> newBottomProjections,
-            List<Expression> newGroupByExpressions,
-            List<NamedExpression> finalOutputs,
-            List<NamedExpression> newProjects,
-            Map<Expression, Expression> projectMap,
-            Map<Expression, Expression> substitutionMap) {
-        LogicalPlan root = repeat.child();
-        if (needBottomProjections) {
-            root = new LogicalProject<>(new ArrayList<>(newBottomProjections), root);
-        }
+    private LogicalRepeat<Plan> normalizeRepeatAndBottom(LogicalProject<LogicalRepeat<Plan>> project) {
+        LogicalRepeat<Plan> repeat = project.child();
 
-        // 1. replace the alisa column
-        // replace grouping Sets output and repeat
-        root = repeat.replaceWithChild(repeat.getGroupingSets(), newGroupByExpressions,
-                finalOutputs, repeat.getGroupingSetIdSlots(), true, root);
+        List<Expression> originGroupByInRepeat = repeat.getGroupByExpressions();
+        List<NamedExpression> originOutputInRepeat = repeat.getOutputExpressions();
 
-        // 2. replace project
-        List<NamedExpression> replacedProjects = newProjects.stream()
-                .map(e -> replaceVirtualSlot(e, projectMap))
-                .map(NamedExpression.class::cast)
-                .collect(Collectors.toList());
-        List<NamedExpression> finalProjects = replacedProjects.stream()
-                .map(e -> ExpressionUtils.replace(e, substitutionMap))
-                .map(NamedExpression.class::cast)
-                .collect(Collectors.toList());
-        root = new LogicalProject<>(finalProjects, root);
+        // 1: which expression in group by should convert to alias or slot?
+        Set<Expression> groupByShouldToAliasOrSlot = collectNonSlot(originGroupByInRepeat);
 
-        // 3. replace agg repeat
-        List<Expression> newAggGroupBy =
-                agg.getGroupByExpressions().stream()
-                        .map(e -> replaceVirtualSlot(e, projectMap))
-                        .collect(Collectors.toList());
-        return new LogicalAggregate<>(newAggGroupBy, agg.getOutputExpressions(),
-                agg.isDisassembled(), agg.isNormalized(),
-                agg.isFinalPhase(), agg.getAggPhase(), root);
+        // 2: which argument of aggregate function should convert to alias or slot?
+        Set<Expression> argsOfAggFun = collectArgumentsOfAggregateFunction(
+                collect(originOutputInRepeat, AggregateFunction.class)
+        );
+        Set<Expression> argOfAggFunShouldToAliasOrSlot = collectNonSlotAndNonLiteral(argsOfAggFun);
+
+        // 3: which real slots of virtual slot reference should convert to alias or slot?
+        Set<Expression> realSlotsShouldToAliasOrSlot = collectNonSlotAndNonLiteral(
+                collectRealSlotsOfVirtualSlots(
+                        combine(originGroupByInRepeat, originOutputInRepeat)
+                )
+        );
+
+        ImmutableMap<Expression, Alias> alreadyHasAlias = ImmutableSet.<Alias>builder()
+                .addAll(collect(repeat.getOutputExpressions(), Alias.class))
+                .addAll(collect(repeat.getOutputExpressions(), Alias.class))
+                .addAll(collect(collectRealSlotsOfVirtualSlots(repeat.getOutputExpressions()), Alias.class))
+                .build()
+                .stream()
+                .collect(ImmutableMap.toImmutableMap(alias -> alias.child(), alias -> alias));
+
+        // Q1: collect the expression that should convert to alias or slot for normalize
+        Set<Expression> shouldToAliasOrSlot = ImmutableSet.<Expression>builder()
+                .addAll(groupByShouldToAliasOrSlot)
+                .addAll(argOfAggFunShouldToAliasOrSlot)
+                .addAll(realSlotsShouldToAliasOrSlot)
+                .build();
+
+        // so we need 2 replace maps here:
+        // 1: replace map 1: expr to wrap an alias for bottom plan
+        ImmutableMap<Expression, Alias> exprToAlias = shouldToAliasOrSlot.stream()
+                .map(e -> {
+                    if (e instanceof Alias) {
+                        return Pair.of(e, (Alias) e);
+                    } else if (alreadyHasAlias.containsKey(e)) {
+                        return Pair.of(e, alreadyHasAlias.get(e));
+                    } else {
+                        return Pair.of(e, new Alias(e, e.toSql()));
+                    }
+                })
+                .collect(ImmutableMap.toImmutableMap(Pair::key, Pair::value));
+
+        // 2: replace map 2: expr to alias to slotRef for top plan
+        ImmutableMap<Expression, Slot> exprToSlot = ImmutableMap.<Expression, Alias>builder()
+                .putAll(alreadyHasAlias)
+                .putAll(exprToAlias)
+                .build()
+                .entrySet()
+                .stream()
+                .map(e2a -> Pair.of(e2a.getKey(), e2a.getValue().toSlot()))
+                .collect(ImmutableMap.toImmutableMap(Pair::key, Pair::value));
+
+        boolean needBottomProjection = !shouldToAliasOrSlot.isEmpty();
+
+        // we can see the normalized bottom plan: output some SlotReference or Alias.
+        Plan normalizedBottomPlan = needBottomProjection
+                ? pushDownSlotRefOrAliasInRepeat(repeat.child(), originGroupByInRepeat, argsOfAggFun, exprToAlias)
+                : repeat.child();
+
+        // after normalized the bottom plan, we can rewrite some expression to slotRef in LogicalRepeat.
+        LogicalRepeat<Plan> normalizedRepeat = normalizeRepeat(repeat, normalizedBottomPlan, exprToSlot);
+        return normalizedRepeat;
+    }
+
+    private LogicalRepeat<Plan> normalizeRepeat(LogicalRepeat<Plan> repeat, Plan normalizedBottomPlan,
+            Map<Expression, Slot> exprToSlot) {
+        return repeat.replaceWithChild(
+                repeat.getGroupingSets(),
+                // normalized group by
+                toSlot(repeat.getGroupByExpressions(), exprToSlot),
+                // normalized output
+                orderByVirtualSlotsLast(
+                        toSlot(
+                                realSlotsOfVirtualSlotsToSlotOrLiteral(repeat.getOutputExpressions(), exprToSlot),
+                                exprToSlot
+                        )
+                ),
+                repeat.getGroupingSetIdSlots(), true, normalizedBottomPlan);
+    }
+
+    private Plan pushDownSlotRefOrAliasInRepeat(Plan childOfRepeat, List<Expression> groupByInRepeat,
+            Set<Expression> argsOfAggFunInRepeat, Map<Expression, Alias> exprToAlias) {
+        List<NamedExpression> outputSlotRefOrAlias = orderByVirtualSlotsLast(
+                ImmutableList.<NamedExpression>builder()
+                        .addAll(groupByInRepeat.stream()
+                                .filter(e -> !(e instanceof Literal) && !(e instanceof VirtualSlotReference))
+                                .map(e -> (e instanceof SlotReference) ? e : exprToAlias.get(e))
+                                .map(NamedExpression.class::cast)
+                                .collect(Collectors.toList())
+                        )
+                        .addAll(argsOfAggFunInRepeat.stream()
+                                .filter(arg -> !(arg instanceof Literal) && !(arg instanceof VirtualSlotReference))
+                                .map(e -> (e instanceof SlotReference) ? e : exprToAlias.get(e))
+                                .map(NamedExpression.class::cast)
+                                .collect(Collectors.toList())
+                        )
+                        .build()
+        );
+        return new LogicalProject<>(outputSlotRefOrAlias, childOfRepeat);
+    }
+
+    private List<NamedExpression> realSlotsOfVirtualSlotsToSlotOrLiteral(
+            List<NamedExpression> outputs, Map<Expression, Slot> exprToSlot) {
+        return outputs.stream()
+                .map(output -> (NamedExpression) output.rewriteUp(e -> {
+                    if (e instanceof VirtualSlotReference) {
+                        VirtualSlotReference virtualSlot = (VirtualSlotReference) e;
+                        List<Expression> realSlots = virtualSlot.getRealSlots();
+                        if (realSlots.isEmpty()) {
+                            return e;
+                        }
+
+                        List<Expression> normalizedRealSlots = realSlots.stream()
+                                .map(originSlot -> {
+                                    if (originSlot instanceof Slot || originSlot instanceof Literal) {
+                                        return originSlot;
+                                    }
+                                    Slot replacedSlot = exprToSlot.get(originSlot);
+                                    return replacedSlot == null ? originSlot : replacedSlot;
+                                }).collect(Collectors.toList());
+                        if (normalizedRealSlots.equals(virtualSlot.getRealSlots())) {
+                            return virtualSlot;
+                        }
+                        return virtualSlot.withRealSlots(normalizedRealSlots);
+                    }
+                    return e;
+                })).collect(ImmutableList.toImmutableList());
+    }
+
+    private <E extends Expression> List<E> toSlot(
+            List<E> originExpressions, Map<Expression, Slot> replaceMap) {
+        return originExpressions
+                .stream()
+                .map(originExpr -> {
+                    if (originExpr instanceof VirtualSlotReference) {
+                        VirtualSlotReference virtualSlotReference = (VirtualSlotReference) originExpr;
+                        List<Expression> realSlots = toSlot(virtualSlotReference.getRealSlots(), replaceMap);
+                        return (E) virtualSlotReference.withRealSlots(realSlots);
+                    }
+                    if (originExpr instanceof Slot) {
+                        return originExpr;
+                    }
+                    Slot replaceSlot = replaceMap.get(originExpr);
+                    return (E) (replaceSlot == null ? originExpr : replaceSlot);
+                })
+                .collect(ImmutableList.toImmutableList());
     }
 }

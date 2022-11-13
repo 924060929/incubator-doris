@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.stats;
 
+import org.apache.doris.analysis.IntLiteral;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.OlapTable;
@@ -375,18 +376,16 @@ public class StatsCalculator extends DefaultPlanVisitor<StatsDeriveResult, Void>
     }
 
     private StatsDeriveResult computeGroupElement(Repeat repeat) {
-        Map<Slot, ColumnStat> columnStatsMap = repeat.getOutputExpressions()
+        Map<Id, ColumnStatistic> columnStatsMap = repeat.getOutputExpressions()
                 .stream()
                 .map(output -> {
-                    ColumnStat columnStats = new ColumnStat();
-                    columnStats.setNdv(0);
-                    columnStats.setMaxSizeByte(0);
-                    columnStats.setNumNulls(0);
-                    columnStats.setAvgSizeByte(0);
-                    return Pair.of(output.toSlot(), columnStats);
+                    ColumnStatistic columnStats = new ColumnStatistic(-1, -1, -1,
+                            -1, -1, -1, -1, -1,
+                            new IntLiteral(-1), new IntLiteral(-1));
+                    return Pair.of(output.toSlot().getExprId(), columnStats);
                 })
                 .collect(Collectors.toMap(Pair::key, Pair::value));
-        int rowCount = 0;
+        int rowCount = -1;
         return new StatsDeriveResult(rowCount, columnStatsMap);
     }
 
