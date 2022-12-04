@@ -17,6 +17,8 @@
 
 package org.apache.doris.nereids.jobs;
 
+import org.apache.doris.nereids.CascadesContext;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.memo.CopyInResult;
 import org.apache.doris.nereids.memo.Group;
@@ -25,14 +27,19 @@ import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleSet;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.SessionVariable;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -45,6 +52,7 @@ public abstract class Job {
     protected JobContext context;
     protected boolean once;
     protected final boolean enableTrace;
+    protected final Set<String> disableRules;
 
     public Job(JobType type, JobContext context) {
         this(type, context, true);
@@ -55,10 +63,10 @@ public abstract class Job {
         this.type = type;
         this.context = context;
         this.once = once;
-        ConnectContext connectContext = ConnectContext.get();
-        this.enableTrace = connectContext == null
-                ? false
-                : connectContext.getSessionVariable().isEnableNereidsTrace();
+        this.enableTrace = getAndCacheSessionVariable(context, "enableNereidsTrace",
+                false, SessionVariable::isEnableNereidsTrace);
+        this.disableRules = getAndCacheSessionVariable(context, "disableNereidsRules",
+                ImmutableSet.of(), SessionVariable::getDisableNereidsRules);
     }
 
     public void pushJob(Job job) {
@@ -82,6 +90,7 @@ public abstract class Job {
      */
     public List<Rule> getValidRules(GroupExpression groupExpression, List<Rule> candidateRules) {
         return candidateRules.stream()
+                .filter(rule -> !disableRules.contains(rule.getRuleType().name().toUpperCase(Locale.ROOT)))
                 .filter(rule -> Objects.nonNull(rule) && rule.getPattern().matchRoot(groupExpression.getPlan())
                         && groupExpression.notApplied(rule)).collect(Collectors.toList());
     }
@@ -131,5 +140,22 @@ public abstract class Job {
     protected void printTraceLog(Rule rule, String traceBefore, String traceAfter) {
         logger.info("========== {} {} ==========\nbefore:\n{}\n\nafter:\n{}\n",
                 getClass().getSimpleName(), rule.getRuleType(), traceBefore, traceAfter);
+    }
+
+    private <T> T getAndCacheSessionVariable(JobContext context, String cacheName,
+            T defaultValue, Function<SessionVariable, T> variableSupplier) {
+        CascadesContext cascadesContext = context.getCascadesContext();
+        ConnectContext connectContext = cascadesContext.getConnectContext();
+        if (connectContext == null) {
+            return defaultValue;
+        }
+
+        StatementContext statementContext = cascadesContext.getStatementContext();
+        if (statementContext == null) {
+            return defaultValue;
+        }
+        T cacheResult = statementContext.getOrRegisterCache(cacheName,
+                () -> variableSupplier.apply(connectContext.getSessionVariable()));
+        return cacheResult;
     }
 }
