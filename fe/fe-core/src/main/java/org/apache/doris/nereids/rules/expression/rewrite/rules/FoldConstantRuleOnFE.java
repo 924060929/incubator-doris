@@ -46,6 +46,7 @@ import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunctio
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import org.apache.doris.nereids.trees.expressions.literal.NullLiteral;
+import org.apache.doris.nereids.types.BooleanType;
 import org.apache.doris.nereids.util.ExpressionUtils;
 
 import com.google.common.collect.ImmutableList;
@@ -163,7 +164,7 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule {
             return BooleanLiteral.FALSE;
         }
         if (argsHasNullLiteral(and)) {
-            return Literal.of(null);
+            return new NullLiteral(BooleanType.INSTANCE);
         }
         List<Expression> nonTrueLiteral = and.children()
                 .stream()
@@ -187,7 +188,7 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule {
             return BooleanLiteral.TRUE;
         }
         if (ExpressionUtils.isAllNullLiteral(or.getArguments())) {
-            return Literal.of(null);
+            return new NullLiteral(BooleanType.INSTANCE);
         }
         List<Expression> nonFalseLiteral = or.children()
                 .stream()
@@ -262,12 +263,14 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule {
             }
         }
 
-        Expression defaultResult = caseWhen.getDefaultValue().isPresent() ? rewrite(caseWhen.getDefaultValue().get(),
-                context) : null;
+        Expression defaultResult = caseWhen.getDefaultValue().isPresent()
+                ? rewrite(caseWhen.getDefaultValue().get(), context)
+                : null;
         if (foundNewDefault) {
             defaultResult = newDefault;
         }
         if (whenClauses.isEmpty()) {
+            // TODO: compute the type of null literal
             return defaultResult == null ? Literal.of(null) : defaultResult;
         }
         if (defaultResult == null) {
@@ -280,7 +283,7 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule {
     public Expression visitInPredicate(InPredicate inPredicate, ExpressionRewriteContext context) {
         Expression value = inPredicate.child(0);
         if (value.isNullLiteral()) {
-            return Literal.of(null);
+            return new NullLiteral(BooleanType.INSTANCE);
         }
 
         boolean valueIsLiteral = value.isLiteral();

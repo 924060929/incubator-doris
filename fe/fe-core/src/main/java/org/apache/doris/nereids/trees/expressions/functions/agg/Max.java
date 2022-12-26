@@ -58,12 +58,6 @@ public class Max extends AggregateFunction implements UnaryExpression, Propagate
     }
 
     @Override
-    public Max withChildren(List<Expression> children) {
-        Preconditions.checkArgument(children.size() == 1);
-        return new Max(children.get(0));
-    }
-
-    @Override
     public <R, C> R accept(ExpressionVisitor<R, C> visitor, C context) {
         return visitor.visitMax(this, context);
     }

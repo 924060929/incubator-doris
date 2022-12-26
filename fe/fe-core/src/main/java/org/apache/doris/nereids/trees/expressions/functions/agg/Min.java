@@ -33,12 +33,12 @@ import java.util.List;
 /** min agg function. */
 public class Min extends AggregateFunction implements UnaryExpression, PropagateNullable, CustomSignature {
 
-    public Min(Expression child) {
-        super("min", child);
+    public Min(Expression arg) {
+        super("min", arg);
     }
 
     public Min(boolean isDistinct, Expression arg) {
-        super("min", false, arg);
+        this(arg);
     }
 
     @Override
@@ -54,12 +54,6 @@ public class Min extends AggregateFunction implements UnaryExpression, Propagate
 
     @Override
     public Min withDistinctAndChildren(boolean isDistinct, List<Expression> children) {
-        Preconditions.checkArgument(children.size() == 1);
-        return new Min(isDistinct, children.get(0));
-    }
-
-    @Override
-    public Min withChildren(List<Expression> children) {
         Preconditions.checkArgument(children.size() == 1);
         return new Min(children.get(0));
     }
