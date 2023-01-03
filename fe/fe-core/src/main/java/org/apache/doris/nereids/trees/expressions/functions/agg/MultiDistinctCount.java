@@ -23,7 +23,7 @@ import org.apache.doris.nereids.trees.expressions.functions.AlwaysNotNullable;
 import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
 import org.apache.doris.nereids.types.BigIntType;
-import org.apache.doris.nereids.types.DataType;
+import org.apache.doris.nereids.types.coercion.AnyDataType;
 import org.apache.doris.nereids.util.ExpressionUtils;
 
 import com.google.common.base.Preconditions;
@@ -34,18 +34,17 @@ import java.util.List;
 /** MultiDistinctCount */
 public class MultiDistinctCount extends AggregateFunction
         implements AlwaysNotNullable, ExplicitlyCastableSignature {
+
+    public static final List<FunctionSignature> SIGNATURES = ImmutableList.of(
+            FunctionSignature.ret(BigIntType.INSTANCE).varArgs(AnyDataType.INSTANCE)
+    );
+
     public MultiDistinctCount(Expression arg0, Expression... varArgs) {
         super("multi_distinct_count", true, ExpressionUtils.mergeArguments(arg0, varArgs));
     }
 
     public MultiDistinctCount(boolean isDistinct, Expression arg0, Expression... varArgs) {
         super("multi_distinct_count", true, ExpressionUtils.mergeArguments(arg0, varArgs));
-    }
-
-    @Override
-    public List<FunctionSignature> getSignatures() {
-        List<DataType> argumentsTypes = getArgumentsTypes();
-        return ImmutableList.of(FunctionSignature.of(BigIntType.INSTANCE, argumentsTypes));
     }
 
     @Override
@@ -62,5 +61,10 @@ public class MultiDistinctCount extends AggregateFunction
     @Override
     public <R, C> R accept(ExpressionVisitor<R, C> visitor, C context) {
         return visitor.visitMultiDistinctCount(this, context);
+    }
+
+    @Override
+    public List<FunctionSignature> getSignatures() {
+        return SIGNATURES;
     }
 }

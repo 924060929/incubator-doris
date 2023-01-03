@@ -18,6 +18,8 @@
 package org.apache.doris.nereids.trees.expressions.functions.agg;
 
 import org.apache.doris.catalog.FunctionSignature;
+import org.apache.doris.catalog.Type;
+import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.functions.CustomSignature;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
@@ -37,7 +39,14 @@ public class Max extends AggregateFunction implements UnaryExpression, Propagate
     }
 
     public Max(boolean isDistinct, Expression arg) {
-        super("max", false, arg);
+        this(arg);
+    }
+
+    @Override
+    public void checkLegality() {
+        if (getArgumentType(0).isOnlyMetricType()) {
+            throw new AnalysisException(Type.OnlyMetricTypeErrorMsg);
+        }
     }
 
     @Override
@@ -54,7 +63,7 @@ public class Max extends AggregateFunction implements UnaryExpression, Propagate
     @Override
     public Max withDistinctAndChildren(boolean isDistinct, List<Expression> children) {
         Preconditions.checkArgument(children.size() == 1);
-        return new Max(isDistinct, children.get(0));
+        return new Max(children.get(0));
     }
 
     @Override

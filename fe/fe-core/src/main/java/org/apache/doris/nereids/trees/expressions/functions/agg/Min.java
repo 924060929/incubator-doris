@@ -18,6 +18,8 @@
 package org.apache.doris.nereids.trees.expressions.functions.agg;
 
 import org.apache.doris.catalog.FunctionSignature;
+import org.apache.doris.catalog.Type;
+import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.functions.CustomSignature;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
@@ -39,6 +41,13 @@ public class Min extends AggregateFunction implements UnaryExpression, Propagate
 
     public Min(boolean isDistinct, Expression arg) {
         this(arg);
+    }
+
+    @Override
+    public void checkLegality() {
+        if (getArgumentType(0).isOnlyMetricType()) {
+            throw new AnalysisException(Type.OnlyMetricTypeErrorMsg);
+        }
     }
 
     @Override
