@@ -37,6 +37,8 @@ import java.util.List;
 public class Count extends AggregateFunction implements ExplicitlyCastableSignature, AlwaysNotNullable {
 
     public static final List<FunctionSignature> SIGNATURES = ImmutableList.of(
+            // count(*)
+            FunctionSignature.ret(BigIntType.INSTANCE).args(),
             FunctionSignature.ret(BigIntType.INSTANCE).varArgs(AnyDataType.INSTANCE)
     );
 

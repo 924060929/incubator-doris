@@ -43,6 +43,8 @@ import org.apache.doris.nereids.trees.expressions.WhenClause;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.Array;
+import org.apache.doris.nereids.trees.expressions.literal.ArrayLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import org.apache.doris.nereids.trees.expressions.literal.NullLiteral;
@@ -53,6 +55,7 @@ import com.google.common.collect.ImmutableList;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * evaluate an expression on fe.
@@ -222,7 +225,11 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule {
             return new NullLiteral(cast.getDataType());
         }
         try {
-            return child.castTo(cast.getDataType());
+            Expression castResult = child.castTo(cast.getDataType());
+            if (!Objects.equals(castResult, cast) && !Objects.equals(castResult, child)) {
+                castResult = rewrite(castResult, context);
+            }
+            return castResult;
         } catch (Throwable t) {
             return cast;
         }
@@ -310,6 +317,15 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule {
     @Override
     public Expression visitTimestampArithmetic(TimestampArithmetic arithmetic, ExpressionRewriteContext context) {
         return ExpressionEvaluator.INSTANCE.eval(arithmetic);
+    }
+
+    @Override
+    public Expression visitArray(Array array, ExpressionRewriteContext context) {
+        if (!allArgsIsAllLiteral(array)) {
+            return array;
+        }
+        List<Literal> arguments = (List) array.getArguments();
+        return new ArrayLiteral(arguments);
     }
 
     private Expression rewriteChildren(Expression expr, ExpressionRewriteContext ctx) {
