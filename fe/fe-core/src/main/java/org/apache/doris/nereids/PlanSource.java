@@ -15,15 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.util;
+package org.apache.doris.nereids;
 
-import org.apache.doris.nereids.pattern.GeneratedPatterns;
-import org.apache.doris.nereids.rules.RulePromise;
-
-public interface PatternMatchSupported extends GeneratedPatterns {
-
-    @Override
-    default RulePromise defaultPromise() {
-        return RulePromise.PLAN_CHECK;
-    }
+/** PlanSource */
+public interface PlanSource {
 }

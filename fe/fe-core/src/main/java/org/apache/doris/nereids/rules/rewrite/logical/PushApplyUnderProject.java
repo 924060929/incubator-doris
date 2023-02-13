@@ -50,7 +50,7 @@ import java.util.List;
 public class PushApplyUnderProject extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
-        return logicalApply(group(), logicalProject(any()))
+        return logicalApply(any(), logicalProject(any()))
                 .when(LogicalApply::isCorrelated)
                 .whenNot(apply -> apply.right().child() instanceof LogicalFilter && apply.isIn())
                 .whenNot(LogicalApply::alreadyExecutedEliminateFilter)

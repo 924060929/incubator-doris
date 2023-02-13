@@ -156,7 +156,7 @@ public class NereidsPlanner extends Planner {
             // resolve column, table and function
             analyze();
             if (explainLevel == ExplainLevel.ANALYZED_PLAN || explainLevel == ExplainLevel.ALL_PLAN) {
-                analyzedPlan = cascadesContext.getMemo().copyOut(false);
+                analyzedPlan = cascadesContext.getRewritePlan();
                 if (explainLevel == ExplainLevel.ANALYZED_PLAN) {
                     return analyzedPlan;
                 }
@@ -165,11 +165,13 @@ public class NereidsPlanner extends Planner {
             // rule-based optimize
             rewrite();
             if (explainLevel == ExplainLevel.REWRITTEN_PLAN || explainLevel == ExplainLevel.ALL_PLAN) {
-                rewrittenPlan = cascadesContext.getMemo().copyOut(false);
+                rewrittenPlan = cascadesContext.getRewritePlan();
                 if (explainLevel == ExplainLevel.REWRITTEN_PLAN) {
                     return rewrittenPlan;
                 }
             }
+
+            initMemo();
 
             deriveStats();
 
@@ -197,7 +199,7 @@ public class NereidsPlanner extends Planner {
     }
 
     private void initCascadesContext(LogicalPlan plan, PhysicalProperties requireProperties) {
-        cascadesContext = CascadesContext.newContext(statementContext, plan, requireProperties);
+        cascadesContext = CascadesContext.newRewriteContext(statementContext, plan, requireProperties);
     }
 
     private void analyze() {
@@ -209,6 +211,10 @@ public class NereidsPlanner extends Planner {
      */
     private void rewrite() {
         new NereidsRewriteJobExecutor(cascadesContext).execute();
+    }
+
+    private void initMemo() {
+        cascadesContext.toMemo();
     }
 
     private void deriveStats() {

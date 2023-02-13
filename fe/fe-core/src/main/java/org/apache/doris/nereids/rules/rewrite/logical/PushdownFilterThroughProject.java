@@ -20,7 +20,7 @@ package org.apache.doris.nereids.rules.rewrite.logical;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.util.ExpressionUtils;
@@ -36,7 +36,7 @@ public class PushdownFilterThroughProject extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalFilter(logicalProject()).then(filter -> {
-            LogicalProject<GroupPlan> project = filter.child();
+            LogicalProject<Plan> project = filter.child();
             return new LogicalProject<>(
                     project.getProjects(),
                     new LogicalFilter<>(

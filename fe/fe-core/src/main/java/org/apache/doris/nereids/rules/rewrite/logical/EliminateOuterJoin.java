@@ -25,8 +25,8 @@ import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.JoinType;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
 import org.apache.doris.nereids.util.ExpressionUtils;
 
@@ -45,7 +45,7 @@ public class EliminateOuterJoin extends OneRewriteRuleFactory {
         return logicalFilter(
                     logicalJoin().when(join -> join.getJoinType().isOuterJoin())
                 ).then(filter -> {
-                    LogicalJoin<GroupPlan, GroupPlan> join = filter.child();
+                    LogicalJoin<Plan, Plan> join = filter.child();
                     Set<Expression> conjuncts = filter.getConjuncts();
                     Set<Expression> leftPredicates = ExpressionUtils.extractCoveredConjunction(conjuncts,
                             join.left().getOutputSet());

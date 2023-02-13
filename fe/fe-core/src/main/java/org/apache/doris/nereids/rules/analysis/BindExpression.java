@@ -47,7 +47,6 @@ import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunctio
 import org.apache.doris.nereids.trees.expressions.functions.generator.TableGeneratingFunction;
 import org.apache.doris.nereids.trees.expressions.functions.table.TableValuedFunction;
 import org.apache.doris.nereids.trees.expressions.visitor.DefaultExpressionRewriter;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.JoinType;
 import org.apache.doris.nereids.trees.plans.LeafPlan;
 import org.apache.doris.nereids.trees.plans.Plan;
@@ -112,7 +111,7 @@ public class BindExpression implements AnalysisRuleFactory {
         return ImmutableList.of(
             RuleType.BINDING_PROJECT_SLOT.build(
                 logicalProject().when(Plan::canBind).thenApply(ctx -> {
-                    LogicalProject<GroupPlan> project = ctx.root;
+                    LogicalProject<Plan> project = ctx.root;
                     List<NamedExpression> boundProjections =
                             bindSlot(project.getProjects(), project.children(), ctx.cascadesContext);
                     List<NamedExpression> boundExceptions = bindSlot(project.getExcepts(), project.children(),
@@ -126,7 +125,7 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_FILTER_SLOT.build(
                 logicalFilter().when(Plan::canBind).thenApply(ctx -> {
-                    LogicalFilter<GroupPlan> filter = ctx.root;
+                    LogicalFilter<Plan> filter = ctx.root;
                     Set<Expression> boundConjuncts = filter.getConjuncts().stream()
                             .map(expr -> bindSlot(expr, filter.children(), ctx.cascadesContext))
                             .map(expr -> bindFunction(expr, ctx.cascadesContext))
@@ -137,7 +136,7 @@ public class BindExpression implements AnalysisRuleFactory {
 
             RuleType.BINDING_USING_JOIN_SLOT.build(
                 usingJoin().thenApply(ctx -> {
-                    UsingJoin<GroupPlan, GroupPlan> using = ctx.root;
+                    UsingJoin<Plan, Plan> using = ctx.root;
                     LogicalJoin<Plan, Plan> lj = new LogicalJoin<>(using.getJoinType() == JoinType.CROSS_JOIN
                             ? JoinType.INNER_JOIN : using.getJoinType(),
                             using.getHashJoinConjuncts(),
@@ -179,7 +178,7 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_JOIN_SLOT.build(
                 logicalJoin().when(Plan::canBind).thenApply(ctx -> {
-                    LogicalJoin<GroupPlan, GroupPlan> join = ctx.root;
+                    LogicalJoin<Plan, Plan> join = ctx.root;
                     List<Expression> cond = join.getOtherJoinConjuncts().stream()
                             .map(expr -> bindSlot(expr, join.children(), ctx.cascadesContext))
                             .map(expr -> bindFunction(expr, ctx.cascadesContext))
@@ -194,7 +193,7 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_AGGREGATE_SLOT.build(
                 logicalAggregate().when(Plan::canBind).thenApply(ctx -> {
-                    LogicalAggregate<GroupPlan> agg = ctx.root;
+                    LogicalAggregate<Plan> agg = ctx.root;
                     List<NamedExpression> output = agg.getOutputExpressions().stream()
                             .map(expr -> bindSlot(expr, agg.children(), ctx.cascadesContext))
                             .map(expr -> bindFunction(expr, ctx.cascadesContext))
@@ -324,7 +323,7 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_REPEAT_SLOT.build(
                 logicalRepeat().when(Plan::canBind).thenApply(ctx -> {
-                    LogicalRepeat<GroupPlan> repeat = ctx.root;
+                    LogicalRepeat<Plan> repeat = ctx.root;
                     List<NamedExpression> output = repeat.getOutputExpressions().stream()
                             .map(expr -> bindSlot(expr, repeat.children(), ctx.cascadesContext))
                             .map(expr -> bindFunction(expr, ctx.cascadesContext))
@@ -369,29 +368,29 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_SORT_SLOT.build(
                 logicalSort(aggregate()).when(Plan::canBind).thenApply(ctx -> {
-                    LogicalSort<Aggregate<GroupPlan>> sort = ctx.root;
-                    Aggregate<GroupPlan> aggregate = sort.child();
+                    LogicalSort<Aggregate<Plan>> sort = ctx.root;
+                    Aggregate<Plan> aggregate = sort.child();
                     return bindSort(sort, aggregate, ctx.cascadesContext);
                 })
             ),
             RuleType.BINDING_SORT_SLOT.build(
                 logicalSort(logicalHaving(aggregate())).when(Plan::canBind).thenApply(ctx -> {
-                    LogicalSort<LogicalHaving<Aggregate<GroupPlan>>> sort = ctx.root;
-                    Aggregate<GroupPlan> aggregate = sort.child().child();
+                    LogicalSort<LogicalHaving<Aggregate<Plan>>> sort = ctx.root;
+                    Aggregate<Plan> aggregate = sort.child().child();
                     return bindSort(sort, aggregate, ctx.cascadesContext);
                 })
             ),
             RuleType.BINDING_SORT_SLOT.build(
                 logicalSort(logicalHaving(logicalProject())).when(Plan::canBind).thenApply(ctx -> {
-                    LogicalSort<LogicalHaving<LogicalProject<GroupPlan>>> sort = ctx.root;
-                    LogicalProject<GroupPlan> project = sort.child().child();
+                    LogicalSort<LogicalHaving<LogicalProject<Plan>>> sort = ctx.root;
+                    LogicalProject<Plan> project = sort.child().child();
                     return bindSort(sort, project, ctx.cascadesContext);
                 })
             ),
             RuleType.BINDING_SORT_SLOT.build(
                 logicalSort(logicalProject()).when(Plan::canBind).thenApply(ctx -> {
-                    LogicalSort<LogicalProject<GroupPlan>> sort = ctx.root;
-                    LogicalProject<GroupPlan> project = sort.child();
+                    LogicalSort<LogicalProject<Plan>> sort = ctx.root;
+                    LogicalProject<Plan> project = sort.child();
                     return bindSort(sort, project, ctx.cascadesContext);
                 })
             ),
@@ -410,7 +409,7 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_HAVING_SLOT.build(
                 logicalHaving(aggregate()).when(Plan::canBind).thenApply(ctx -> {
-                    LogicalHaving<Aggregate<GroupPlan>> having = ctx.root;
+                    LogicalHaving<Aggregate<Plan>> having = ctx.root;
                     Plan childPlan = having.child();
                     Set<Expression> boundConjuncts = having.getConjuncts().stream()
                             .map(expr -> {
@@ -473,7 +472,7 @@ public class BindExpression implements AnalysisRuleFactory {
             ),
             RuleType.BINDING_GENERATE_SLOT.build(
                 logicalGenerate().when(Plan::canBind).thenApply(ctx -> {
-                    LogicalGenerate<GroupPlan> generate = ctx.root;
+                    LogicalGenerate<Plan> generate = ctx.root;
                     List<Function> boundSlotGenerators
                             = bindSlot(generate.getGenerators(), generate.children(), ctx.cascadesContext);
                     List<Function> boundFunctionGenerators = boundSlotGenerators.stream()

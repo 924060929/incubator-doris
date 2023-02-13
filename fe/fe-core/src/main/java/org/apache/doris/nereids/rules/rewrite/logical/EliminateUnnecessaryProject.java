@@ -37,14 +37,14 @@ public class EliminateUnnecessaryProject implements RewriteRuleFactory {
     public List<Rule> buildRules() {
         return ImmutableList.of(
             RuleType.MARK_NECESSARY_PROJECT.build(
-                logicalSetOperation(logicalProject(), group())
+                logicalSetOperation(logicalProject(), any())
                     .thenApply(ctx -> {
                         LogicalProject project = (LogicalProject) ctx.root.child(0);
                         return ctx.root.withChildren(project.withEliminate(false), ctx.root.child(1));
                     })
             ),
             RuleType.MARK_NECESSARY_PROJECT.build(
-                logicalSetOperation(group(), logicalProject())
+                logicalSetOperation(any(), logicalProject())
                     .thenApply(ctx -> {
                         LogicalProject project = (LogicalProject) ctx.root.child(1);
                         return ctx.root.withChildren(ctx.root.child(0), project.withEliminate(false));
@@ -55,11 +55,9 @@ public class EliminateUnnecessaryProject implements RewriteRuleFactory {
                     .when(LogicalProject::canEliminate)
                     .when(project -> project.getOutputSet().equals(project.child().getOutputSet()))
                     .thenApply(ctx -> {
-                        int rootGroupId = ctx.cascadesContext.getMemo().getRoot().getGroupId().asInt();
                         LogicalProject<Plan> project = ctx.root;
                         // if project is root, we need to ensure the output order is same.
-                        if (project.getGroupExpression().get().getOwnerGroup().getGroupId().asInt()
-                                == rootGroupId) {
+                        if (ctx.isRewriteRoot()) {
                             if (project.getOutput().equals(project.child().getOutput())) {
                                 return project.child();
                             } else {

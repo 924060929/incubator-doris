@@ -30,7 +30,7 @@ import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SubqueryExpr;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.expressions.visitor.DefaultExpressionRewriter;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalApply;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
@@ -57,7 +57,7 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
         return ImmutableList.of(
             RuleType.ANALYZE_FILTER_SUBQUERY.build(
                 logicalFilter().thenApply(ctx -> {
-                    LogicalFilter<GroupPlan> filter = ctx.root;
+                    LogicalFilter<Plan> filter = ctx.root;
                     Set<SubqueryExpr> subqueryExprs = filter.getPredicate().collect(SubqueryExpr.class::isInstance);
                     if (subqueryExprs.isEmpty()) {
                         return filter;
@@ -73,7 +73,7 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
             ),
            RuleType.ANALYZE_PROJECT_SUBQUERY.build(
                logicalProject().thenApply(ctx -> {
-                   LogicalProject<GroupPlan> project = ctx.root;
+                   LogicalProject<Plan> project = ctx.root;
                    Set<SubqueryExpr> subqueryExprs = new HashSet<>();
                    project.getProjects().stream()
                            .filter(Alias.class::isInstance)
@@ -97,9 +97,9 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
         );
     }
 
-    private LogicalPlan analyzedSubquery(Set<SubqueryExpr> subqueryExprs,
-            LogicalPlan childPlan, CascadesContext ctx) {
-        LogicalPlan tmpPlan = childPlan;
+    private Plan analyzedSubquery(Set<SubqueryExpr> subqueryExprs,
+            Plan childPlan, CascadesContext ctx) {
+        Plan tmpPlan = childPlan;
         for (SubqueryExpr subqueryExpr : subqueryExprs) {
             if (!ctx.subqueryIsAnalyzed(subqueryExpr)) {
                 tmpPlan = addApply(subqueryExpr, tmpPlan, ctx);
@@ -108,8 +108,7 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
         return tmpPlan;
     }
 
-    private LogicalPlan addApply(SubqueryExpr subquery,
-            LogicalPlan childPlan, CascadesContext ctx) {
+    private LogicalPlan addApply(SubqueryExpr subquery, Plan childPlan, CascadesContext ctx) {
         ctx.setSubqueryExprIsAnalyzed(subquery, true);
         LogicalApply newApply = new LogicalApply(
                 subquery.getCorrelateSlots(),

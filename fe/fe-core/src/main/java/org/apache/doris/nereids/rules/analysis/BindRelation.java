@@ -32,8 +32,8 @@ import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.analyzer.CTEContext;
 import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.exceptions.AnalysisException;
-import org.apache.doris.nereids.memo.Memo;
 import org.apache.doris.nereids.parser.NereidsParser;
+import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
@@ -205,12 +205,14 @@ public class BindRelation extends OneAnalysisRuleFactory {
 
     private Plan parseAndAnalyzeView(String viewSql, CascadesContext parentContext) {
         LogicalPlan parsedViewPlan = new NereidsParser().parseSingle(viewSql);
-        CascadesContext viewContext = new Memo(parsedViewPlan)
-                .newCascadesContext(parentContext.getStatementContext());
+        CascadesContext viewContext = new CascadesContext(parsedViewPlan, null, parentContext.getStatementContext(),
+                PhysicalProperties.ANY);
+        // CascadesContext viewContext = new Memo(parsedViewPlan)
+        //         .newCascadesContext(parentContext.getStatementContext());
         viewContext.newAnalyzer().analyze();
 
         // we should remove all group expression of the plan which in other memo, so the groupId would not conflict
-        return viewContext.getMemo().copyOut(false);
+        return viewContext.getRewritePlan();
     }
 
     private List<Long> getPartitionIds(TableIf t, UnboundRelation unboundRelation) {

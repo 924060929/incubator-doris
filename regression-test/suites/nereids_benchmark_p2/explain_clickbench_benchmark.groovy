@@ -185,7 +185,7 @@ suite("explain_clickbench_benchmark") {
 
     benchmark {
         warmUp true
-        executeTimes 3
+        executeTimes 300
         skipFailure false
         printResult true
 

@@ -46,8 +46,8 @@ import org.apache.doris.nereids.types.BigIntType;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.VarcharType;
 import org.apache.doris.nereids.util.FieldChecker;
+import org.apache.doris.nereids.util.MemoPatternMatchSupported;
 import org.apache.doris.nereids.util.MemoTestUtils;
-import org.apache.doris.nereids.util.PatternMatchSupported;
 import org.apache.doris.nereids.util.PlanChecker;
 import org.apache.doris.utframe.TestWithFeService;
 
@@ -60,7 +60,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-public class RegisterCTETest extends TestWithFeService implements PatternMatchSupported {
+public class RegisterCTETest extends TestWithFeService implements MemoPatternMatchSupported {
 
     private final NereidsParser parser = new NereidsParser();
 

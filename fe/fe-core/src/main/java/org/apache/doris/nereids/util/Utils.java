@@ -231,6 +231,7 @@ public class Utils {
         for (int i = 0; i < list.size(); i++) {
             if (list.get(i) == item) {
                 list.remove(i);
+                i--;
                 return;
             }
         }

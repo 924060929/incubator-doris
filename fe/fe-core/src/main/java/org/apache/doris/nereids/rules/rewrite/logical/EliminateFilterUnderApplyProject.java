@@ -23,7 +23,6 @@ import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalApply;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
@@ -63,12 +62,12 @@ import java.util.Set;
 public class EliminateFilterUnderApplyProject extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
-        return logicalApply(group(), logicalProject(logicalFilter()))
+        return logicalApply(any(), logicalProject(logicalFilter()))
                 .when(LogicalApply::isCorrelated)
                 .when(LogicalApply::isIn)
                 .then(apply -> {
-                    LogicalProject<LogicalFilter<GroupPlan>> project = apply.right();
-                    LogicalFilter<GroupPlan> filter = project.child();
+                    LogicalProject<LogicalFilter<Plan>> project = apply.right();
+                    LogicalFilter<Plan> filter = project.child();
                     Set<Expression> conjuncts = filter.getConjuncts();
                     Map<Boolean, List<Expression>> split = Utils.splitCorrelatedConjuncts(
                             conjuncts, apply.getCorrelationSlot());

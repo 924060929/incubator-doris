@@ -56,7 +56,8 @@ public abstract class AbstractSelectMaterializedIndexRule {
             case AGG_KEYS:
             case UNIQUE_KEYS:
             case DUP_KEYS:
-                return !scan.isIndexSelected();
+                // if only exist base schema, don't select index for speed up
+                return !scan.isIndexSelected() && scan.getTable().getIndexNameToId().size() > 1;
             default:
                 return false;
         }

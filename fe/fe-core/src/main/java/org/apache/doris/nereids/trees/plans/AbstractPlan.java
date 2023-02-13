@@ -32,6 +32,8 @@ import org.apache.doris.nereids.properties.UnboundLogicalProperties;
 import org.apache.doris.nereids.trees.AbstractTreeNode;
 import org.apache.doris.nereids.trees.expressions.ExprId;
 import org.apache.doris.nereids.trees.expressions.Slot;
+import org.apache.doris.nereids.util.MutableState;
+import org.apache.doris.nereids.util.MutableState.EmptyMutableState;
 import org.apache.doris.nereids.util.TreeStringUtils;
 import org.apache.doris.statistics.StatsDeriveResult;
 
@@ -52,10 +54,18 @@ public abstract class AbstractPlan extends AbstractTreeNode<Plan> implements Pla
             EventChannel.getDefaultChannel()
                     .addEnhancers(new AddCounterEventEnhancer())
                     .addConsumers(new LogConsumer(CounterEvent.class, EventChannel.LOG)));
+
     protected final StatsDeriveResult statsDeriveResult;
     protected final PlanType type;
     protected final Optional<GroupExpression> groupExpression;
     protected final Supplier<LogicalProperties> logicalPropertiesSupplier;
+
+    // this field is special, because other fields in tree node is immutable, but in some scenes, mutable
+    // state is necessary. e.g. the rewrite framework need distinguish whether the plan is created by
+    // rules, the framework can set this field to a boolean value to quickly judge without new big plan.
+    // we should avoid using it as much as possible, because mutable state is easy to cause bugs and
+    // difficult to locate.
+    private MutableState mutableState = EmptyMutableState.INSTANCE;
 
     public AbstractPlan(PlanType type, Plan... children) {
         this(type, Optional.empty(), Optional.empty(), null, children);
@@ -165,5 +175,15 @@ public abstract class AbstractPlan extends AbstractTreeNode<Plan> implements Pla
             return UnboundLogicalProperties.INSTANCE;
         }
         return logicalPropertiesSupplier.get();
+    }
+
+    @Override
+    public Optional<Object> getMutableState(String key) {
+        return mutableState.get(key);
+    }
+
+    @Override
+    public void setMutableState(String key, Object state) {
+        this.mutableState = this.mutableState.set(key, state);
     }
 }

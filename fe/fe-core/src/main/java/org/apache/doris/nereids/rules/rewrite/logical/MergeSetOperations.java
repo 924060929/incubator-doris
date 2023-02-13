@@ -51,7 +51,7 @@ public class MergeSetOperations implements RewriteRuleFactory {
     public List<Rule> buildRules() {
         return ImmutableList.of(
             RuleType.MERGE_SET_OPERATION.build(
-                logicalSetOperation(logicalSetOperation(), group()).thenApply(ctx -> {
+                logicalSetOperation(logicalSetOperation(), any()).thenApply(ctx -> {
                     LogicalSetOperation parentSetOperation = ctx.root;
                     LogicalSetOperation childSetOperation = (LogicalSetOperation) parentSetOperation.child(0);
 
@@ -67,7 +67,7 @@ public class MergeSetOperations implements RewriteRuleFactory {
                 })
             ),
             RuleType.MERGE_SET_OPERATION.build(
-                logicalSetOperation(group(), logicalSetOperation()).thenApply(ctx -> {
+                logicalSetOperation(any(), logicalSetOperation()).thenApply(ctx -> {
                     LogicalSetOperation parentSetOperation = ctx.root;
                     LogicalSetOperation childSetOperation = (LogicalSetOperation) parentSetOperation.child(1);
 

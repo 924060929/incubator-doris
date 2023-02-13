@@ -21,7 +21,7 @@ import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.trees.plans.logical.LogicalApply;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
@@ -60,12 +60,12 @@ import java.util.List;
 public class ApplyPullFilterOnProjectUnderAgg extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
-        return logicalApply(group(), logicalAggregate(logicalProject(logicalFilter())))
+        return logicalApply(any(), logicalAggregate(logicalProject(logicalFilter())))
                 .when(LogicalApply::isCorrelated).then(apply -> {
-                    LogicalAggregate<LogicalProject<LogicalFilter<GroupPlan>>> agg = apply.right();
+                    LogicalAggregate<LogicalProject<LogicalFilter<Plan>>> agg = apply.right();
 
-                    LogicalProject<LogicalFilter<GroupPlan>> project = agg.child();
-                    LogicalFilter<GroupPlan> filter = project.child();
+                    LogicalProject<LogicalFilter<Plan>> project = agg.child();
+                    LogicalFilter<Plan> filter = project.child();
                     List<NamedExpression> newProjects = Lists.newArrayList();
                     newProjects.addAll(project.getProjects());
                     filter.child().getOutput().forEach(slot -> {

@@ -21,7 +21,6 @@ import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Expression;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalApply;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
@@ -54,8 +53,8 @@ import java.util.Set;
 public class PushApplyUnderFilter extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
-        return logicalApply(group(), logicalFilter()).when(LogicalApply::isCorrelated).then(apply -> {
-            LogicalFilter<GroupPlan> filter = apply.right();
+        return logicalApply(any(), logicalFilter()).when(LogicalApply::isCorrelated).then(apply -> {
+            LogicalFilter<Plan> filter = apply.right();
             Set<Expression> conjuncts = filter.getConjuncts();
             Map<Boolean, List<Expression>> split = Utils.splitCorrelatedConjuncts(
                     conjuncts, apply.getCorrelationSlot());

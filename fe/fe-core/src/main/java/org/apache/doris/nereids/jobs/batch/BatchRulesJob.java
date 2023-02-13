@@ -21,8 +21,9 @@ import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.Job;
 import org.apache.doris.nereids.jobs.JobContext;
 import org.apache.doris.nereids.jobs.cascades.OptimizeGroupJob;
-import org.apache.doris.nereids.jobs.rewrite.RewriteBottomUpJob;
-import org.apache.doris.nereids.jobs.rewrite.RewriteTopDownJob;
+import org.apache.doris.nereids.jobs.rewrite.PlanTreeRewriteBottomUpJob;
+import org.apache.doris.nereids.jobs.rewrite.PlanTreeRewriteTopDownJob;
+import org.apache.doris.nereids.jobs.rewrite.RootPlanTreeRewriteJob;
 import org.apache.doris.nereids.jobs.rewrite.VisitorRewriteJob;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleFactory;
@@ -56,10 +57,12 @@ public abstract class BatchRulesJob {
         for (RuleFactory ruleFactory : ruleFactories) {
             rules.addAll(ruleFactory.buildRules());
         }
-        return new RewriteBottomUpJob(
-                cascadesContext.getMemo().getRoot(),
-                rules,
-                cascadesContext.getCurrentJobContext());
+        return new RootPlanTreeRewriteJob(cascadesContext.getCurrentJobContext(),
+                rules, PlanTreeRewriteBottomUpJob::new);
+//        return new RewriteBottomUpJob(
+//                cascadesContext.getMemo().getRoot(),
+//                rules,
+//                cascadesContext.getCurrentJobContext());
     }
 
     protected Job topDownBatch(RuleFactory... ruleFactories) {
@@ -67,12 +70,7 @@ public abstract class BatchRulesJob {
     }
 
     protected Job topDownBatch(List<RuleFactory> ruleFactories) {
-        List<Rule> rules = new ArrayList<>();
-        for (RuleFactory ruleFactory : ruleFactories) {
-            rules.addAll(ruleFactory.buildRules());
-        }
-        return new RewriteTopDownJob(cascadesContext.getMemo().getRoot(), rules,
-                cascadesContext.getCurrentJobContext());
+        return topDownBatch(ruleFactories, true);
     }
 
     protected Job topDownBatch(List<RuleFactory> ruleFactories, boolean once) {
@@ -80,8 +78,10 @@ public abstract class BatchRulesJob {
         for (RuleFactory ruleFactory : ruleFactories) {
             rules.addAll(ruleFactory.buildRules());
         }
-        return new RewriteTopDownJob(cascadesContext.getMemo().getRoot(), rules,
-                cascadesContext.getCurrentJobContext(), once);
+        return new RootPlanTreeRewriteJob(cascadesContext.getCurrentJobContext(),
+                rules, PlanTreeRewriteTopDownJob::new);
+//        return new RewriteTopDownJob(cascadesContext.getMemo().getRoot(), rules,
+//                cascadesContext.getCurrentJobContext(), once);
     }
 
     protected Job visitorJob(RuleType ruleType, DefaultPlanRewriter<JobContext> planRewriter) {

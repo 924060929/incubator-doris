@@ -34,7 +34,7 @@ public class EliminateSortUnderApply implements RewriteRuleFactory {
     public List<Rule> buildRules() {
         return ImmutableList.of(
             RuleType.ELIMINATE_SORT_UNDER_APPLY.build(
-                logicalApply(group(), logicalSort()).then(apply -> {
+                logicalApply(any(), logicalSort()).then(apply -> {
                     List<Plan> children = new ImmutableList.Builder<Plan>()
                             .add(apply.left())
                             .add(apply.right().child())
@@ -43,7 +43,7 @@ public class EliminateSortUnderApply implements RewriteRuleFactory {
                 })
             ),
             RuleType.ELIMINATE_SORT_UNDER_APPLY.build(
-                logicalApply(group(), logicalProject(logicalSort())).then(apply -> {
+                logicalApply(any(), logicalProject(logicalSort())).then(apply -> {
                     List<Plan> children = new ImmutableList.Builder<Plan>()
                             .add(apply.left())
                             .add(apply.right().withChildren(apply.right().child().child()))

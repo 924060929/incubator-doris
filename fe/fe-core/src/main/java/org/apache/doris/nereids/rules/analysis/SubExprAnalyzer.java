@@ -20,7 +20,7 @@ package org.apache.doris.nereids.rules.analysis;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.analyzer.Scope;
 import org.apache.doris.nereids.exceptions.AnalysisException;
-import org.apache.doris.nereids.memo.Memo;
+import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.trees.expressions.Exists;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.InSubquery;
@@ -140,13 +140,13 @@ class SubExprAnalyzer extends DefaultExpressionRewriter<CascadesContext> {
     }
 
     private AnalyzedResult analyzeSubquery(SubqueryExpr expr) {
-        CascadesContext subqueryContext = new Memo(expr.getQueryPlan())
-                .newCascadesContext((cascadesContext.getStatementContext()), cascadesContext.getCteContext());
+        CascadesContext subqueryContext = CascadesContext.newRewriteContext(
+                cascadesContext.getStatementContext(), expr.getQueryPlan(), PhysicalProperties.ANY);
         Scope subqueryScope = genScopeWithSubquery(expr);
         subqueryContext
                 .newAnalyzer(Optional.of(subqueryScope))
                 .analyze();
-        return new AnalyzedResult((LogicalPlan) subqueryContext.getMemo().copyOut(false),
+        return new AnalyzedResult((LogicalPlan) subqueryContext.getRewritePlan(),
                 subqueryScope.getCorrelatedSlots());
     }
 
