@@ -133,7 +133,7 @@ public class FoldConstantTest extends ExpressionRewriteTestHelper {
 
         // cast '1' as tinyint
         Cast c = new Cast(Literal.of("1"), TinyIntType.INSTANCE);
-        Expression rewritten = executor.rewrite(c);
+        Expression rewritten = executor.rewrite(c, context);
         Literal expected = Literal.of((byte) 1);
         Assertions.assertEquals(rewritten, expected);
     }
