@@ -36,7 +36,7 @@ public abstract class PlanTreeRewriteJob extends Job {
     }
 
     protected RewriteResult rewrite(Plan plan, List<Rule> rules, RewriteJobContext rewriteJobContext) {
-        List<Rule> validRules = getValidRules(plan, rules);
+        List<Rule> validRules = getValidRules(rules);
         boolean isRewriteRoot = rewriteJobContext.isRewriteRoot();
         for (Rule rule : validRules) {
             Pattern<Plan> pattern = (Pattern<Plan>) rule.getPattern();

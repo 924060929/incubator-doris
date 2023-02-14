@@ -102,11 +102,10 @@ public abstract class Job implements TracerSupplier {
                 .collect(ImmutableList.toImmutableList());
     }
 
-    public List<Rule> getValidRules(Plan plan, List<Rule> candidateRules) {
+    public List<Rule> getValidRules(List<Rule> candidateRules) {
         return candidateRules.stream()
                 .filter(rule -> Objects.nonNull(rule)
-                        && !disableRules.contains(rule.getRuleType().name())
-                        && rule.getPattern().matchRoot(plan))
+                        && !disableRules.contains(rule.getRuleType().name()))
                 .collect(ImmutableList.toImmutableList());
     }
 
