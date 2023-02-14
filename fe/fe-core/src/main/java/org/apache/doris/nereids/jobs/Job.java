@@ -70,8 +70,7 @@ public abstract class Job implements TracerSupplier {
         this.type = type;
         this.context = context;
         this.once = once;
-        this.disableRules = getAndCacheSessionVariable(context, "disableNereidsRules",
-                ImmutableSet.of(), SessionVariable::getDisableNereidsRules);
+        this.disableRules = getDisableRules(context);
     }
 
     public void pushJob(Job job) {
@@ -149,7 +148,12 @@ public abstract class Job implements TracerSupplier {
                 groupExpression.getOwnerGroup(), groupExpression, groupExpression.getPlan()));
     }
 
-    private <T> T getAndCacheSessionVariable(JobContext context, String cacheName,
+    public static Set<String> getDisableRules(JobContext context) {
+        return getAndCacheSessionVariable(context, "disableNereidsRules",
+                ImmutableSet.of(), SessionVariable::getDisableNereidsRules);
+    }
+
+    private static <T> T getAndCacheSessionVariable(JobContext context, String cacheName,
             T defaultValue, Function<SessionVariable, T> variableSupplier) {
         CascadesContext cascadesContext = context.getCascadesContext();
         ConnectContext connectContext = cascadesContext.getConnectContext();

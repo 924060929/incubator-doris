@@ -24,8 +24,8 @@ import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
 import org.apache.doris.nereids.jobs.JobContext;
-import org.apache.doris.nereids.jobs.batch.NereidsRewriteJobExecutor;
-import org.apache.doris.nereids.jobs.batch.OptimizeRulesJob;
+import org.apache.doris.nereids.jobs.batch.CascadesOptimizer;
+import org.apache.doris.nereids.jobs.batch.NereidsRewriter;
 import org.apache.doris.nereids.jobs.cascades.DeriveStatsJob;
 import org.apache.doris.nereids.jobs.joinorder.JoinOrderJob;
 import org.apache.doris.nereids.memo.CopyInResult;
@@ -169,13 +169,13 @@ public class PlanChecker {
     }
 
     public PlanChecker rewrite() {
-        new NereidsRewriteJobExecutor(cascadesContext).execute();
+        new NereidsRewriter(cascadesContext).execute();
         return this;
     }
 
     public PlanChecker optimize() {
         double now = System.currentTimeMillis();
-        new OptimizeRulesJob(cascadesContext).execute();
+        new CascadesOptimizer(cascadesContext).execute();
         System.out.println("cascades:" + (System.currentTimeMillis() - now));
         return this;
     }

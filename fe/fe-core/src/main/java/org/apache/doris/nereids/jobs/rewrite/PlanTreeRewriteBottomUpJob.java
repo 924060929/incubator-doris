@@ -47,7 +47,6 @@ public class PlanTreeRewriteBottomUpJob extends PlanTreeRewriteJob {
         // use childrenVisited to judge whether clear the state in the previous batch
         boolean clearStatePhase = !rewriteJobContext.childrenVisited;
         if (clearStatePhase) {
-            // clear state
             traverseClearState();
             return;
         }

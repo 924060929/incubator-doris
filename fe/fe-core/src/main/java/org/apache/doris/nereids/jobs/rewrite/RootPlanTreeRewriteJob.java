@@ -17,9 +17,10 @@
 
 package org.apache.doris.nereids.jobs.rewrite;
 
+import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.Job;
 import org.apache.doris.nereids.jobs.JobContext;
-import org.apache.doris.nereids.jobs.JobType;
+import org.apache.doris.nereids.jobs.RewriteJob;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.trees.plans.Plan;
 
@@ -27,22 +28,33 @@ import java.util.List;
 import java.util.Objects;
 
 /** RootPlanTreeRewriteJob */
-public class RootPlanTreeRewriteJob extends Job {
+public class RootPlanTreeRewriteJob implements RewriteJob {
     private final List<Rule> rules;
     private final RewriteJobBuilder rewriteJobBuilder;
+    private final boolean once;
 
-    public RootPlanTreeRewriteJob(JobContext context, List<Rule> rules, RewriteJobBuilder rewriteJobBuilder) {
-        super(JobType.TOP_DOWN_REWRITE, context);
+    public RootPlanTreeRewriteJob(List<Rule> rules, RewriteJobBuilder rewriteJobBuilder, boolean once) {
         this.rules = Objects.requireNonNull(rules, "rules cannot be null");
         this.rewriteJobBuilder = Objects.requireNonNull(rewriteJobBuilder, "rewriteJobBuilder cannot be null");
+        this.once = once;
     }
 
     @Override
-    public void execute() {
-        Plan root = context.getCascadesContext().getRewritePlan();
+    public void execute(JobContext context) {
+        CascadesContext cascadesContext = context.getCascadesContext();
+        // get plan from the cascades context
+        Plan root = cascadesContext.getRewritePlan();
+        // write rewritten root plan to cascades context by the RootRewriteJobContext
         RootRewriteJobContext rewriteJobContext = new RootRewriteJobContext(root, false, context);
         Job rewriteJob = rewriteJobBuilder.build(rewriteJobContext, context, rules);
-        rewriteJob.execute();
+
+        context.getScheduleContext().pushJob(rewriteJob);
+        cascadesContext.getJobScheduler().executeJobPool(cascadesContext);
+    }
+
+    @Override
+    public boolean isOnce() {
+        return once;
     }
 
     /** RewriteJobBuilder */

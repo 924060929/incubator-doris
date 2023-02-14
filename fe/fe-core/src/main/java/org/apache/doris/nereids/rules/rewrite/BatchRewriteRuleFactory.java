@@ -15,20 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.jobs.batch;
+package org.apache.doris.nereids.rules.rewrite;
 
-import org.apache.doris.nereids.CascadesContext;
-import org.apache.doris.nereids.rules.analysis.AnalyzeSubquery;
+import org.apache.doris.nereids.rules.PlanRuleFactory;
+import org.apache.doris.nereids.rules.Rule;
+import org.apache.doris.nereids.rules.RuleFactory;
+import org.apache.doris.nereids.rules.RulePromise;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableList.Builder;
 
-/**
- * Analyze subquery.
- */
-public class AnalyzeSubqueryRulesJob extends BatchRulesJob {
-    public AnalyzeSubqueryRulesJob(CascadesContext cascadesContext) {
-        super(cascadesContext);
-        rulesJob.addAll(ImmutableList.of(
-                bottomUpBatch(ImmutableList.of(new AnalyzeSubquery()))));
+import java.util.List;
+
+/** BatchRewriteRuleFactory */
+public interface BatchRewriteRuleFactory extends PlanRuleFactory {
+    @Override
+    default RulePromise defaultPromise() {
+        return RulePromise.REWRITE;
     }
+
+    @Override
+    default List<Rule> buildRules() {
+        Builder<Rule> rules = ImmutableList.builder();
+        for (RuleFactory ruleFactory : getRuleFactories()) {
+            rules.addAll(ruleFactory.buildRules());
+        }
+        return rules.build();
+    }
+
+    List<RuleFactory> getRuleFactories();
 }

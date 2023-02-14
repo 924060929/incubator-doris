@@ -17,7 +17,8 @@
 
 package org.apache.doris.nereids.jobs.batch;
 
-import org.apache.doris.nereids.CascadesContext;
+import org.apache.doris.nereids.rules.RuleFactory;
+import org.apache.doris.nereids.rules.rewrite.BatchRewriteRuleFactory;
 import org.apache.doris.nereids.rules.rewrite.logical.ApplyPullFilterOnAgg;
 import org.apache.doris.nereids.rules.rewrite.logical.ApplyPullFilterOnProjectUnderAgg;
 import org.apache.doris.nereids.rules.rewrite.logical.EliminateFilterUnderApplyProject;
@@ -25,6 +26,8 @@ import org.apache.doris.nereids.rules.rewrite.logical.PushApplyUnderFilter;
 import org.apache.doris.nereids.rules.rewrite.logical.PushApplyUnderProject;
 
 import com.google.common.collect.ImmutableList;
+
+import java.util.List;
 
 /**
  * Adjust the plan in logicalApply so that there are no correlated columns in the subquery.
@@ -34,19 +37,17 @@ import com.google.common.collect.ImmutableList;
  * For the project and filter on AGG, try to adjust them to apply.
  * For the project and filter under AGG, bring the filter under AGG and merge it with agg.
  */
-public class AdjustApplyFromCorrelateToUnCorrelateJob extends BatchRulesJob {
-    /**
-     * Constructor.
-     */
-    public AdjustApplyFromCorrelateToUnCorrelateJob(CascadesContext cascadesContext) {
-        super(cascadesContext);
-        rulesJob.addAll(ImmutableList.of(
-                topDownBatch(ImmutableList.of(
-                        new PushApplyUnderProject(),
-                        new PushApplyUnderFilter(),
-                        new EliminateFilterUnderApplyProject(),
-                        new ApplyPullFilterOnAgg(),
-                        new ApplyPullFilterOnProjectUnderAgg()
-                ))));
+public class AdjustApplyFromCorrelateToUnCorrelateJob implements BatchRewriteRuleFactory {
+    public static final List<RuleFactory> RULES = ImmutableList.of(
+            new PushApplyUnderProject(),
+            new PushApplyUnderFilter(),
+            new EliminateFilterUnderApplyProject(),
+            new ApplyPullFilterOnAgg(),
+            new ApplyPullFilterOnProjectUnderAgg()
+    );
+
+    @Override
+    public List<RuleFactory> getRuleFactories() {
+        return RULES;
     }
 }

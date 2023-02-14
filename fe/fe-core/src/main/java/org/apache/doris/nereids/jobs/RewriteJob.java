@@ -15,21 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.jobs.batch;
+package org.apache.doris.nereids.jobs;
 
-import org.apache.doris.nereids.CascadesContext;
-import org.apache.doris.nereids.rules.analysis.CheckAnalysis;
+/** RewriteJob */
+public interface RewriteJob {
+    void execute(JobContext jobContext);
 
-import com.google.common.collect.ImmutableList;
-
-/**
- * Execute check analysis rules.
- */
-public class CheckAnalysisJob extends BatchRulesJob {
-    public CheckAnalysisJob(CascadesContext cascadesContext) {
-        super(cascadesContext);
-        rulesJob.addAll(ImmutableList.of(
-                bottomUpBatch(ImmutableList.of(new CheckAnalysis()))
-        ));
-    }
+    boolean isOnce();
 }

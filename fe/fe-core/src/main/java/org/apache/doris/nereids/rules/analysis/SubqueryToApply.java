@@ -51,7 +51,7 @@ import java.util.Set;
  * The first step is to replace the predicate corresponding to the filter where the subquery is located.
  * The second step converts the subquery into an apply node.
  */
-public class AnalyzeSubquery implements AnalysisRuleFactory {
+public class SubqueryToApply implements AnalysisRuleFactory {
     @Override
     public List<Rule> buildRules() {
         return ImmutableList.of(
@@ -66,7 +66,7 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
                     // first step: Replace the subquery of predicate in LogicalFilter
                     // second step: Replace subquery with LogicalApply
                     return new LogicalFilter<>(new ReplaceSubquery().replace(filter.getConjuncts()),
-                            analyzedSubquery(
+                            subqueryToApply(
                             subqueryExprs, filter.child(), ctx.cascadesContext
                     ));
                 })
@@ -89,7 +89,7 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
                    return new LogicalProject(project.getProjects().stream()
                            .map(p -> p.withChildren(new ReplaceSubquery().replace(p)))
                            .collect(ImmutableList.toImmutableList()),
-                           analyzedSubquery(
+                           subqueryToApply(
                                    subqueryExprs, project.child(), ctx.cascadesContext
                            ));
                })
@@ -97,7 +97,7 @@ public class AnalyzeSubquery implements AnalysisRuleFactory {
         );
     }
 
-    private Plan analyzedSubquery(Set<SubqueryExpr> subqueryExprs,
+    private Plan subqueryToApply(Set<SubqueryExpr> subqueryExprs,
             Plan childPlan, CascadesContext ctx) {
         Plan tmpPlan = childPlan;
         for (SubqueryExpr subqueryExpr : subqueryExprs) {

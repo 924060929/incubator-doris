@@ -17,21 +17,21 @@
 
 package org.apache.doris.nereids.jobs.rewrite;
 
-import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.Job;
 import org.apache.doris.nereids.jobs.JobContext;
-import org.apache.doris.nereids.jobs.JobType;
+import org.apache.doris.nereids.jobs.RewriteJob;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanRewriter;
 
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Use visitor to rewrite the plan.
  */
-public class VisitorRewriteJob extends Job {
+public class VisitorRewriteJob implements RewriteJob {
     private final RuleType ruleType;
 
     private final DefaultPlanRewriter<JobContext> planRewriter;
@@ -39,15 +39,14 @@ public class VisitorRewriteJob extends Job {
     /**
      * Constructor.
      */
-    public VisitorRewriteJob(CascadesContext cascadesContext,
-            DefaultPlanRewriter<JobContext> rewriter, RuleType ruleType) {
-        super(JobType.VISITOR_REWRITE, cascadesContext.getCurrentJobContext(), true);
+    public VisitorRewriteJob(DefaultPlanRewriter<JobContext> rewriter, RuleType ruleType) {
         this.ruleType = Objects.requireNonNull(ruleType, "ruleType cannot be null");
         this.planRewriter = Objects.requireNonNull(rewriter, "planRewriter cannot be null");
     }
 
     @Override
-    public void execute() {
+    public void execute(JobContext context) {
+        Set<String> disableRules = Job.getDisableRules(context);
         if (disableRules.contains(ruleType.name().toUpperCase(Locale.ROOT))) {
             return;
         }
@@ -58,4 +57,8 @@ public class VisitorRewriteJob extends Job {
         context.getCascadesContext().setRewritePlan(rewrittenRoot);
     }
 
+    @Override
+    public boolean isOnce() {
+        return false;
+    }
 }

@@ -58,6 +58,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.Stack;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 
 /**
  * Context used in memo.
@@ -83,6 +84,8 @@ public class CascadesContext implements ScheduleContext, PlanSource {
     private List<Table> tables = null;
 
     private boolean isRewriteRoot;
+
+    private Optional<Scope> outerScope = Optional.empty();
 
     public CascadesContext(Plan plan, Memo memo, StatementContext statementContext,
             PhysicalProperties requestProperties) {
@@ -129,10 +132,6 @@ public class CascadesContext implements ScheduleContext, PlanSource {
 
     public NereidsAnalyzer newAnalyzer() {
         return new NereidsAnalyzer(this);
-    }
-
-    public NereidsAnalyzer newAnalyzer(Optional<Scope> outerScope) {
-        return new NereidsAnalyzer(this, outerScope);
     }
 
     @Override
@@ -244,6 +243,14 @@ public class CascadesContext implements ScheduleContext, PlanSource {
 
     public boolean isRewriteRoot() {
         return isRewriteRoot;
+    }
+
+    public Optional<Scope> getOuterScope() {
+        return outerScope;
+    }
+
+    public void setOuterScope(@Nullable Scope outerScope) {
+        this.outerScope = Optional.ofNullable(outerScope);
     }
 
     private CascadesContext execute(Job job) {

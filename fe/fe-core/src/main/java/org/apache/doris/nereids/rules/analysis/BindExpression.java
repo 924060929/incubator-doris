@@ -79,7 +79,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -92,13 +91,8 @@ import java.util.stream.Stream;
 @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
 public class BindExpression implements AnalysisRuleFactory {
 
-    private final Optional<Scope> outerScope;
-
-    public BindExpression(Optional<Scope> outerScope) {
-        this.outerScope = Objects.requireNonNull(outerScope, "outerScope cannot be null");
-    }
-
-    private Scope toScope(List<Slot> slots) {
+    private Scope toScope(CascadesContext cascadesContext, List<Slot> slots) {
+        Optional<Scope> outerScope = cascadesContext.getOuterScope();
         if (outerScope.isPresent()) {
             return new Scope(outerScope, slots, outerScope.get().getSubquery());
         } else {
@@ -150,7 +144,7 @@ public class BindExpression implements AnalysisRuleFactory {
                     // the most right slot is matched with priority.
                     Collections.reverse(leftOutput);
                     List<Expression> leftSlots = new ArrayList<>();
-                    Scope scope = toScope(leftOutput.stream()
+                    Scope scope = toScope(ctx.cascadesContext, leftOutput.stream()
                             .filter(s -> !slotNames.contains(s.getName()))
                             .peek(s -> slotNames.add(s.getName()))
                             .collect(Collectors.toList()));
@@ -159,7 +153,7 @@ public class BindExpression implements AnalysisRuleFactory {
                         leftSlots.add(expression);
                     }
                     slotNames.clear();
-                    scope = toScope(lj.right().getOutput().stream()
+                    scope = toScope(ctx.cascadesContext, lj.right().getOutput().stream()
                             .filter(s -> !slotNames.contains(s.getName()))
                             .peek(s -> slotNames.add(s.getName()))
                             .collect(Collectors.toList()));
@@ -290,9 +284,10 @@ public class BindExpression implements AnalysisRuleFactory {
 
                     boundSlots.addAll(outputSlots);
                     SlotBinder binder = new SlotBinder(
-                            toScope(Lists.newArrayList(boundSlots)), ctx.cascadesContext);
+                            toScope(ctx.cascadesContext, ImmutableList.copyOf(boundSlots)), ctx.cascadesContext);
                     SlotBinder childBinder = new SlotBinder(
-                            toScope(new ArrayList<>(agg.child().getOutputSet())), ctx.cascadesContext);
+                            toScope(ctx.cascadesContext, ImmutableList.copyOf(agg.child().getOutputSet())),
+                            ctx.cascadesContext);
 
                     List<Expression> groupBy = replacedGroupBy.stream()
                             .map(expression -> {
@@ -568,7 +563,7 @@ public class BindExpression implements AnalysisRuleFactory {
 
     @SuppressWarnings("unchecked")
     private <E extends Expression> E bindSlot(E expr, Plan input, CascadesContext cascadesContext) {
-        return (E) new SlotBinder(toScope(input.getOutput()), cascadesContext).bind(expr);
+        return (E) new SlotBinder(toScope(cascadesContext, input.getOutput()), cascadesContext).bind(expr);
     }
 
     @SuppressWarnings("unchecked")
@@ -576,7 +571,7 @@ public class BindExpression implements AnalysisRuleFactory {
         List<Slot> boundedSlots = inputs.stream()
                 .flatMap(input -> input.getOutput().stream())
                 .collect(Collectors.toList());
-        return (E) new SlotBinder(toScope(boundedSlots), cascadesContext).bind(expr);
+        return (E) new SlotBinder(toScope(cascadesContext, boundedSlots), cascadesContext).bind(expr);
     }
 
     @SuppressWarnings("unchecked")

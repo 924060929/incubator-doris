@@ -18,17 +18,25 @@
 package org.apache.doris.nereids.jobs.batch;
 
 import org.apache.doris.nereids.CascadesContext;
-import org.apache.doris.nereids.rules.analysis.AdjustAggregateNullableForEmptySet;
+import org.apache.doris.nereids.jobs.cascades.OptimizeGroupJob;
 
-import com.google.common.collect.ImmutableList;
+import java.util.Objects;
 
 /**
- * Analyze subquery.
+ * cascade optimizer.
  */
-public class AdjustAggregateNullableForEmptySetJob extends BatchRulesJob {
-    public AdjustAggregateNullableForEmptySetJob(CascadesContext cascadesContext) {
-        super(cascadesContext);
-        rulesJob.addAll(ImmutableList.of(
-                bottomUpBatch(ImmutableList.of(new AdjustAggregateNullableForEmptySet()))));
+public class CascadesOptimizer {
+    private CascadesContext cascadesContext;
+
+    public CascadesOptimizer(CascadesContext cascadesContext) {
+        this.cascadesContext = Objects.requireNonNull(cascadesContext, "cascadesContext cannot be null");
+    }
+
+    public void execute() {
+        cascadesContext.pushJob(new OptimizeGroupJob(
+                cascadesContext.getMemo().getRoot(),
+                cascadesContext.getCurrentJobContext())
+        );
+        cascadesContext.getJobScheduler().executeJobPool(cascadesContext);
     }
 }

@@ -26,8 +26,8 @@ import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
 import org.apache.doris.nereids.glue.translator.PhysicalPlanTranslator;
 import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
-import org.apache.doris.nereids.jobs.batch.NereidsRewriteJobExecutor;
-import org.apache.doris.nereids.jobs.batch.OptimizeRulesJob;
+import org.apache.doris.nereids.jobs.batch.CascadesOptimizer;
+import org.apache.doris.nereids.jobs.batch.NereidsRewriter;
 import org.apache.doris.nereids.jobs.cascades.DeriveStatsJob;
 import org.apache.doris.nereids.jobs.joinorder.JoinOrderJob;
 import org.apache.doris.nereids.memo.CopyInResult;
@@ -210,7 +210,7 @@ public class NereidsPlanner extends Planner {
      * Logical plan rewrite based on a series of heuristic rules.
      */
     private void rewrite() {
-        new NereidsRewriteJobExecutor(cascadesContext).execute();
+        new NereidsRewriter(cascadesContext).execute();
     }
 
     private void initMemo() {
@@ -244,7 +244,7 @@ public class NereidsPlanner extends Planner {
      * try to find best plan under the guidance of statistic information and cost model.
      */
     private void optimize() {
-        new OptimizeRulesJob(cascadesContext).execute();
+        new CascadesOptimizer(cascadesContext).execute();
     }
 
     private PhysicalPlan postProcess(PhysicalPlan physicalPlan) {
