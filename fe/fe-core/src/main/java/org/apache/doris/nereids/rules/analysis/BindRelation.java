@@ -205,10 +205,8 @@ public class BindRelation extends OneAnalysisRuleFactory {
 
     private Plan parseAndAnalyzeView(String viewSql, CascadesContext parentContext) {
         LogicalPlan parsedViewPlan = new NereidsParser().parseSingle(viewSql);
-        CascadesContext viewContext = new CascadesContext(parsedViewPlan, null, parentContext.getStatementContext(),
-                PhysicalProperties.ANY);
-        // CascadesContext viewContext = new Memo(parsedViewPlan)
-        //         .newCascadesContext(parentContext.getStatementContext());
+        CascadesContext viewContext = CascadesContext.newRewriteContext(
+                parentContext.getStatementContext(), parsedViewPlan, PhysicalProperties.ANY);
         viewContext.newAnalyzer().analyze();
 
         // we should remove all group expression of the plan which in other memo, so the groupId would not conflict

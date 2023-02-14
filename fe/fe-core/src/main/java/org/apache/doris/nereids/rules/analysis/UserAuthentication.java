@@ -33,7 +33,8 @@ public class UserAuthentication extends OneAnalysisRuleFactory {
 
     @Override
     public Rule build() {
-        return logicalRelation().thenApply(ctx -> checkPermission(ctx.root, ctx.connectContext))
+        return logicalRelation()
+                .thenApply(ctx -> checkPermission(ctx.root, ctx.connectContext))
                 .toRule(RuleType.RELATION_AUTHENTICATION);
     }
 
@@ -45,7 +46,6 @@ public class UserAuthentication extends OneAnalysisRuleFactory {
                     ConnectContext.get().getQualifiedUser(), ConnectContext.get().getRemoteIP(),
                     dbName + ": " + tableName);
             throw new AnalysisException(message);
-
         }
         return relation;
     }

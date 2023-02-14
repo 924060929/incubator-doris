@@ -122,6 +122,11 @@ public class CascadesContext implements ScheduleContext, PlanSource {
         return new CascadesContext(initPlan, null, statementContext, requireProperties);
     }
 
+    public static CascadesContext newRewriteContext(StatementContext statementContext,
+            Plan initPlan, CTEContext cteContext) {
+        return new CascadesContext(initPlan, null, statementContext, cteContext, PhysicalProperties.ANY);
+    }
+
     public void toMemo() {
         this.memo = new Memo(plan);
     }

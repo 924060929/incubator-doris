@@ -22,6 +22,7 @@ import org.apache.doris.nereids.jobs.RewriteJob;
 import org.apache.doris.nereids.rules.RuleSet;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.analysis.AdjustAggregateNullableForEmptySet;
+import org.apache.doris.nereids.rules.analysis.AvgDistinctToSumDivCount;
 import org.apache.doris.nereids.rules.analysis.CheckAfterRewrite;
 import org.apache.doris.nereids.rules.analysis.LogicalSubQueryAliasToLogicalProject;
 import org.apache.doris.nereids.rules.expression.rewrite.ExpressionNormalization;
@@ -90,6 +91,7 @@ public class NereidsRewriter extends BatchRewriteJob {
                     new AdjustApplyFromCorrelateToUnCorrelateJob(),
                     new ConvertApplyToJoinJob(),
 
+                    new AvgDistinctToSumDivCount(),
                     new EliminateGroupByConstant(),
                     new NormalizeAggregate(),
                     new ExtractFilterFromCrossJoin(),

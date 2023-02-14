@@ -20,7 +20,6 @@ package org.apache.doris.nereids.rules.analysis;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.analyzer.CTEContext;
 import org.apache.doris.nereids.exceptions.AnalysisException;
-import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.trees.expressions.Slot;
@@ -69,7 +68,7 @@ public class RegisterCTE extends OneAnalysisRuleFactory {
 
             Function<Plan, LogicalPlan> analyzeCte = parsePlan -> {
                 CascadesContext localCascadesContext = CascadesContext.newRewriteContext(
-                        cascadesContext.getStatementContext(), parsePlan, PhysicalProperties.ANY);
+                        cascadesContext.getStatementContext(), parsePlan, localCteContext);
                 localCascadesContext.newAnalyzer().analyze();
                 return (LogicalPlan) localCascadesContext.getRewritePlan();
             };

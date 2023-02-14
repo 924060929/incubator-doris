@@ -46,7 +46,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * AnalyzeSubquery. translate from subquery to LogicalApply.
+ * SubqueryToApply. translate from subquery to LogicalApply.
  * In two steps
  * The first step is to replace the predicate corresponding to the filter where the subquery is located.
  * The second step converts the subquery into an apply node.
@@ -55,7 +55,7 @@ public class SubqueryToApply implements AnalysisRuleFactory {
     @Override
     public List<Rule> buildRules() {
         return ImmutableList.of(
-            RuleType.ANALYZE_FILTER_SUBQUERY.build(
+            RuleType.FILTER_SUBQUERY_TO_APPLY.build(
                 logicalFilter().thenApply(ctx -> {
                     LogicalFilter<Plan> filter = ctx.root;
                     Set<SubqueryExpr> subqueryExprs = filter.getPredicate().collect(SubqueryExpr.class::isInstance);
@@ -71,7 +71,7 @@ public class SubqueryToApply implements AnalysisRuleFactory {
                     ));
                 })
             ),
-           RuleType.ANALYZE_PROJECT_SUBQUERY.build(
+            RuleType.PROJECT_SUBQUERY_TO_APPLY.build(
                logicalProject().thenApply(ctx -> {
                    LogicalProject<Plan> project = ctx.root;
                    Set<SubqueryExpr> subqueryExprs = new HashSet<>();
@@ -93,7 +93,7 @@ public class SubqueryToApply implements AnalysisRuleFactory {
                                    subqueryExprs, project.child(), ctx.cascadesContext
                            ));
                })
-           )
+            )
         );
     }
 

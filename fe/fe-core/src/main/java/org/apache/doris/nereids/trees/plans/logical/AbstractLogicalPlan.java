@@ -46,7 +46,8 @@ public abstract class AbstractLogicalPlan extends AbstractPlan implements Logica
 
     @Override
     public LogicalProperties computeLogicalProperties() {
-        boolean hasUnboundChild = children.stream().map(Plan::getLogicalProperties)
+        boolean hasUnboundChild = children.stream()
+                .map(Plan::getLogicalProperties)
                 .anyMatch(UnboundLogicalProperties.class::isInstance);
         if (hasUnboundChild || hasUnboundExpression()) {
             return UnboundLogicalProperties.INSTANCE;

@@ -20,7 +20,6 @@ package org.apache.doris.nereids.jobs.batch;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.RewriteJob;
 import org.apache.doris.nereids.rules.analysis.AdjustAggregateNullableForEmptySet;
-import org.apache.doris.nereids.rules.analysis.AvgDistinctToSumDivCount;
 import org.apache.doris.nereids.rules.analysis.BindExpression;
 import org.apache.doris.nereids.rules.analysis.BindRelation;
 import org.apache.doris.nereids.rules.analysis.CheckAnalysis;
@@ -58,7 +57,6 @@ public class AnalyzeRulesJob extends BatchRewriteJob {
                 // should make sure isDistinct property is correctly passed around.
                 // please see rule BindSlotReference or BindFunction for example
                 new ProjectWithDistinctToAggregate(),
-                new AvgDistinctToSumDivCount(),
                 new ResolveOrdinalInOrderByAndGroupBy(),
                 new ReplaceExpressionByChildOutput(),
                 new HideOneRowRelationUnderUnion()
@@ -81,11 +79,6 @@ public class AnalyzeRulesJob extends BatchRewriteJob {
      */
     public AnalyzeRulesJob(CascadesContext cascadesContext) {
         super(cascadesContext);
-    }
-
-    @Override
-    public void execute() {
-        super.execute();
     }
 
     @Override

@@ -102,8 +102,8 @@ public enum RuleType {
     INFER_PREDICATES(RuleTypeClass.REWRITE),
 
     // subquery analyze
-    ANALYZE_FILTER_SUBQUERY(RuleTypeClass.REWRITE),
-    ANALYZE_PROJECT_SUBQUERY(RuleTypeClass.REWRITE),
+    FILTER_SUBQUERY_TO_APPLY(RuleTypeClass.REWRITE),
+    PROJECT_SUBQUERY_TO_APPLY(RuleTypeClass.REWRITE),
     // subquery rewrite rule
     ELIMINATE_LIMIT_UNDER_APPLY(RuleTypeClass.REWRITE),
     ELIMINATE_SORT_UNDER_APPLY(RuleTypeClass.REWRITE),
