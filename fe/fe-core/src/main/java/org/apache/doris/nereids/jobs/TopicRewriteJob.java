@@ -15,30 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.jobs.batch;
-
-import org.apache.doris.nereids.rules.RuleFactory;
-import org.apache.doris.nereids.rules.rewrite.BatchRewriteRuleFactory;
-import org.apache.doris.nereids.rules.rewrite.logical.ExistsApplyToJoin;
-import org.apache.doris.nereids.rules.rewrite.logical.InApplyToJoin;
-import org.apache.doris.nereids.rules.rewrite.logical.ScalarApplyToJoin;
+package org.apache.doris.nereids.jobs;
 
 import com.google.common.collect.ImmutableList;
 
 import java.util.List;
+import java.util.stream.Stream;
 
-/**
- * Convert logicalApply without a correlated to a logicalJoin.
- */
-public class ConvertApplyToJoinJob implements BatchRewriteRuleFactory {
-    public static final List<RuleFactory> RULES = ImmutableList.of(
-            new ScalarApplyToJoin(),
-            new InApplyToJoin(),
-            new ExistsApplyToJoin()
-    );
+/** TopicRewriteJob */
+public class TopicRewriteJob implements RewriteJob {
+    public final String topicName;
+    public final List<RewriteJob> jobs;
+
+    /** constructor */
+    public TopicRewriteJob(String topicName, List<RewriteJob> jobs) {
+        this.topicName = topicName;
+        this.jobs = jobs.stream()
+                .flatMap(job -> job instanceof TopicRewriteJob
+                        ? ((TopicRewriteJob) job).jobs.stream()
+                        : Stream.of(job)
+                )
+                .collect(ImmutableList.toImmutableList());
+    }
 
     @Override
-    public List<RuleFactory> getRuleFactories() {
-        return RULES;
+    public void execute(JobContext jobContext) {
+        for (RewriteJob job : jobs) {
+            job.execute(jobContext);
+        }
+    }
+
+    @Override
+    public boolean isOnce() {
+        return true;
     }
 }

@@ -15,26 +15,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.trees.plans.logical;
+package org.apache.doris.nereids.jobs.batch;
 
-import org.apache.doris.nereids.memo.GroupExpression;
-import org.apache.doris.nereids.properties.LogicalProperties;
-import org.apache.doris.nereids.trees.expressions.Slot;
-import org.apache.doris.nereids.trees.plans.LeafPlan;
-import org.apache.doris.nereids.trees.plans.PlanType;
+import org.apache.doris.nereids.rules.RuleFactory;
+import org.apache.doris.nereids.rules.rewrite.BatchRewriteRuleFactory;
+import org.apache.doris.nereids.rules.rewrite.logical.ExistsApplyToJoin;
+import org.apache.doris.nereids.rules.rewrite.logical.InApplyToJoin;
+import org.apache.doris.nereids.rules.rewrite.logical.ScalarApplyToJoin;
+
+import com.google.common.collect.ImmutableList;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
- * Abstract class for all logical plan that have no child.
+ * Convert logicalApply without a correlated to a logicalJoin.
  */
-public abstract class LogicalLeaf extends AbstractLogicalPlan implements LeafPlan, OutputSavePoint {
+public class ApplyToJoin implements BatchRewriteRuleFactory {
+    public static final List<RuleFactory> RULES = ImmutableList.of(
+            new ScalarApplyToJoin(),
+            new InApplyToJoin(),
+            new ExistsApplyToJoin()
+    );
 
-    public LogicalLeaf(PlanType nodeType, Optional<GroupExpression> groupExpression,
-                           Optional<LogicalProperties> logicalProperties) {
-        super(nodeType, groupExpression, logicalProperties);
+    @Override
+    public List<RuleFactory> getRuleFactories() {
+        return RULES;
     }
-
-    public abstract List<Slot> computeOutput();
 }

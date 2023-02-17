@@ -20,19 +20,24 @@ package org.apache.doris.nereids.jobs.batch;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.JobContext;
 import org.apache.doris.nereids.jobs.RewriteJob;
+import org.apache.doris.nereids.jobs.TopicRewriteJob;
+import org.apache.doris.nereids.jobs.rewrite.CustomRewriteJob;
 import org.apache.doris.nereids.jobs.rewrite.PlanTreeRewriteBottomUpJob;
 import org.apache.doris.nereids.jobs.rewrite.PlanTreeRewriteTopDownJob;
 import org.apache.doris.nereids.jobs.rewrite.RootPlanTreeRewriteJob;
-import org.apache.doris.nereids.jobs.rewrite.VisitorRewriteJob;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleFactory;
 import org.apache.doris.nereids.rules.RuleType;
-import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanRewriter;
+import org.apache.doris.nereids.trees.plans.visitor.CustomRewriter;
+
+import com.google.common.collect.ImmutableList;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * Base class for executing all jobs.
@@ -46,8 +51,20 @@ public abstract class BatchRewriteJob {
         this.cascadesContext = Objects.requireNonNull(cascadesContext, "cascadesContext can not null");
     }
 
-    public static List<RewriteJob> jobs(RewriteJob... batches) {
-        return Arrays.asList(batches);
+    public static List<RewriteJob> jobs(RewriteJob... jobs) {
+        return Arrays.stream(jobs)
+                .flatMap(job -> job instanceof TopicRewriteJob
+                    ? ((TopicRewriteJob) job).jobs.stream()
+                    : Stream.of(job)
+                ).collect(ImmutableList.toImmutableList());
+    }
+
+    public static TopicRewriteJob topic(String topicName, RewriteJob... jobs) {
+        return new TopicRewriteJob(topicName, Arrays.asList(jobs));
+    }
+
+    public static RewriteJob bottomUp(String batchName, RuleFactory... ruleFactories) {
+        return bottomUp(Arrays.asList(ruleFactories));
     }
 
     public static RewriteJob bottomUp(RuleFactory... ruleFactories) {
@@ -78,8 +95,8 @@ public abstract class BatchRewriteJob {
         return new RootPlanTreeRewriteJob(rules, PlanTreeRewriteTopDownJob::new, once);
     }
 
-    public static RewriteJob visitor(RuleType ruleType, DefaultPlanRewriter<JobContext> planRewriter) {
-        return new VisitorRewriteJob(planRewriter, ruleType);
+    public static RewriteJob custom(RuleType ruleType, Supplier<CustomRewriter> planRewriter) {
+        return new CustomRewriteJob(planRewriter, ruleType);
     }
 
     /**
@@ -87,9 +104,11 @@ public abstract class BatchRewriteJob {
      */
     public void execute() {
         for (RewriteJob job : getJobs()) {
+            JobContext jobContext = cascadesContext.getCurrentJobContext();
             do {
-                job.execute(cascadesContext.getCurrentJobContext());
-            } while (!job.isOnce() && cascadesContext.getCurrentJobContext().isRewritten());
+                jobContext.setRewritten(false);
+                job.execute(jobContext);
+            } while (!job.isOnce() && jobContext.isRewritten());
         }
     }
 

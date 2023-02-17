@@ -15,22 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.jobs;
+package org.apache.doris.nereids.trees.plans.logical;
 
-/**
- * All job types in Nereids.
- */
-public enum JobType {
-    OPTIMIZE_PLAN_SET,
-    OPTIMIZE_PLAN,
-    OPTIMIZE_CHILDREN,
-    EXPLORE_PLAN_SET,
-    EXPLORE_PLAN,
-    APPLY_RULE,
-    DERIVE_STATS,
-    TOP_DOWN_REWRITE,
-    VISITOR_REWRITE,
-    BOTTOM_UP_REWRITE,
-    JOIN_ORDER,
-    LINK_PLAN;
+/** OutputSavePoint is used to point out a plan whether exist output field */
+public interface OutputSavePoint {
 }

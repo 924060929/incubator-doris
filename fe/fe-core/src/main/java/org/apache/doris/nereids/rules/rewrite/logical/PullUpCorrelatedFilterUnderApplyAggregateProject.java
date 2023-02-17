@@ -57,7 +57,7 @@ import java.util.List;
  *                         child
  * </pre>
  */
-public class ApplyPullFilterOnProjectUnderAgg extends OneRewriteRuleFactory {
+public class PullUpCorrelatedFilterUnderApplyAggregateProject extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalApply(any(), logicalAggregate(logicalProject(logicalFilter())))
@@ -80,6 +80,6 @@ public class ApplyPullFilterOnProjectUnderAgg extends OneRewriteRuleFactory {
                             agg.getOutputExpressions(), agg.isOrdinalIsResolved(), newFilter);
                     return new LogicalApply<>(apply.getCorrelationSlot(), apply.getSubqueryExpr(),
                             apply.getCorrelationFilter(), apply.left(), newAgg);
-                }).toRule(RuleType.APPLY_PULL_FILTER_ON_PROJECT_UNDER_AGG);
+                }).toRule(RuleType.PULL_UP_CORRELATED_FILTER_UNDER_APPLY_AGGREGATE_PROJECT);
     }
 }

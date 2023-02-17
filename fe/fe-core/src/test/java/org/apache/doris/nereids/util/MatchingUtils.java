@@ -47,9 +47,9 @@ public class MatchingUtils {
         }
     }
 
-    private static void assertMatches(Memo memo, Supplier<Boolean> asserter, Supplier<String> msg) {
+    private static void assertMatches(Memo memo, Supplier<Boolean> asserter, Supplier<String> planString) {
         Assertions.assertTrue(asserter.get(),
-                () -> "pattern not match, msg:\n" + msg.get() + "\n"
+                () -> "pattern not match, plan:\n" + planString.get() + "\n"
         );
     }
 

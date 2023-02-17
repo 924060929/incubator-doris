@@ -51,7 +51,7 @@ import java.util.Optional;
  *
  * eg: select k1, k2 from t1 union select 1, 2 union select d1, d2 from t2;
  */
-public abstract class LogicalSetOperation extends AbstractLogicalPlan implements SetOperation {
+public abstract class LogicalSetOperation extends AbstractLogicalPlan implements SetOperation, OutputSavePoint {
 
     // eg value: qualifier:DISTINCT
     protected final Qualifier qualifier;

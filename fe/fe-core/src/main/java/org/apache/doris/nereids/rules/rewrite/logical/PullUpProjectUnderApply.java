@@ -47,7 +47,7 @@ import java.util.List;
  *          /               \
  * Input(output:b)          child
  */
-public class PushApplyUnderProject extends OneRewriteRuleFactory {
+public class PullUpProjectUnderApply extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalApply(any(), logicalProject(any()))
@@ -64,6 +64,6 @@ public class PushApplyUnderProject extends OneRewriteRuleFactory {
                         newSlots.add(apply.right().getOutput().get(0));
                     }
                     return new LogicalProject(newSlots, newCorrelate);
-                }).toRule(RuleType.PUSH_APPLY_UNDER_PROJECT);
+                }).toRule(RuleType.PULL_UP_PROJECT_UNDER_APPLY);
     }
 }

@@ -46,7 +46,6 @@ import org.apache.doris.nereids.rules.rewrite.logical.FindHashConditionForJoin;
 import org.apache.doris.nereids.rules.rewrite.logical.InferPredicates;
 import org.apache.doris.nereids.rules.rewrite.logical.InnerToCrossJoin;
 import org.apache.doris.nereids.rules.rewrite.logical.LimitPushDown;
-import org.apache.doris.nereids.rules.rewrite.logical.MergeFilters;
 import org.apache.doris.nereids.rules.rewrite.logical.MergeProjects;
 import org.apache.doris.nereids.rules.rewrite.logical.MergeSetOperations;
 import org.apache.doris.nereids.rules.rewrite.logical.NormalizeAggregate;
@@ -62,23 +61,44 @@ import java.util.List;
  */
 public class NereidsRewriter extends BatchRewriteJob {
     private static final List<RewriteJob> REWRITE_JOBS = jobs(
-            topDown(
-                    /*
-                     * Eliminate useless operators in the subquery, including limit and sort.
-                     * Compatible with the old optimizer, the sort and limit in the subquery will not take effect,
-                     * just delete it directly.
-                     */
-                    new EliminateSpecificPlanUnderApplyJob(),
+            topic("Normalization",
+                topDown(
+                    new EliminateOrderByConstant(),
+                    new EliminateGroupByConstant(),
 
                     // MergeProjects depends on this rule
                     new LogicalSubQueryAliasToLogicalProject(),
 
-                    // AdjustApplyFromCorrelateToUnCorrelateJob and ConvertApplyToJoinJob
-                    // and SelectMaterializedIndexWithAggregate depends on this rule
-                    new MergeProjects(),
+                    // rewrite expressions, no depends
                     new ExpressionNormalization(),
                     new ExpressionOptimization(),
-                    new ExtractSingleTableExpressionFromDisjunction(),
+                    new AvgDistinctToSumDivCount(),
+                    new CountDistinctRewrite(),
+
+                    new NormalizeAggregate(),
+                    new ExtractFilterFromCrossJoin(),
+                    new AdjustAggregateNullableForEmptySet()
+                ),
+
+                // ExtractSingleTableExpressionFromDisjunction conflict to InPredicateToEqualToRule
+                // in the ExpressionNormalization, so must invoke in another job, or else run into
+                // deep loop
+                topDown(
+                        new ExtractSingleTableExpressionFromDisjunction()
+                )
+            ),
+
+            topic("Subquery unnesting", topDown(
+                    /*
+                     * Eliminate useless plans in the subquery, including limit and sort.
+                     * Compatible with the old optimizer, the sort and limit in the subquery will not take effect,
+                     * just delete it directly.
+                     */
+                    new EliminateUselessPlanUnderApply(),
+
+                    // CorrelateApplyToUnCorrelateApply and ApplyToJoin
+                    // and SelectMaterializedIndexWithAggregate depends on this rule
+                    new MergeProjects(),
 
                     /*
                      * Subquery unnesting.
@@ -87,41 +107,41 @@ public class NereidsRewriter extends BatchRewriteJob {
                      * 2. Convert logicalApply to a logicalJoin.
                      *  TODO: group these rules to make sure the result plan is what we expected.
                      */
+                    new CorrelateApplyToUnCorrelateApply(),
+                    new ApplyToJoin()
+            )),
 
-                    new AdjustApplyFromCorrelateToUnCorrelateJob(),
-                    new ConvertApplyToJoinJob(),
+            topic("Rewrite join",
+                    // ReorderJoin depends PUSH_DOWN_FILTERS
+                    topDown(RuleSet.PUSH_DOWN_FILTERS, false),
 
-                    new AvgDistinctToSumDivCount(),
-                    new EliminateGroupByConstant(),
-                    new NormalizeAggregate(),
-                    new ExtractFilterFromCrossJoin(),
-                    new EliminateOrderByConstant()
+                    topDown(
+                        new ReorderJoin(),
+                        new PushFilterInsideJoin(),
+                        new FindHashConditionForJoin(),
+                        new InnerToCrossJoin()
+                    )
             ),
-            topDown(RuleSet.PUSH_DOWN_FILTERS, false),
-            visitor(RuleType.INFER_PREDICATES, new InferPredicates()),
-            bottomUp(new AdjustAggregateNullableForEmptySet()),
-            topDown(
-                    new MergeFilters(),
-                    new ReorderJoin(),
-                    new ColumnPruning(),
-                    new PushFilterInsideJoin(),
-                    new FindHashConditionForJoin(),
-                    new InnerToCrossJoin(),
-                    new EliminateLimit(),
-                    new EliminateFilter(),
 
-                    new PruneOlapScanPartition(),
-                    new CountDistinctRewrite(),
+            topic("Column pruning and infer predicate",
+                    topDown(new ColumnPruning()),
 
-                    new SelectMaterializedIndexWithAggregate()
+                    custom(RuleType.INFER_PREDICATES, () -> new InferPredicates()),
+
+                    // column pruning create new project, so we should use PUSH_DOWN_FILTERS
+                    // to change filter-project to project-filter
+                    topDown(RuleSet.PUSH_DOWN_FILTERS, false)
             ),
-            topDown(RuleSet.PUSH_DOWN_FILTERS, false),
-            visitor(RuleType.INFER_PREDICATES, new InferPredicates()),
+
+            // this rule should invoke after ColumnPruning
+            custom(RuleType.ELIMINATE_UNNECESSARY_PROJECT, () -> new EliminateUnnecessaryProject()),
 
             // we need to execute this rule at the end of rewrite
             // to avoid two consecutive same project appear when we do optimization.
-            topDown(
-                    new EliminateUnnecessaryProject(),
+            topic("Others optimization", topDown(
+                    new EliminateLimit(),
+                    new EliminateFilter(),
+                    new PruneOlapScanPartition(),
                     new SelectMaterializedIndexWithAggregate(),
                     new SelectMaterializedIndexWithoutAggregate(),
                     new PruneOlapScanTablet(),
@@ -129,13 +149,14 @@ public class NereidsRewriter extends BatchRewriteJob {
                     new MergeSetOperations(),
                     new LimitPushDown(),
                     new BuildAggForUnion()
-            ),
+            )),
+
             // this rule batch must keep at the end of rewrite to do some plan check
-            bottomUp(
+            topic("Final rewrite and check", bottomUp(
                 new AdjustNullable(),
                 new ExpressionRewrite(CheckLegalityAfterRewrite.INSTANCE),
                 new CheckAfterRewrite()
-            )
+            ))
     );
 
     public NereidsRewriter(CascadesContext cascadesContext) {

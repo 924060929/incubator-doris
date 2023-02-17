@@ -50,7 +50,7 @@ import java.util.Set;
  *                /            \
  *      Input(output:b)    Filter(UnCorrelated predicate)
  */
-public class PushApplyUnderFilter extends OneRewriteRuleFactory {
+public class UnCorrelatedApplyFilter extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalApply(any(), logicalFilter()).when(LogicalApply::isCorrelated).then(apply -> {
@@ -70,6 +70,6 @@ public class PushApplyUnderFilter extends OneRewriteRuleFactory {
             return new LogicalApply<>(apply.getCorrelationSlot(), apply.getSubqueryExpr(),
                     ExpressionUtils.optionalAnd(correlatedPredicate),
                     apply.left(), child);
-        }).toRule(RuleType.PUSH_APPLY_UNDER_FILTER);
+        }).toRule(RuleType.UN_CORRELATED_APPLY_FILTER);
     }
 }

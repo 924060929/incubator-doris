@@ -27,21 +27,24 @@ public class RewriteJobContext {
     final RewriteJobContext parentContext;
     final int childIndexInParentContext;
     final Plan plan;
-    final Plan[] childrenResult;
+    final RewriteJobContext[] childrenContext;
+    Plan result;
 
+    /** RewriteJobContext */
     public RewriteJobContext(Plan plan, @Nullable RewriteJobContext parentContext, int childIndexInParentContext,
             boolean childrenVisited) {
         this.plan = plan;
         this.parentContext = parentContext;
         this.childIndexInParentContext = childIndexInParentContext;
         this.childrenVisited = childrenVisited;
-        this.childrenResult = new Plan[plan.arity()];
+        this.childrenContext = new RewriteJobContext[plan.arity()];
+        if (parentContext != null) {
+            parentContext.childrenContext[childIndexInParentContext] = this;
+        }
     }
 
-    public void setResultToParent(Plan childResult) {
-        if (parentContext != null) {
-            parentContext.childrenResult[childIndexInParentContext] = childResult;
-        }
+    public void setResult(Plan result) {
+        this.result = result;
     }
 
     public RewriteJobContext withChildrenVisited(boolean childrenVisited) {

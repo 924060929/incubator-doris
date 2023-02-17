@@ -61,6 +61,7 @@ public class PlanTreeRewriteBottomUpJob extends PlanTreeRewriteJob {
                 ensureChildrenRewritten();
                 return;
             case REWRITTEN:
+                rewriteJobContext.result = plan;
                 return;
             default:
                 throw new IllegalStateException("Unknown rewrite state: " + state);
@@ -82,21 +83,21 @@ public class PlanTreeRewriteBottomUpJob extends PlanTreeRewriteJob {
     }
 
     private void rewriteThis() {
-        Plan plan = linkChildren(rewriteJobContext.plan, rewriteJobContext.childrenResult);
+        Plan plan = linkChildren(rewriteJobContext.plan, rewriteJobContext.childrenContext);
         RewriteResult rewriteResult = rewrite(plan, rules, rewriteJobContext);
         if (rewriteResult.hasNewPlan) {
-            RewriteJobContext currentJobContext = rewriteJobContext.withPlan(rewriteResult.plan);
+            RewriteJobContext newJobContext = rewriteJobContext.withPlan(rewriteResult.plan);
             RewriteState state = getState(rewriteResult.plan);
             // some eliminate rule will return a rewritten plan
             if (state == RewriteState.REWRITTEN) {
-                rewriteJobContext.setResultToParent(rewriteResult.plan);
+                newJobContext.setResult(rewriteResult.plan);
                 return;
             }
-            pushJob(new PlanTreeRewriteBottomUpJob(currentJobContext, context, rules));
+            pushJob(new PlanTreeRewriteBottomUpJob(newJobContext, context, rules));
             setState(rewriteResult.plan, RewriteState.ENSURE_CHILDREN_REWRITTEN);
         } else {
             setState(rewriteResult.plan, RewriteState.REWRITTEN);
-            rewriteJobContext.setResultToParent(rewriteResult.plan);
+            rewriteJobContext.setResult(rewriteResult.plan);
         }
     }
 
@@ -108,16 +109,11 @@ public class PlanTreeRewriteBottomUpJob extends PlanTreeRewriteJob {
         List<Plan> children = plan.children();
         for (int i = children.size() - 1; i >= 0; i--) {
             Plan child = children.get(i);
-            RewriteState childState = getState(child);
-            if (childState == RewriteState.REWRITTEN) {
-                rewriteJobContext.childrenResult[i] = child;
-            } else {
-                // some rule return new plan tree, which the number of new plan node > 1,
-                // we should transform this new plan nodes too.
-                RewriteJobContext childRewriteJobContext = new RewriteJobContext(
-                        child, rewriteJobContext, i, false);
-                pushJob(new PlanTreeRewriteBottomUpJob(childRewriteJobContext, context, rules));
-            }
+            // some rule return new plan tree, which the number of new plan node > 1,
+            // we should transform this new plan nodes too.
+            RewriteJobContext childRewriteJobContext = new RewriteJobContext(
+                    child, rewriteJobContext, i, false);
+            pushJob(new PlanTreeRewriteBottomUpJob(childRewriteJobContext, context, rules));
         }
     }
 

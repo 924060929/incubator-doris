@@ -153,6 +153,11 @@ public abstract class Job implements TracerSupplier {
                 ImmutableSet.of(), SessionVariable::getDisableNereidsRules);
     }
 
+    public static boolean isTraceEnable(JobContext context) {
+        return getAndCacheSessionVariable(context, "isTraceEnable",
+                false, SessionVariable::isEnableNereidsTrace);
+    }
+
     private static <T> T getAndCacheSessionVariable(JobContext context, String cacheName,
             T defaultValue, Function<SessionVariable, T> variableSupplier) {
         CascadesContext cascadesContext = context.getCascadesContext();

@@ -36,17 +36,29 @@ public abstract class PlanTreeRewriteJob extends Job {
     }
 
     protected RewriteResult rewrite(Plan plan, List<Rule> rules, RewriteJobContext rewriteJobContext) {
-        List<Rule> validRules = getValidRules(rules);
+        boolean traceEnable = true; // isTraceEnable(context);
         boolean isRewriteRoot = rewriteJobContext.isRewriteRoot();
+        CascadesContext cascadesContext = context.getCascadesContext();
+        cascadesContext.setIsRewriteRoot(isRewriteRoot);
+        List<Rule> validRules = getValidRules(rules);
         for (Rule rule : validRules) {
             Pattern<Plan> pattern = (Pattern<Plan>) rule.getPattern();
-            CascadesContext cascadesContext = context.getCascadesContext();
-            cascadesContext.setIsRewriteRoot(isRewriteRoot);
             if (pattern.matchPlanTree(plan)) {
                 List<Plan> newPlans = rule.transform(plan, cascadesContext);
-                Preconditions.checkState(newPlans.size() == 1);
+                Preconditions.checkState(newPlans.size() == 1,
+                        "Rewrite rule should generate one plan: " + rule.getRuleType());
                 Plan newPlan = newPlans.get(0);
                 if (!newPlan.deepEquals(plan)) {
+                    String traceBefore = null;
+                    if (traceEnable) {
+                        traceBefore = getCurrentPlanTreeString();
+                    }
+                    rewriteJobContext.result = newPlan;
+                    context.setRewritten(true);
+                    if (traceEnable) {
+                        String traceAfter = getCurrentPlanTreeString();
+                        printTraceLog(rule, traceBefore, traceAfter);
+                    }
                     return new RewriteResult(true, newPlan);
                 }
             }
@@ -55,20 +67,39 @@ public abstract class PlanTreeRewriteJob extends Job {
     }
 
     protected Plan linkChildrenAndParent(Plan plan, RewriteJobContext rewriteJobContext) {
-        Plan newPlan = linkChildren(plan, rewriteJobContext.childrenResult);
-        rewriteJobContext.setResultToParent(newPlan);
+        Plan newPlan = linkChildren(plan, rewriteJobContext.childrenContext);
+        rewriteJobContext.setResult(newPlan);
         return newPlan;
     }
 
-    protected Plan linkChildren(Plan plan, Plan[] newChildren) {
+    protected Plan linkChildren(Plan plan, RewriteJobContext[] childrenContext) {
         boolean changed = false;
-        for (int i = 0; i < newChildren.length; ++i) {
-            if (newChildren[i] != plan.child(i)) {
+        Plan[] newChildren = new Plan[childrenContext.length];
+        for (int i = 0; i < childrenContext.length; ++i) {
+            Plan result = childrenContext[i].result;
+            Plan oldChild = plan.child(i);
+            if (result != null && result != oldChild) {
+                newChildren[i] = result;
                 changed = true;
-                break;
+            } else {
+                newChildren[i] = oldChild;
             }
         }
         return changed ? plan.withChildren(newChildren) : plan;
+    }
+
+    private String getCurrentPlanTreeString() {
+        return context.getCascadesContext()
+                .getCurrentRootRewriteJobContext().get()
+                .getNewestPlan()
+                .treeString();
+    }
+
+    private void printTraceLog(Rule rule, String traceBefore, String traceAfter) {
+        System.out.println("========== " + getClass().getSimpleName() + " " + rule.getRuleType()
+                + " ==========\nbefore:\n" + traceBefore + "\n\nafter:\n" + traceAfter + "\n");
+        // LOGGER.info("========== {} {} ==========\nbefore:\n{}\n\nafter:\n{}\n",
+        //         getClass().getSimpleName(), rule.getRuleType(), traceBefore, traceAfter);
     }
 
     static class RewriteResult {

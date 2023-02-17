@@ -50,7 +50,7 @@ public class PlanTreeRewriteTopDownJob extends PlanTreeRewriteJob {
             RewriteJobContext newRewriteJobContext = rewriteJobContext.withChildrenVisited(true);
             pushJob(new PlanTreeRewriteTopDownJob(newRewriteJobContext, context, rules));
 
-            List<Plan> children = rewriteJobContext.plan.children();
+            List<Plan> children = newRewriteJobContext.plan.children();
             for (int i = children.size() - 1; i >= 0; i--) {
                 RewriteJobContext childRewriteJobContext = new RewriteJobContext(
                         children.get(i), newRewriteJobContext, i, false);

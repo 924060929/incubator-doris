@@ -26,8 +26,10 @@ import org.apache.doris.nereids.analyzer.Scope;
 import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.jobs.Job;
 import org.apache.doris.nereids.jobs.JobContext;
+import org.apache.doris.nereids.jobs.rewrite.CustomRewriteJob;
 import org.apache.doris.nereids.jobs.rewrite.RewriteBottomUpJob;
 import org.apache.doris.nereids.jobs.rewrite.RewriteTopDownJob;
+import org.apache.doris.nereids.jobs.rewrite.RootPlanTreeRewriteJob.RootRewriteJobContext;
 import org.apache.doris.nereids.jobs.scheduler.JobPool;
 import org.apache.doris.nereids.jobs.scheduler.JobScheduler;
 import org.apache.doris.nereids.jobs.scheduler.JobStack;
@@ -39,12 +41,14 @@ import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleFactory;
 import org.apache.doris.nereids.rules.RuleSet;
+import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.trees.expressions.SubqueryExpr;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalCTE;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSubQueryAlias;
+import org.apache.doris.nereids.trees.plans.visitor.CustomRewriter;
 import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.collect.ImmutableList;
@@ -66,6 +70,8 @@ import javax.annotation.Nullable;
 public class CascadesContext implements ScheduleContext, PlanSource {
     // in analyze/rewrite stage, the plan will storage in this field
     private Plan plan;
+
+    private Optional<RootRewriteJobContext> currentRootRewriteJobContext;
 
     // in optimize stage, the plan will storage in the memo
     private Memo memo;
@@ -131,10 +137,6 @@ public class CascadesContext implements ScheduleContext, PlanSource {
         this.memo = new Memo(plan);
     }
 
-    public Plan getRewritePlan() {
-        return plan;
-    }
-
     public NereidsAnalyzer newAnalyzer() {
         return new NereidsAnalyzer(this);
     }
@@ -194,8 +196,21 @@ public class CascadesContext implements ScheduleContext, PlanSource {
         return this;
     }
 
+    public Plan getRewritePlan() {
+        return plan;
+    }
+
     public void setRewritePlan(Plan plan) {
         this.plan = plan;
+    }
+
+    public Optional<RootRewriteJobContext> getCurrentRootRewriteJobContext() {
+        return currentRootRewriteJobContext;
+    }
+
+    public void setCurrentRootRewriteJobContext(
+            RootRewriteJobContext currentRootRewriteJobContext) {
+        this.currentRootRewriteJobContext = Optional.ofNullable(currentRootRewriteJobContext);
     }
 
     public void setSubqueryExprIsAnalyzed(SubqueryExpr subqueryExpr, boolean isAnalyzed) {
@@ -232,6 +247,13 @@ public class CascadesContext implements ScheduleContext, PlanSource {
 
     public CascadesContext topDownRewrite(List<Rule> rules) {
         return execute(new RewriteTopDownJob(memo.getRoot(), rules, currentJobContext));
+    }
+
+    public CascadesContext topDownRewrite(CustomRewriter customRewriter) {
+        CustomRewriteJob customRewriteJob = new CustomRewriteJob(() -> customRewriter, RuleType.TEST_REWRITE);
+        customRewriteJob.execute(currentJobContext);
+        toMemo();
+        return this;
     }
 
     public CTEContext getCteContext() {

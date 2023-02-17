@@ -40,7 +40,8 @@ import java.util.Optional;
 /**
  * Logical project plan.
  */
-public class LogicalProject<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD_TYPE> implements Project {
+public class LogicalProject<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD_TYPE>
+        implements Project, OutputSavePoint {
 
     private final List<NamedExpression> projects;
     private final List<NamedExpression> excepts;

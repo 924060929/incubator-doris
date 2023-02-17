@@ -22,26 +22,27 @@ import org.apache.doris.nereids.jobs.JobContext;
 import org.apache.doris.nereids.jobs.RewriteJob;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.trees.plans.Plan;
-import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanRewriter;
+import org.apache.doris.nereids.trees.plans.visitor.CustomRewriter;
 
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
- * Use visitor to rewrite the plan.
+ * Custom rewrite the plan.
  */
-public class VisitorRewriteJob implements RewriteJob {
+public class CustomRewriteJob implements RewriteJob {
     private final RuleType ruleType;
 
-    private final DefaultPlanRewriter<JobContext> planRewriter;
+    private final Supplier<CustomRewriter> customRewriter;
 
     /**
      * Constructor.
      */
-    public VisitorRewriteJob(DefaultPlanRewriter<JobContext> rewriter, RuleType ruleType) {
+    public CustomRewriteJob(Supplier<CustomRewriter> rewriter, RuleType ruleType) {
         this.ruleType = Objects.requireNonNull(ruleType, "ruleType cannot be null");
-        this.planRewriter = Objects.requireNonNull(rewriter, "planRewriter cannot be null");
+        this.customRewriter = Objects.requireNonNull(rewriter, "customRewriter cannot be null");
     }
 
     @Override
@@ -53,7 +54,7 @@ public class VisitorRewriteJob implements RewriteJob {
         Plan root = context.getCascadesContext().getRewritePlan();
         // COUNTER_TRACER.log(CounterEvent.of(Memo.get=-StateId(), CounterType.JOB_EXECUTION, group, logicalExpression,
         //         root));
-        Plan rewrittenRoot = root.accept(planRewriter, context);
+        Plan rewrittenRoot = customRewriter.get().rewriteRoot(root, context);
         context.getCascadesContext().setRewritePlan(rewrittenRoot);
     }
 

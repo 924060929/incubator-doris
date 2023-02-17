@@ -59,7 +59,7 @@ import java.util.Set;
  *                           |
  *                          child
  */
-public class EliminateFilterUnderApplyProject extends OneRewriteRuleFactory {
+public class UnCorrelatedApplyProjectFilter extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalApply(any(), logicalProject(logicalFilter()))
@@ -91,6 +91,6 @@ public class EliminateFilterUnderApplyProject extends OneRewriteRuleFactory {
                     return new LogicalApply<>(apply.getCorrelationSlot(), apply.getSubqueryExpr(),
                             ExpressionUtils.optionalAnd(correlatedPredicate),
                             apply.left(), newProject);
-                }).toRule(RuleType.ELIMINATE_FILTER_UNDER_APPLY_PROJECT);
+                }).toRule(RuleType.UN_CORRELATED_APPLY_PROJECT_FILTER);
     }
 }

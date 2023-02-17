@@ -30,7 +30,7 @@ import java.util.List;
  * Eliminate useless operators in the subquery, including limit and sort.
  * Compatible with the old optimizer, the sort and limit in the subquery will not take effect, just delete it directly.
  */
-public class EliminateSpecificPlanUnderApplyJob implements BatchRewriteRuleFactory {
+public class EliminateUselessPlanUnderApply implements BatchRewriteRuleFactory {
     public static final List<RuleFactory> RULES = ImmutableList.of(
             new EliminateLimitUnderApply(),
             new EliminateSortUnderApply()

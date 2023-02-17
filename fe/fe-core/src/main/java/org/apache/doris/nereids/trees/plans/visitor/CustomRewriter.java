@@ -15,22 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.jobs;
+package org.apache.doris.nereids.trees.plans.visitor;
 
-/**
- * All job types in Nereids.
- */
-public enum JobType {
-    OPTIMIZE_PLAN_SET,
-    OPTIMIZE_PLAN,
-    OPTIMIZE_CHILDREN,
-    EXPLORE_PLAN_SET,
-    EXPLORE_PLAN,
-    APPLY_RULE,
-    DERIVE_STATS,
-    TOP_DOWN_REWRITE,
-    VISITOR_REWRITE,
-    BOTTOM_UP_REWRITE,
-    JOIN_ORDER,
-    LINK_PLAN;
+import org.apache.doris.nereids.jobs.JobContext;
+import org.apache.doris.nereids.trees.plans.Plan;
+
+/** CustomRewriter */
+public interface CustomRewriter {
+
+    // entrance method
+    Plan rewriteRoot(Plan plan, JobContext jobContext);
 }

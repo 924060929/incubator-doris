@@ -31,8 +31,8 @@ import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleSet;
 import org.apache.doris.nereids.rules.rewrite.AggregateStrategies;
 import org.apache.doris.nereids.rules.rewrite.logical.InApplyToJoin;
-import org.apache.doris.nereids.rules.rewrite.logical.PushApplyUnderFilter;
-import org.apache.doris.nereids.rules.rewrite.logical.PushApplyUnderProject;
+import org.apache.doris.nereids.rules.rewrite.logical.PullUpProjectUnderApply;
+import org.apache.doris.nereids.rules.rewrite.logical.UnCorrelatedApplyFilter;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.ExprId;
@@ -205,8 +205,8 @@ public class RegisterCTETest extends TestWithFeService implements MemoPatternMat
 
         PlanChecker.from(connectContext)
                 .analyze(sql3)
-                .applyBottomUp(new PushApplyUnderProject())
-                .applyBottomUp(new PushApplyUnderFilter())
+                .applyBottomUp(new PullUpProjectUnderApply())
+                .applyBottomUp(new UnCorrelatedApplyFilter())
                 .applyBottomUp(new InApplyToJoin())
                 .matches(
                         logicalProject(

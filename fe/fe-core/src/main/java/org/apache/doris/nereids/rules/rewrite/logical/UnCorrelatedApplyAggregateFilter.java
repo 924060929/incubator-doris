@@ -59,7 +59,7 @@ import java.util.Map;
  *                    Filter(Uncorrelated predicate)
  * </pre>
  */
-public class ApplyPullFilterOnAgg extends OneRewriteRuleFactory {
+public class UnCorrelatedApplyAggregateFilter extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalApply(any(), logicalAggregate(logicalFilter())).when(LogicalApply::isCorrelated).then(apply -> {
@@ -89,6 +89,6 @@ public class ApplyPullFilterOnAgg extends OneRewriteRuleFactory {
                     apply.getSubqueryExpr(),
                     ExpressionUtils.optionalAnd(correlatedPredicate),
                     apply.left(), newAgg);
-        }).toRule(RuleType.APPLY_PULL_FILTER_ON_AGG);
+        }).toRule(RuleType.UN_CORRELATED_APPLY_AGGREGATE_FILTER);
     }
 }
