@@ -67,7 +67,7 @@ class Suite implements GroovyInterceptable {
     Suite(String name, String group, SuiteContext context) {
         this.name = name
         this.group = group
-        this.context = contextf
+        this.context = context
     }
 
     String getConf(String key, String defaultValue = null) {
