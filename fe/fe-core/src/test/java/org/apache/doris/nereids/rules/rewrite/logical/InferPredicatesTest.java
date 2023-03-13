@@ -493,7 +493,6 @@ public class InferPredicatesTest extends TestWithFeService implements MemoPatter
     @Test
     public void inferPredicatesTest20() {
         String sql = "select * from student left join score on student.id = score.sid and score.sid > 1 inner join course on course.id = score.sid";
-        PlanChecker.from(connectContext).analyze(sql).rewrite().printlnTree();
         PlanChecker.from(connectContext)
                 .analyze(sql)
                 .rewrite()
@@ -517,7 +516,6 @@ public class InferPredicatesTest extends TestWithFeService implements MemoPatter
     @Test
     public void inferPredicatesTest21() {
         String sql = "select * from student,score,course where student.id = score.sid and score.sid = course.id and score.sid > 1";
-        PlanChecker.from(connectContext).analyze(sql).rewrite().printlnTree();
         PlanChecker.from(connectContext)
                 .analyze(sql)
                 .rewrite()
@@ -544,10 +542,10 @@ public class InferPredicatesTest extends TestWithFeService implements MemoPatter
     @Test
     public void inferPredicatesTest22() {
         String sql = "select * from student join (select sid as id1, sid as id2, grade from score) s on student.id = s.id1 where s.id1 > 1";
-        PlanChecker.from(connectContext).analyze(sql).rewrite().printlnTree();
         PlanChecker.from(connectContext)
                 .analyze(sql)
                 .rewrite()
+                .printlnTree()
                 .matchesFromRoot(
                         logicalJoin(
                             logicalFilter(
@@ -560,6 +558,15 @@ public class InferPredicatesTest extends TestWithFeService implements MemoPatter
                             )
                         )
                 );
+    }
+
+    @Test
+    public void inferMultipleLevelPredicates() {
+        String sql = "select * from student s1 right join student s2 on s1.id = s2.id right join student s3 on s2.id = s3.id where s3.id = 1";
+        PlanChecker.from(connectContext)
+                .analyze(sql)
+                .rewrite()
+                .printlnTree();
     }
 }
 

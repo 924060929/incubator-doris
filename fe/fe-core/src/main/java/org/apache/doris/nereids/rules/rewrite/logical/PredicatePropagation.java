@@ -40,7 +40,7 @@ public class PredicatePropagation {
      * infer additional predicates.
      */
     public Set<Expression> infer(Set<Expression> predicates) {
-        Set<Expression> inferred = Sets.newHashSet();
+        Set<Expression> inferred = Sets.newLinkedHashSet();
         for (Expression predicate : predicates) {
             if (canEquivalentInfer(predicate)) {
                 List<Expression> newInferred = predicates.stream()

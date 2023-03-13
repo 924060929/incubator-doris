@@ -173,9 +173,9 @@ public class NereidsRewriter extends BatchRewriteJob {
                     bottomUp(RuleSet.PUSH_DOWN_FILTERS),
 
                     // after eliminate outer join in the PUSH_DOWN_FILTERS, we can infer more predicate and push down
-                    custom(RuleType.INFER_PREDICATES, () -> new InferPredicates()),
-
-                    bottomUp(RuleSet.PUSH_DOWN_FILTERS),
+//                    custom(RuleType.INFER_PREDICATES, () -> new InferPredicates()),
+//
+//                    bottomUp(RuleSet.PUSH_DOWN_FILTERS),
 
                     // after eliminate outer join, we can move some filters to join.otherJoinConjuncts,
                     // this can help to translate plan to backend
