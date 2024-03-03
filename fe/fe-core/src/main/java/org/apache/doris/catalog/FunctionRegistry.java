@@ -98,10 +98,15 @@ public class FunctionRegistry {
                 String combinatorSuffix = AggStateFunctionBuilder.getCombinatorSuffix(name);
                 functionBuilders = name2InternalBuiltinBuilders.get(nestedName.toLowerCase());
                 if (functionBuilders != null) {
-                    functionBuilders = functionBuilders.stream()
-                            .map(builder -> new AggStateFunctionBuilder(combinatorSuffix, builder))
-                            .filter(functionBuilder -> functionBuilder.canApply(arguments))
-                            .collect(Collectors.toList());
+                    List<FunctionBuilder> candidateBuilders = Lists.newArrayListWithCapacity(arguments.size());
+                    for (FunctionBuilder functionBuilder : functionBuilders) {
+                        AggStateFunctionBuilder aggStateFunctionBuilder
+                                = new AggStateFunctionBuilder(combinatorSuffix, functionBuilder);
+                        if (aggStateFunctionBuilder.canApply(arguments)) {
+                            candidateBuilders.add(functionBuilder);
+                        }
+                    }
+                    functionBuilders = candidateBuilders;
                 }
             }
         }
@@ -115,9 +120,12 @@ public class FunctionRegistry {
         }
 
         // check the arity and type
-        List<FunctionBuilder> candidateBuilders = functionBuilders.stream()
-                .filter(functionBuilder -> functionBuilder.canApply(arguments))
-                .collect(Collectors.toList());
+        List<FunctionBuilder> candidateBuilders = Lists.newArrayListWithCapacity(arguments.size());
+        for (FunctionBuilder functionBuilder : functionBuilders) {
+            if (functionBuilder.canApply(arguments)) {
+                candidateBuilders.add(functionBuilder);
+            }
+        }
         if (candidateBuilders.isEmpty()) {
             String candidateHints = getCandidateHint(name, functionBuilders);
             throw new AnalysisException("Can not found function '" + qualifiedName
