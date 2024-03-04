@@ -186,13 +186,11 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
     @Override
     public Slot visitUnboundSlot(UnboundSlot unboundSlot, ExpressionRewriteContext context) {
         Optional<Scope> outerScope = getDefaultScope().getOuterScope();
-        Optional<List<Slot>> boundedOpt = Optional.of(
-                bindSlotByMultiScopes(unboundSlot, getScopes())
-        );
+        Optional<List<Slot>> boundedOpt = Optional.of(bindSlotByInnerScopes(unboundSlot));
         boolean foundInThisScope = !boundedOpt.get().isEmpty();
         // Currently only looking for symbols on the previous level.
         if (bindSlotInOuterScope && !foundInThisScope && outerScope.isPresent()) {
-            boundedOpt = Optional.of(bindSlot(unboundSlot, outerScope.get()));
+            boundedOpt = Optional.of(bindSlotByScope(unboundSlot, outerScope.get()));
         }
         List<Slot> bounded = boundedOpt.get();
         switch (bounded.size()) {
@@ -589,9 +587,13 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         return new BoundStar(slots);
     }
 
+    protected List<Slot> bindSlotByInnerScopes(UnboundSlot unboundSlot) {
+        return bindSlotByMultiScopes(unboundSlot, getScopes());
+    }
+
     private List<Slot> bindSlotByMultiScopes(UnboundSlot unboundSlot, List<Scope> scopes) {
         for (Scope candidateScope : scopes) {
-            List<Slot> slots = bindSlot(unboundSlot, candidateScope);
+            List<Slot> slots = bindSlotByScope(unboundSlot, candidateScope);
             if (!slots.isEmpty()) {
                 return slots;
             }
@@ -599,7 +601,8 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         return ImmutableList.of();
     }
 
-    private List<Slot> bindSlot(UnboundSlot unboundSlot, Scope scope) {
+    /** bindSlotByScope */
+    public List<Slot> bindSlotByScope(UnboundSlot unboundSlot, Scope scope) {
         // return scope.getSlots().stream().distinct().filter(boundSlot -> {
         //     if (boundSlot instanceof SlotReference
         //             && ((SlotReference) boundSlot).hasSubColPath()) {
@@ -723,7 +726,7 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
                 .build());
     }
 
-    private boolean shouldSlotBindBy(int namePartSize, Slot boundSlot) {
+    private boolean shouldBindSlotBy(int namePartSize, Slot boundSlot) {
         if (boundSlot instanceof SlotReference
                 && ((SlotReference) boundSlot).hasSubColPath()) {
             // already bounded
@@ -739,7 +742,7 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         int namePartSize = 1;
         Builder<Slot> usedSlots = ImmutableList.builderWithExpectedSize(1);
         for (Slot boundSlot : scope.findSlotIgnoreCase(name)) {
-            if (!shouldSlotBindBy(namePartSize, boundSlot)) {
+            if (!shouldBindSlotBy(namePartSize, boundSlot)) {
                 continue;
             }
             // set sql case as alias
@@ -752,7 +755,7 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         int namePartSize = 2;
         Builder<Slot> usedSlots = ImmutableList.builderWithExpectedSize(1);
         for (Slot boundSlot : scope.findSlotIgnoreCase(name)) {
-            if (!shouldSlotBindBy(namePartSize, boundSlot)) {
+            if (!shouldBindSlotBy(namePartSize, boundSlot)) {
                 continue;
             }
             List<String> boundSlotQualifier = boundSlot.getQualifier();
@@ -770,7 +773,7 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         int namePartSize = 3;
         Builder<Slot> usedSlots = ImmutableList.builderWithExpectedSize(1);
         for (Slot boundSlot : scope.findSlotIgnoreCase(name)) {
-            if (!shouldSlotBindBy(namePartSize, boundSlot)) {
+            if (!shouldBindSlotBy(namePartSize, boundSlot)) {
                 continue;
             }
             List<String> boundSlotQualifier = boundSlot.getQualifier();
@@ -789,7 +792,7 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         int namePartSize = 4;
         Builder<Slot> usedSlots = ImmutableList.builderWithExpectedSize(1);
         for (Slot boundSlot : scope.findSlotIgnoreCase(name)) {
-            if (!shouldSlotBindBy(namePartSize, boundSlot)) {
+            if (!shouldBindSlotBy(namePartSize, boundSlot)) {
                 continue;
             }
             List<String> boundSlotQualifier = boundSlot.getQualifier();

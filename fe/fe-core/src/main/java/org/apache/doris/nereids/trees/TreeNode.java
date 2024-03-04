@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableSet;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiFunction;
@@ -176,6 +177,18 @@ public interface TreeNode<NODE_TYPE extends TreeNode<NODE_TYPE>> {
         func.accept(this);
         for (NODE_TYPE child : children()) {
             child.foreach(func);
+        }
+    }
+
+    /** foreachBreath */
+    default void foreachBreath(Predicate<TreeNode<NODE_TYPE>> func) {
+        LinkedList<TreeNode<NODE_TYPE>> queue = new LinkedList<>();
+        queue.add(this);
+        while (!queue.isEmpty()) {
+            TreeNode<NODE_TYPE> current = queue.pollFirst();
+            if (!func.test(current)) {
+                queue.addAll(current.children());
+            }
         }
     }
 

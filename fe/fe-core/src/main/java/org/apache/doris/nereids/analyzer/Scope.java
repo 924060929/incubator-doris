@@ -22,7 +22,8 @@ import org.apache.doris.nereids.trees.expressions.SubqueryExpr;
 import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.base.Suppliers;
-import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.LinkedListMultimap;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Sets;
 
 import java.util.List;
@@ -62,7 +63,7 @@ public class Scope {
     private final List<Slot> slots;
     private final Optional<SubqueryExpr> ownerSubquery;
     private final Set<Slot> correlatedSlots;
-    private final Supplier<ArrayListMultimap<String, Slot>> nameToSlot;
+    private final Supplier<ListMultimap<String, Slot>> nameToSlot;
 
     public Scope(List<Slot> slots) {
         this(Optional.empty(), slots, Optional.empty());
@@ -93,12 +94,20 @@ public class Scope {
         return correlatedSlots;
     }
 
+    /** findSlotIgnoreCase */
     public List<Slot> findSlotIgnoreCase(String slotName) {
+        // Builder<Slot> candidateSlots = ImmutableList.builder();
+        // for (Slot slot : slots) {
+        //     if (slot.getName().equalsIgnoreCase(slotName)) {
+        //         candidateSlots.add(slot);
+        //     }
+        // }
+        // return candidateSlots.build();
         return nameToSlot.get().get(slotName.toUpperCase(Locale.ROOT));
     }
 
-    private ArrayListMultimap<String, Slot> buildNameToSlot() {
-        ArrayListMultimap<String, Slot> map = ArrayListMultimap.create(slots.size(), 2);
+    private ListMultimap<String, Slot> buildNameToSlot() {
+        ListMultimap<String, Slot> map = LinkedListMultimap.create(slots.size());
         for (Slot slot : slots) {
             map.put(slot.getName().toUpperCase(Locale.ROOT), slot);
         }
