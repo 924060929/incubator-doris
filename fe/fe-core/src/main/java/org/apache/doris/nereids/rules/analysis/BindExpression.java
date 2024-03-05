@@ -625,6 +625,10 @@ public class BindExpression implements AnalysisRuleFactory {
     private Plan bindSortWithoutSetOperation(MatchingContext<LogicalSort<Plan>> ctx) {
         LogicalSort<Plan> sort = ctx.root;
         Plan input = sort.child();
+        // we should skip LogicalHaving to bind slot in LogicalSort;
+        if (input instanceof LogicalHaving) {
+            input = input.child(0);
+        }
         CascadesContext cascadesContext = ctx.cascadesContext;
 
         // 1. We should deduplicate the slots, otherwise the binding process will fail due to the
