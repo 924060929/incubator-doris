@@ -748,7 +748,7 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
             List<String> boundSlotQualifier = boundSlot.getQualifier();
             String boundSlotDb = boundSlotQualifier.get(boundSlotQualifier.size() - 2);
             String boundSlotTable = boundSlotQualifier.get(boundSlotQualifier.size() - 1);
-            if (!compareDbName(boundSlotDb, db) && !sameTableName(boundSlotTable, table)) {
+            if (!compareDbName(boundSlotDb, db) || !sameTableName(boundSlotTable, table)) {
                 continue;
             }
             // set sql case as alias
@@ -769,8 +769,8 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
             String boundSlotDb = boundSlotQualifier.get(boundSlotQualifier.size() - 2);
             String boundSlotTable = boundSlotQualifier.get(boundSlotQualifier.size() - 1);
             if (!boundSlotCatalog.equalsIgnoreCase(catalog)
-                    && !compareDbName(boundSlotDb, db)
-                    && !sameTableName(boundSlotTable, table)) {
+                    || !compareDbName(boundSlotDb, db)
+                    || !sameTableName(boundSlotTable, table)) {
                 continue;
             }
             // set sql case as alias

@@ -17,6 +17,8 @@
 
 package org.apache.doris.nereids.trees;
 
+import org.apache.doris.nereids.util.Utils;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableSet;
@@ -47,11 +49,7 @@ public interface TreeNode<NODE_TYPE extends TreeNode<NODE_TYPE>> {
     int arity();
 
     default NODE_TYPE withChildren(NODE_TYPE... children) {
-        Builder<NODE_TYPE> list = ImmutableList.builderWithExpectedSize(children.length);
-        for (NODE_TYPE child : children) {
-            list.add(child);
-        }
-        return withChildren(list.build());
+        return withChildren(Utils.fastToImmutableList(children));
     }
 
     NODE_TYPE withChildren(List<NODE_TYPE> children);
