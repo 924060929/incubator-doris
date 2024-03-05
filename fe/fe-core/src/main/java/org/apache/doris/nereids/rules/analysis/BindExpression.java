@@ -387,8 +387,9 @@ public class BindExpression implements AnalysisRuleFactory {
         ImmutableSet.Builder<Expression> boundConjuncts
                 = ImmutableSet.builderWithExpectedSize(having.getConjuncts().size());
         for (Expression conjunct : having.getConjuncts()) {
-            Expression boundExpr = analyzer.analyze(conjunct);
-            boundConjuncts.add(TypeCoercionUtils.castIfNotSameType(boundExpr, BooleanType.INSTANCE));
+            conjunct = analyzer.analyze(conjunct);
+            conjunct = TypeCoercionUtils.castIfNotSameType(conjunct, BooleanType.INSTANCE);
+            boundConjuncts.add(conjunct);
         }
         checkIfOutputAliasNameDuplicatedForGroupBy(boundConjuncts.build(), child.getOutput());
         return new LogicalHaving<>(boundConjuncts.build(), having.child());
@@ -416,11 +417,21 @@ public class BindExpression implements AnalysisRuleFactory {
         SimpleExprAnalyzer analyzer = buildSimpleExprAnalyzer(
                 join, cascadesContext, join.children(), true, true);
 
-        List<Expression> hashJoinConjuncts = analyzer.analyzeToList(join.getHashJoinConjuncts());
-        List<Expression> otherConjuncts = analyzer.analyzeToList(join.getOtherJoinConjuncts());
+        Builder<Expression> hashJoinConjuncts = ImmutableList.builderWithExpectedSize(join.getHashJoinConjuncts().size());
+        for (Expression hashJoinConjunct : join.getHashJoinConjuncts()) {
+            hashJoinConjunct = analyzer.analyze(hashJoinConjunct);
+            hashJoinConjunct = TypeCoercionUtils.castIfNotSameType(hashJoinConjunct, BooleanType.INSTANCE);
+            hashJoinConjuncts.add(hashJoinConjunct);
+        }
+        Builder<Expression> otherJoinConjuncts = ImmutableList.builderWithExpectedSize(join.getOtherJoinConjuncts().size());
+        for (Expression otherJoinConjunct : join.getOtherJoinConjuncts()) {
+            otherJoinConjunct = analyzer.analyze(otherJoinConjunct);
+            otherJoinConjunct = TypeCoercionUtils.castIfNotSameType(otherJoinConjunct, BooleanType.INSTANCE);
+            hashJoinConjuncts.add(otherJoinConjunct);
+        }
 
         return new LogicalJoin<>(join.getJoinType(),
-                hashJoinConjuncts, otherConjuncts,
+                hashJoinConjuncts.build(), otherJoinConjuncts.build(),
                 join.getDistributeHint(), join.getMarkJoinSlotReference(),
                 join.children(), null);
     }
