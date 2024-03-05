@@ -674,7 +674,7 @@ public class BindExpression implements AnalysisRuleFactory {
             Expression boundKey = analyzer.analyze(orderKey.getExpr());
             boundOrderKeys.add(orderKey.withExpression(boundKey));
         }
-        return sort.withOrderKeys(boundOrderKeys.build());
+        return new LogicalSort<>(boundOrderKeys.build(), sort.child());
     }
 
     /**
