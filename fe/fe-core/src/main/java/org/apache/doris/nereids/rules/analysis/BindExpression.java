@@ -574,6 +574,10 @@ public class BindExpression implements AnalysisRuleFactory {
                     // if the slot not found, or more than one candidate slots found in agg.child.output,
                     // then try to bind by agg.output
                     List<Slot> slotsInOutput = self.bindSlotByScope(unboundSlot, aggOutputScopeWithoutAggFun.get());
+                    if (slotsInOutput.isEmpty()) {
+                        return slotsInChildren;
+                    }
+
                     Builder<Expression> useOutputExpr = ImmutableList.builderWithExpectedSize(slotsInOutput.size());
                     for (Slot slotInOutput : slotsInOutput) {
                         // mappingSlot is provided by aggOutputScopeWithoutAggFun
