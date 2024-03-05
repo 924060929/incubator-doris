@@ -353,7 +353,9 @@ public class BindExpression implements AnalysisRuleFactory {
         // bind slot by child.output first
         Scope defaultScope = toScope(cascadesContext, childPlan.getOutput());
         // then bind slot by child.children.output
-        Scope backupScope = toScope(cascadesContext, PlanUtils.fastGetChildrenOutputs(childPlan.children()));
+        Supplier<Scope> backupScope = Suppliers.memoize(() ->
+                toScope(cascadesContext, PlanUtils.fastGetChildrenOutputs(childPlan.children()))
+        );
         return bindHavingByScopes(having, cascadesContext, defaultScope, backupScope);
     }
 
@@ -366,13 +368,15 @@ public class BindExpression implements AnalysisRuleFactory {
         // having(aggregate) should bind slot by aggregate.child.output first
         Scope defaultScope = toScope(cascadesContext, PlanUtils.fastGetChildrenOutputs(aggregate.children()));
         // then bind slot by aggregate.output
-        Scope backupScope = toScope(cascadesContext, aggregate.getOutput());
+        Supplier<Scope> backupScope = Suppliers.memoize(() ->
+                toScope(cascadesContext, aggregate.getOutput())
+        );
         return bindHavingByScopes(ctx.root, ctx.cascadesContext, defaultScope, backupScope);
     }
 
     private LogicalHaving<Plan> bindHavingByScopes(
             LogicalHaving<? extends Plan> having,
-            CascadesContext cascadesContext, Scope defaultScope, Scope backupScope) {
+            CascadesContext cascadesContext, Scope defaultScope, Supplier<Scope> backupScope) {
         Plan child = having.child();
 
         SimpleExprAnalyzer analyzer = buildCustomSlotBinderAnalyzer(
@@ -382,7 +386,7 @@ public class BindExpression implements AnalysisRuleFactory {
                     if (!slots.isEmpty()) {
                         return slots;
                     }
-                    return self.bindSlotByScope(unboundSlot, backupScope);
+                    return self.bindSlotByScope(unboundSlot, backupScope.get());
                 });
         ImmutableSet.Builder<Expression> boundConjuncts
                 = ImmutableSet.builderWithExpectedSize(having.getConjuncts().size());
@@ -417,17 +421,19 @@ public class BindExpression implements AnalysisRuleFactory {
         SimpleExprAnalyzer analyzer = buildSimpleExprAnalyzer(
                 join, cascadesContext, join.children(), true, true);
 
-        Builder<Expression> hashJoinConjuncts = ImmutableList.builderWithExpectedSize(join.getHashJoinConjuncts().size());
+        Builder<Expression> hashJoinConjuncts = ImmutableList.builderWithExpectedSize(
+                join.getHashJoinConjuncts().size());
         for (Expression hashJoinConjunct : join.getHashJoinConjuncts()) {
             hashJoinConjunct = analyzer.analyze(hashJoinConjunct);
             hashJoinConjunct = TypeCoercionUtils.castIfNotSameType(hashJoinConjunct, BooleanType.INSTANCE);
             hashJoinConjuncts.add(hashJoinConjunct);
         }
-        Builder<Expression> otherJoinConjuncts = ImmutableList.builderWithExpectedSize(join.getOtherJoinConjuncts().size());
+        Builder<Expression> otherJoinConjuncts = ImmutableList.builderWithExpectedSize(
+                join.getOtherJoinConjuncts().size());
         for (Expression otherJoinConjunct : join.getOtherJoinConjuncts()) {
             otherJoinConjunct = analyzer.analyze(otherJoinConjunct);
             otherJoinConjunct = TypeCoercionUtils.castIfNotSameType(otherJoinConjunct, BooleanType.INSTANCE);
-            hashJoinConjuncts.add(otherJoinConjunct);
+            otherJoinConjuncts.add(otherJoinConjunct);
         }
 
         return new LogicalJoin<>(join.getJoinType(),
