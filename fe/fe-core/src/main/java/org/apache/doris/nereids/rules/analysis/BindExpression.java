@@ -576,7 +576,7 @@ public class BindExpression implements AnalysisRuleFactory {
                     List<Slot> slotsInOutput = self.bindSlotByScope(unboundSlot, aggOutputScopeWithoutAggFun.get());
                     if (slotsInOutput.isEmpty()) {
                         // if slotsInChildren.size() > 1 && slotsInOutput.isEmpty(),
-                        // we return slotsInChildren to throw an ambiguous exception
+                        // we return slotsInChildren to throw an ambiguous slots exception
                         return slotsInChildren;
                     }
 
