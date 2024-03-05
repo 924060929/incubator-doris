@@ -662,7 +662,10 @@ public class BindExpression implements AnalysisRuleFactory {
         //        order by col1;     # order by order_col1
         //    bind order_col1 with alias_col1, then, bind it with inner_col1
         Scope inputScope = toScope(cascadesContext, input.getOutput());
-        Scope inputChildrenScope = toScope(cascadesContext, PlanUtils.fastGetChildrenOutputs(input.children()));
+
+        final Plan finalInput = input;
+        Supplier<Scope> inputChildrenScope = Suppliers.memoize(
+                () -> toScope(cascadesContext, PlanUtils.fastGetChildrenOutputs(finalInput.children())));
         SimpleExprAnalyzer analyzer = buildCustomSlotBinderAnalyzer(
                 sort, cascadesContext, inputScope, true, false,
                 (self, unboundSlot) -> {
@@ -672,7 +675,7 @@ public class BindExpression implements AnalysisRuleFactory {
                         return slots;
                     }
                     // then, try to bind slot by Scope(input.children.output)
-                    return self.bindSlotByScope(unboundSlot, inputChildrenScope);
+                    return self.bindSlotByScope(unboundSlot, inputChildrenScope.get());
                 });
 
         Builder<OrderKey> boundOrderKeys = ImmutableList.builderWithExpectedSize(sort.getOrderKeys().size());
