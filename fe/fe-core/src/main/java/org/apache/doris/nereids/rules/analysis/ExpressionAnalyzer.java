@@ -70,6 +70,7 @@ import org.apache.doris.nereids.trees.expressions.literal.IntegerLikeLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import org.apache.doris.nereids.trees.expressions.literal.StringLiteral;
 import org.apache.doris.nereids.trees.expressions.typecoercion.ImplicitCastInputTypes;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.types.ArrayType;
 import org.apache.doris.nereids.types.BigIntType;
 import org.apache.doris.nereids.types.BooleanType;
@@ -96,6 +97,7 @@ import java.util.stream.Collectors;
 /** ExpressionAnalyzer */
 public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext> {
 
+    private final Plan currentPlan;
     /*
     bounded={table.a, a}
     unbound=a
@@ -108,10 +110,12 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
      */
     private final boolean enableExactMatch;
     private final boolean bindSlotInOuterScope;
+    private boolean currentInLambda;
 
-    public ExpressionAnalyzer(Scope scope, CascadesContext cascadesContext,
+    public ExpressionAnalyzer(Plan currentPlan, Scope scope, CascadesContext cascadesContext,
             boolean enableExactMatch, boolean bindSlotInOuterScope) {
         super(scope, cascadesContext);
+        this.currentPlan = currentPlan;
         this.enableExactMatch = enableExactMatch;
         this.bindSlotInOuterScope = bindSlotInOuterScope;
     }
@@ -133,6 +137,17 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
             }
         }
         return expr;
+    }
+
+    @Override
+    public Expression visitLambda(Lambda lambda, ExpressionRewriteContext context) {
+        boolean originInLambda = currentInLambda;
+        try {
+            currentInLambda = true;
+            return super.visitLambda(lambda, context);
+        } finally {
+            currentInLambda = originInLambda;
+        }
     }
 
     /* ********************************************************************************************
@@ -191,8 +206,16 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
         List<? extends Expression> bounded = boundedOpt.get();
         switch (bounded.size()) {
             case 0:
-                // just return, give a chance to bind on another slot.
-                // if unbound finally, check will throw exception
+                if (!currentInLambda) {
+                    String tableName = StringUtils.join(unboundSlot.getQualifier(), ".");
+                    if (tableName.isEmpty()) {
+                        tableName = "table list";
+                    }
+                    throw new AnalysisException("Unknown column '"
+                            + unboundSlot.getNameParts().get(unboundSlot.getNameParts().size() - 1)
+                            + "' in '" + tableName + "' in "
+                            + currentPlan.getType().toString().substring("LOGICAL_".length()) + " clause");
+                }
                 return unboundSlot;
             case 1:
                 Expression firstBound = bounded.get(0);
