@@ -167,7 +167,7 @@ public class BindExpression implements AnalysisRuleFactory {
                 logicalSort(logicalSetOperation()).thenApply(this::bindSortWithSetOperation)
             ),
             RuleType.BINDING_HAVING_SLOT.build(
-                logicalHaving(aggregate()).when(Plan::canBind).thenApply(this::bindHavingAggregate)
+                logicalHaving(aggregate()).thenApply(this::bindHavingAggregate)
             ),
             RuleType.BINDING_HAVING_SLOT.build(
                 logicalHaving(any().whenNot(Aggregate.class::isInstance)).thenApply(this::bindHaving)
