@@ -96,13 +96,6 @@ public class Scope {
 
     /** findSlotIgnoreCase */
     public List<Slot> findSlotIgnoreCase(String slotName) {
-        // Builder<Slot> candidateSlots = ImmutableList.builder();
-        // for (Slot slot : slots) {
-        //     if (slot.getName().equalsIgnoreCase(slotName)) {
-        //         candidateSlots.add(slot);
-        //     }
-        // }
-        // return candidateSlots.build();
         return nameToSlot.get().get(slotName.toUpperCase(Locale.ROOT));
     }
 

@@ -615,49 +615,6 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
 
     /** bindSlotByScope */
     public List<Slot> bindSlotByScope(UnboundSlot unboundSlot, Scope scope) {
-        // return scope.getSlots().stream().distinct().filter(boundSlot -> {
-        //     if (boundSlot instanceof SlotReference
-        //             && ((SlotReference) boundSlot).hasSubColPath()) {
-        //         // already bounded
-        //         return false;
-        //     }
-        //     List<String> nameParts = unboundSlot.getNameParts();
-        //     int qualifierSize = boundSlot.getQualifier().size();
-        //     int namePartsSize = nameParts.size();
-        //     if (namePartsSize > qualifierSize + 1) {
-        //         return false;
-        //     }
-        //     if (namePartsSize == 1) {
-        //         return nameParts.get(0).equalsIgnoreCase(boundSlot.getName());
-        //     }
-        //     if (namePartsSize == 2) {
-        //         String qualifierTableName = boundSlot.getQualifier().get(qualifierSize - 1);
-        //         return sameTableName(qualifierTableName, nameParts.get(0))
-        //                 && boundSlot.getName().equalsIgnoreCase(nameParts.get(1));
-        //     }
-        //     if (nameParts.size() == 3) {
-        //         String qualifierTableName = boundSlot.getQualifier().get(qualifierSize - 1);
-        //         String qualifierDbName = boundSlot.getQualifier().get(qualifierSize - 2);
-        //         return compareDbName(nameParts.get(0), qualifierDbName)
-        //                 && sameTableName(qualifierTableName, nameParts.get(1))
-        //                 && boundSlot.getName().equalsIgnoreCase(nameParts.get(2));
-        //     }
-        //     // catalog.db.table.column
-        //     if (nameParts.size() == 4) {
-        //         String qualifierTableName = boundSlot.getQualifier().get(qualifierSize - 1);
-        //         String qualifierDbName = boundSlot.getQualifier().get(qualifierSize - 2);
-        //         String qualifierCatalogName = boundSlot.getQualifier().get(qualifierSize - 3);
-        //         return qualifierCatalogName.equalsIgnoreCase(nameParts.get(0))
-        //                 && compareDbName(nameParts.get(1), qualifierDbName)
-        //                 && sameTableName(qualifierTableName, nameParts.get(2))
-        //                 && boundSlot.getName().equalsIgnoreCase(nameParts.get(3));
-        //     }
-        //     //TODO: handle name parts more than three.
-        //     throw new AnalysisException("Not supported name: "
-        //             + StringUtils.join(nameParts, "."));
-        // })
-        // .map(s -> s.withName(unboundSlot.getNameParts().get(unboundSlot.getNameParts().size() - 1)))
-        // .collect(Collectors.toList());
         List<String> nameParts = unboundSlot.getNameParts();
         int namePartSize = nameParts.size();
         switch (namePartSize) {

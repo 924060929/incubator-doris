@@ -36,7 +36,6 @@ import org.apache.doris.nereids.rules.AppliedAwareRule.AppliedAwareRuleCondition
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.expression.ExpressionRewriteContext;
-import org.apache.doris.nereids.rules.expression.rules.FunctionBinder;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.BoundStar;
 import org.apache.doris.nereids.trees.expressions.DefaultValueSlot;
@@ -105,7 +104,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -666,58 +664,6 @@ public class BindExpression implements AnalysisRuleFactory {
             boundOrderKeys.add(orderKey.withExpression(boundKey));
         }
         return new LogicalSort<>(boundOrderKeys.build(), input);
-    }
-
-    private <E extends Expression> List<E> bindSlot(
-            List<E> exprList, Plan input, CascadesContext cascadesContext) {
-        List<E> slots = new ArrayList<>(exprList.size());
-        for (E expr : exprList) {
-            E result = bindSlot(expr, input, cascadesContext);
-            slots.add(result);
-        }
-        return slots;
-    }
-
-    private <E extends Expression> E bindSlot(E expr, Plan input, CascadesContext cascadesContext) {
-        return bindSlot(expr, input, cascadesContext, true, true);
-    }
-
-    private <E extends Expression> E bindSlot(E expr, Plan input, CascadesContext cascadesContext,
-            boolean enableExactMatch) {
-        return bindSlot(expr, input, cascadesContext, enableExactMatch, true);
-    }
-
-    private <E extends Expression> E bindSlot(E expr, Plan input, CascadesContext cascadesContext,
-            boolean enableExactMatch, boolean bindSlotInOuterScope) {
-        return (E) new SlotBinder(toScope(cascadesContext, input.getOutput()), cascadesContext,
-                enableExactMatch, bindSlotInOuterScope).bind(expr);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <E extends Expression> E bindSlot(E expr, List<Plan> inputs, CascadesContext cascadesContext,
-            boolean enableExactMatch) {
-        return bindSlot(expr, inputs, cascadesContext, enableExactMatch, true);
-    }
-
-    private <E extends Expression> E bindSlot(E expr, List<Plan> inputs, CascadesContext cascadesContext,
-            boolean enableExactMatch, boolean bindSlotInOuterScope) {
-        List<Slot> boundedSlots = new ArrayList<>();
-        for (Plan input : inputs) {
-            boundedSlots.addAll(input.getOutput());
-        }
-        return (E) new SlotBinder(toScope(cascadesContext, boundedSlots), cascadesContext,
-                enableExactMatch, bindSlotInOuterScope).bind(expr);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <E extends Expression> E bindSlot(E expr, List<Plan> inputs, CascadesContext cascadesContext) {
-        return bindSlot(expr, inputs, cascadesContext, true);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <E extends Expression> E bindFunction(E expr, Plan plan, CascadesContext cascadesContext) {
-        return (E) FunctionBinder.INSTANCE.rewrite(checkBoundExceptLambda(expr, plan),
-                new ExpressionRewriteContext(cascadesContext));
     }
 
     /**
