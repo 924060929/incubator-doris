@@ -65,12 +65,12 @@ public class Scope {
     private final Set<Slot> correlatedSlots;
     private final Supplier<ListMultimap<String, Slot>> nameToSlot;
 
-    public Scope(List<Slot> slots) {
+    public Scope(List<? extends Slot> slots) {
         this(Optional.empty(), slots, Optional.empty());
     }
 
     /** Scope */
-    public Scope(Optional<Scope> outerScope, List<Slot> slots, Optional<SubqueryExpr> subqueryExpr) {
+    public Scope(Optional<Scope> outerScope, List<? extends Slot> slots, Optional<SubqueryExpr> subqueryExpr) {
         this.outerScope = Objects.requireNonNull(outerScope, "outerScope can not be null");
         this.slots = Utils.fastToImmutableList(Objects.requireNonNull(slots, "slots can not be null"));
         this.ownerSubquery = Objects.requireNonNull(subqueryExpr, "subqueryExpr can not be null");
