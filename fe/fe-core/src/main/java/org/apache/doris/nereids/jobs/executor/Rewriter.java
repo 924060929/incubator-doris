@@ -30,6 +30,7 @@ import org.apache.doris.nereids.rules.analysis.LogicalSubQueryAliasToLogicalProj
 import org.apache.doris.nereids.rules.analysis.NormalizeAggregate;
 import org.apache.doris.nereids.rules.expression.CheckLegalityAfterRewrite;
 import org.apache.doris.nereids.rules.expression.ExpressionNormalization;
+import org.apache.doris.nereids.rules.expression.ExpressionNormalizationAndOptimization;
 import org.apache.doris.nereids.rules.expression.ExpressionOptimization;
 import org.apache.doris.nereids.rules.expression.ExpressionRewrite;
 import org.apache.doris.nereids.rules.rewrite.AddDefaultLimit;
@@ -152,8 +153,7 @@ public class Rewriter extends AbstractBatchJobExecutor {
                             //   such as group by key matching and replaced
                             //   but we need to do some normalization before subquery unnesting,
                             //   such as extract common expression.
-                            new ExpressionNormalization(),
-                            new ExpressionOptimization(),
+                            new ExpressionNormalizationAndOptimization(),
                             new AvgDistinctToSumDivCount(),
                             new CountDistinctRewrite(),
                             new ExtractFilterFromCrossJoin()

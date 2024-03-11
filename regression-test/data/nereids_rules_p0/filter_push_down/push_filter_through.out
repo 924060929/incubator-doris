@@ -412,7 +412,7 @@ PhysicalResultSink
 --PhysicalDistribute[DistributionSpecGather]
 ----PhysicalUnion
 ------PhysicalDistribute[DistributionSpecExecutionAny]
---------filter(((cast(random() as INT) = 2) OR (cast(random() as INT) = 3)))
+--------filter(cast(random() as INT) IN (2, 3))
 ----------PhysicalOneRowRelation
 ------PhysicalDistribute[DistributionSpecExecutionAny]
 --------filter(id IN (2, 3))
@@ -423,7 +423,7 @@ PhysicalResultSink
 --PhysicalDistribute[DistributionSpecGather]
 ----PhysicalIntersect
 ------PhysicalDistribute[DistributionSpecHash]
---------filter(((cast(random() as INT) = 2) OR (cast(random() as INT) = 3)))
+--------filter(cast(random() as INT) IN (2, 3))
 ----------PhysicalOneRowRelation
 ------PhysicalDistribute[DistributionSpecHash]
 --------filter(id IN (2, 3))
