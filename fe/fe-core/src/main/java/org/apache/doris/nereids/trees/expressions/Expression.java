@@ -376,7 +376,7 @@ public abstract class Expression extends AbstractTreeNode<Expression> implements
 
     @Override
     public int hashCode() {
-        return 0;
+        return getClass().hashCode();
     }
 
     /**

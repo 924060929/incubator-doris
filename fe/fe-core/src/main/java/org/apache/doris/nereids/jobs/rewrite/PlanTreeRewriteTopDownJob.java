@@ -59,7 +59,7 @@ public class PlanTreeRewriteTopDownJob extends PlanTreeRewriteJob {
             List<Plan> children = newRewriteJobContext.plan.children();
             for (int i = children.size() - 1; i >= 0; i--) {
                 RewriteJobContext childRewriteJobContext = new RewriteJobContext(
-                        children.get(i), newRewriteJobContext, i, false);
+                        children.get(i), newRewriteJobContext, i, false, rewriteJobContext.batchId);
                 // NOTICE: this relay on pull up cte anchor
                 if (!(rewriteJobContext.plan instanceof LogicalCTEAnchor)) {
                     pushJob(new PlanTreeRewriteTopDownJob(childRewriteJobContext, context, rules));
@@ -67,7 +67,8 @@ public class PlanTreeRewriteTopDownJob extends PlanTreeRewriteJob {
             }
         } else {
             // All the children part are already visited. Just link the children plan to the current node.
-            Plan result = linkChildrenAndParent(rewriteJobContext.plan, rewriteJobContext);
+            Plan result = linkChildren(rewriteJobContext.plan, rewriteJobContext.childrenContext);
+            rewriteJobContext.setResult(result);
             if (rewriteJobContext.parentContext == null) {
                 context.getCascadesContext().setRewritePlan(result);
             }

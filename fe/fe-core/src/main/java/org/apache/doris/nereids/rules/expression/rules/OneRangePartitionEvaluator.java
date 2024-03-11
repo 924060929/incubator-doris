@@ -431,7 +431,10 @@ public class OneRangePartitionEvaluator
         List<Expression> newChildren = new ArrayList<>();
         List<EvaluateRangeResult> childrenResults = new ArrayList<>();
         boolean hasNewChildren = false;
-        for (Expression child : expr.children()) {
+
+        List<Expression> children = expr.children();
+        for (int i = 0; i < children.size(); i++) {
+            Expression child = children.get(i);
             EvaluateRangeResult childResult = child.accept(this, context);
             if (childResult.result != child) {
                 hasNewChildren = true;
@@ -444,7 +447,7 @@ public class OneRangePartitionEvaluator
         }
 
         // evaluate this
-        expr = expr.accept(FoldConstantRuleOnFE.INSTANCE, expressionRewriteContext);
+        expr = FoldConstantRuleOnFE.evaluate(expr, expressionRewriteContext);
         return new EvaluateRangeResult(expr, context.defaultColumnRanges, childrenResults);
     }
 
@@ -590,8 +593,8 @@ public class OneRangePartitionEvaluator
         Literal lower = span.lowerEndpoint().getValue();
         Literal upper = span.upperEndpoint().getValue();
 
-        Expression lowerDate = new Date(lower).accept(FoldConstantRuleOnFE.INSTANCE, expressionRewriteContext);
-        Expression upperDate = new Date(upper).accept(FoldConstantRuleOnFE.INSTANCE, expressionRewriteContext);
+        Expression lowerDate = FoldConstantRuleOnFE.evaluate(new Date(lower), expressionRewriteContext);
+        Expression upperDate = FoldConstantRuleOnFE.evaluate(new Date(upper), expressionRewriteContext);
 
         if (lowerDate instanceof Literal && upperDate instanceof Literal && lowerDate.equals(upperDate)) {
             return new EvaluateRangeResult(lowerDate, result.columnRanges, result.childrenResult);
@@ -673,7 +676,7 @@ public class OneRangePartitionEvaluator
 
         public EvaluateRangeResult(Expression result, Map<Slot, ColumnRange> columnRanges,
                 List<EvaluateRangeResult> childrenResult) {
-            this(result, columnRanges, childrenResult, childrenResult.stream().allMatch(r -> r.isRejectNot()));
+            this(result, columnRanges, childrenResult, allIsRejectNot(childrenResult));
         }
 
         public EvaluateRangeResult withRejectNot(boolean rejectNot) {
@@ -682,6 +685,15 @@ public class OneRangePartitionEvaluator
 
         public boolean isRejectNot() {
             return rejectNot;
+        }
+
+        private static boolean allIsRejectNot(List<EvaluateRangeResult> childrenResult) {
+            for (EvaluateRangeResult evaluateRangeResult : childrenResult) {
+                if (!evaluateRangeResult.isRejectNot()) {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

@@ -43,10 +43,7 @@ public abstract class PushDownToProjectionFunction extends ScalarFunction {
      */
     public static boolean validToPushDown(Expression pushDownExpr) {
         // Currently only element at for variant type could be pushed down
-        return pushDownExpr != null && !pushDownExpr.collectToList(
-                    PushDownToProjectionFunction.class::isInstance).stream().filter(
-                            x -> ((Expression) x).getDataType().isVariantType()).collect(
-                    Collectors.toList()).isEmpty();
+        return pushDownExpr != null && pushDownExpr.anyMatch(PushDownToProjectionFunction.class::isInstance);
     }
 
     /**

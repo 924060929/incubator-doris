@@ -26,6 +26,7 @@ import com.google.common.base.CaseFormat;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 
@@ -325,21 +326,44 @@ public class Utils {
     }
 
     /** fastToImmutableList */
-    public static <E> ImmutableList<E> fastToImmutableList(List<? extends E> originList) {
-        if (originList instanceof ImmutableList) {
-            return (ImmutableList<E>) originList;
+    public static <E> ImmutableList<E> fastToImmutableList(Collection<? extends E> collection) {
+        if (collection instanceof ImmutableList) {
+            return (ImmutableList<E>) collection;
         }
 
-        switch (originList.size()) {
+        switch (collection.size()) {
             case 0: return ImmutableList.of();
-            case 1: return ImmutableList.of(originList.get(0));
+            case 1:
+                return collection instanceof List
+                        ? ImmutableList.of(((List<E>) collection).get(0))
+                        : ImmutableList.of(collection.iterator().next());
             default: {
                 // NOTE: ImmutableList.copyOf(list) has additional clone of the list, so here we
                 //       direct generate a ImmutableList
-                Builder<E> copyChildren = ImmutableList.builderWithExpectedSize(originList.size());
-                copyChildren.addAll(originList);
+                Builder<E> copyChildren = ImmutableList.builderWithExpectedSize(collection.size());
+                copyChildren.addAll(collection);
                 return copyChildren.build();
             }
+        }
+    }
+
+    /** fastToImmutableSet */
+    public static <E> ImmutableSet<E> fastToImmutableSet(Collection<E> collection) {
+        switch (collection.size()) {
+            case 0:
+                return ImmutableSet.of();
+            case 1:
+                return collection instanceof List
+                        ? ImmutableSet.of(((List<E>) collection).get(0))
+                        : ImmutableSet.of(collection.iterator().next());
+            default:
+                // NOTE: ImmutableList.copyOf(array) has additional clone of the array, so here we
+                //       direct generate a ImmutableList
+                ImmutableSet.Builder<E> copyChildren = ImmutableSet.builderWithExpectedSize(collection.size());
+                for (E child : collection) {
+                    copyChildren.add(child);
+                }
+                return copyChildren.build();
         }
     }
 

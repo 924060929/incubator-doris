@@ -228,11 +228,18 @@ public class NormalizeAggregate implements RewriteRuleFactory, NormalizeToSlot {
 
         // agg output include 2 parts
         // pushedGroupByExprs and normalized agg functions
-        List<NamedExpression> normalizedAggOutput = ImmutableList.<NamedExpression>builder()
-                .addAll(pushedGroupByExprs.stream().map(NamedExpression::toSlot).iterator())
-                .addAll(normalizedAggFuncsToSlotContext
-                        .pushDownToNamedExpression(normalizedAggFuncs))
-                .build();
+
+        ImmutableList.Builder<NamedExpression> normalizedAggOutputBuilder
+                = ImmutableList.builderWithExpectedSize(groupingByExprs.size() + normalizedAggFuncs.size());
+        for (NamedExpression pushedGroupByExpr : pushedGroupByExprs) {
+            normalizedAggOutputBuilder.add(pushedGroupByExpr.toSlot());
+        }
+        for (AggregateFunction normalizedAggFunc : normalizedAggFuncs) {
+            normalizedAggOutputBuilder.add(
+                    normalizedAggFuncsToSlotContext.pushDownToNamedExpression(normalizedAggFunc)
+            );
+        }
+        List<NamedExpression> normalizedAggOutput = normalizedAggOutputBuilder.build();
 
         // create new agg node
         LogicalAggregate<?> newAggregate =
@@ -245,7 +252,7 @@ public class NormalizeAggregate implements RewriteRuleFactory, NormalizeToSlot {
         // create a parent project node
         LogicalProject<Plan> project = new LogicalProject<>(upperProjects, newAggregate);
         if (having.isPresent()) {
-            if (upperProjects.stream().anyMatch(expr -> expr.anyMatch(WindowExpression.class::isInstance))) {
+            if (ExpressionUtils.containsWindowExpression(upperProjects)) {
                 // when project contains window functions, in order to get the correct result
                 // push having through project to make it the parent node of logicalAgg
                 return project.withChildren(ImmutableList.of(
