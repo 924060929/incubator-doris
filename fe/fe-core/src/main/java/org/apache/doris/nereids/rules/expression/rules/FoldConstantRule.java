@@ -17,24 +17,52 @@
 
 package org.apache.doris.nereids.rules.expression.rules;
 
-import org.apache.doris.nereids.rules.expression.AbstractExpressionRewriteRule;
+import org.apache.doris.nereids.rules.expression.ExpressionBottomUpRewriter;
+import org.apache.doris.nereids.rules.expression.ExpressionPatternMatcher;
+import org.apache.doris.nereids.rules.expression.ExpressionPatternRuleFactory;
+import org.apache.doris.nereids.rules.expression.ExpressionRewrite;
 import org.apache.doris.nereids.rules.expression.ExpressionRewriteContext;
 import org.apache.doris.nereids.trees.expressions.Expression;
+
+import com.google.common.collect.ImmutableList;
+
+import java.util.List;
 
 /**
  * Constant evaluation of an expression.
  */
-public class FoldConstantRule extends AbstractExpressionRewriteRule {
+public class FoldConstantRule implements ExpressionPatternRuleFactory {
 
     public static final FoldConstantRule INSTANCE = new FoldConstantRule();
 
+    private static final FoldConstantRuleOnFE FOLD_CONSTANT_BY_FE = FoldConstantRuleOnFE.INSTANCE;
+    private static final FoldConstantRuleOnBE FOLD_CONSTANT_BY_BE = FoldConstantRuleOnBE.INSTANCE;
+
+    private static final ExpressionBottomUpRewriter FULL_FOLD_REWRITER = ExpressionRewrite.bottomUp(
+            FOLD_CONSTANT_BY_FE,
+            FOLD_CONSTANT_BY_BE
+    );
+
+    private static final ExpressionBottomUpRewriter FOLD_BY_FE_REWRITER = ExpressionRewrite.bottomUp(
+            FoldConstantRuleOnFE.INSTANCE
+    );
+
     @Override
-    public Expression rewrite(Expression expr, ExpressionRewriteContext ctx) {
+    public List<ExpressionPatternMatcher<? extends Expression>> buildRules() {
+        return ImmutableList.<ExpressionPatternMatcher<? extends Expression>>builder()
+                .addAll(FoldConstantRuleOnFE.INSTANCE.buildRules())
+                .addAll(FoldConstantRuleOnBE.INSTANCE.buildRules())
+                .build();
+    }
+
+    /** evaluate */
+    public static Expression evaluate(Expression expr, ExpressionRewriteContext ctx) {
         if (ctx.cascadesContext != null
                 && ctx.cascadesContext.getConnectContext() != null
                 && ctx.cascadesContext.getConnectContext().getSessionVariable().isEnableFoldConstantByBe()) {
-            return new FoldConstantRuleOnBE().rewrite(expr, ctx);
+            return FULL_FOLD_REWRITER.rewrite(expr, ctx);
+        } else {
+            return FOLD_BY_FE_REWRITER.rewrite(expr, ctx);
         }
-        return FoldConstantRuleOnFE.INSTANCE.rewrite(expr, ctx);
     }
 }

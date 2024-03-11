@@ -44,7 +44,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 
-public class SimplifyRangeTest {
+public class SimplifyRangeTest extends ExpressionRewrite {
 
     private static final NereidsParser PARSER = new NereidsParser();
     private ExpressionRuleExecutor executor;
@@ -58,7 +58,9 @@ public class SimplifyRangeTest {
 
     @Test
     public void testSimplify() {
-        executor = new ExpressionRuleExecutor(ImmutableList.of(SimplifyRange.INSTANCE));
+        executor = new ExpressionRuleExecutor(ImmutableList.of(
+            bottomUp(SimplifyRange.INSTANCE)
+        ));
         assertRewrite("TA", "TA");
         assertRewrite("(TA >= 1 and TA <=3 ) or (TA > 5 and TA < 7)", "(TA >= 1 and TA <=3 ) or (TA > 5 and TA < 7)");
         assertRewrite("(TA > 3 and TA < 1) or (TA > 7 and TA < 5)", "FALSE");
@@ -160,8 +162,10 @@ public class SimplifyRangeTest {
 
     @Test
     public void testSimplifyDate() {
-        executor = new ExpressionRuleExecutor(ImmutableList.of(SimplifyRange.INSTANCE));
-        // assertRewrite("TA", "TA");
+        executor = new ExpressionRuleExecutor(ImmutableList.of(
+            bottomUp(SimplifyRange.INSTANCE)
+        ));
+        assertRewrite("TA", "TA");
         assertRewrite(
                 "(TA >= date '2024-01-01' and TA <= date '2024-01-03') or (TA > date '2024-01-05' and TA < date '2024-01-07')",
                 "(TA >= date '2024-01-01' and TA <= date '2024-01-03') or (TA > date '2024-01-05' and TA < date '2024-01-07')");
@@ -226,8 +230,10 @@ public class SimplifyRangeTest {
 
     @Test
     public void testSimplifyDateTime() {
-        executor = new ExpressionRuleExecutor(ImmutableList.of(SimplifyRange.INSTANCE));
-        // assertRewrite("TA", "TA");
+        executor = new ExpressionRuleExecutor(ImmutableList.of(
+            bottomUp(SimplifyRange.INSTANCE)
+        ));
+        assertRewrite("TA", "TA");
         assertRewrite(
                 "(TA >= timestamp '2024-01-01 00:00:00' and TA <= timestamp '2024-01-03 00:00:00') or (TA > timestamp '2024-01-05 00:00:00' and TA < timestamp '2024-01-07 00:00:00')",
                 "(TA >= timestamp '2024-01-01 00:00:00' and TA <= timestamp '2024-01-03 00:00:00') or (TA > timestamp '2024-01-05 00:00:00' and TA < timestamp '2024-01-07 00:00:00')");

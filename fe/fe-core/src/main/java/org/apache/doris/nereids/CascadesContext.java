@@ -76,6 +76,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -133,6 +134,10 @@ public class CascadesContext implements ScheduleContext {
     // This list is used to listen the change event of the plan which
     // trigger by rule and show by `explain plan process` statement
     private final List<PlanProcess> planProcesses = new ArrayList<>();
+
+    // this field is modified by FoldConstantRuleOnFE, it matters current traverse
+    // into AggregateFunction with distinct, we can not fold constant in this case
+    private int distinctAggLevel;
 
     /**
      * Constructor of OptimizerContext.
@@ -256,7 +261,7 @@ public class CascadesContext implements ScheduleContext {
         this.tables = tables.stream().collect(Collectors.toMap(TableIf::getId, t -> t, (t1, t2) -> t1));
     }
 
-    public ConnectContext getConnectContext() {
+    public final ConnectContext getConnectContext() {
         return statementContext.getConnectContext();
     }
 
@@ -372,6 +377,16 @@ public class CascadesContext implements ScheduleContext {
         }
         return statementContext.getOrRegisterCache(cacheName,
                 () -> variableSupplier.apply(connectContext.getSessionVariable()));
+    }
+
+    /** getAndCacheDisableRules */
+    public final BitSet getAndCacheDisableRules() {
+        ConnectContext connectContext = getConnectContext();
+        StatementContext statementContext = getStatementContext();
+        if (connectContext == null || statementContext == null) {
+            return new BitSet();
+        }
+        return statementContext.getOrCacheDisableRules(connectContext.getSessionVariable());
     }
 
     private CascadesContext execute(Job job) {
@@ -721,5 +736,17 @@ public class CascadesContext implements ScheduleContext {
         for (PlanProcess row : planProcesses) {
             LOG.info("RULE: " + row.ruleName + "\nBEFORE:\n" + row.beforeShape + "\nafter:\n" + row.afterShape);
         }
+    }
+
+    public void incrementDistinctAggLevel() {
+        this.distinctAggLevel++;
+    }
+
+    public void decrementDistinctAggLevel() {
+        this.distinctAggLevel--;
+    }
+
+    public int getDistinctAggLevel() {
+        return distinctAggLevel;
     }
 }

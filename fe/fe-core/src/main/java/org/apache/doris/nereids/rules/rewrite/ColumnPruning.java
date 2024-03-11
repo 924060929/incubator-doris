@@ -39,13 +39,13 @@ import org.apache.doris.nereids.trees.plans.logical.OutputPrunable;
 import org.apache.doris.nereids.trees.plans.visitor.CustomRewriter;
 import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanRewriter;
 import org.apache.doris.nereids.util.ExpressionUtils;
+import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -97,13 +97,11 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
             for (Plan child : plan.children()) {
                 child.accept(this, jobContext);
             }
-            plan.getExpressions().stream().filter(
-                    expression -> !(expression instanceof SlotReference)
-            ).forEach(
-                    expression -> {
-                        keys.addAll(expression.getInputSlots());
-                    }
-            );
+            for (Expression expression : plan.getExpressions()) {
+                if (!(expression instanceof SlotReference)) {
+                    keys.addAll(expression.getInputSlots());
+                }
+            }
             return plan;
         }
     }
@@ -212,11 +210,11 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
     }
 
     private Plan skipPruneThisAndFirstLevelChildren(Plan plan) {
-        Set<Slot> requireAllOutputOfChildren = plan.children()
-                .stream()
-                .flatMap(child -> child.getOutputSet().stream())
-                .collect(Collectors.toSet());
-        return pruneChildren(plan, requireAllOutputOfChildren);
+        ImmutableSet.Builder<Slot> requireAllOutputOfChildren = ImmutableSet.builder();
+        for (Plan child : plan.children()) {
+            requireAllOutputOfChildren.addAll(child.getOutput());
+        }
+        return pruneChildren(plan, requireAllOutputOfChildren.build());
     }
 
     private static Aggregate fillUpGroupByAndOutput(Aggregate prunedOutputAgg) {
@@ -253,9 +251,8 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         if (originOutput.isEmpty()) {
             return plan;
         }
-        List<NamedExpression> prunedOutputs = originOutput.stream()
-                .filter(output -> context.requiredSlots.contains(output.toSlot()))
-                .collect(ImmutableList.toImmutableList());
+        List<NamedExpression> prunedOutputs =
+                Utils.filterImmutableList(originOutput, output -> context.requiredSlots.contains(output.toSlot()));
 
         if (prunedOutputs.isEmpty()) {
             List<NamedExpression> candidates = Lists.newArrayList(originOutput);
@@ -281,7 +278,6 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         }
         List<NamedExpression> prunedOutputs = Lists.newArrayList();
         List<List<NamedExpression>> constantExprsList = union.getConstantExprsList();
-        List<List<NamedExpression>> prunedConstantExprsList = Lists.newArrayList();
         List<Integer> extractColumnIndex = Lists.newArrayList();
         for (int i = 0; i < originOutput.size(); i++) {
             NamedExpression output = originOutput.get(i);
@@ -291,12 +287,14 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
             }
         }
         int len = extractColumnIndex.size();
+        ImmutableList.Builder<List<NamedExpression>> prunedConstantExprsList
+                = ImmutableList.builderWithExpectedSize(constantExprsList.size());
         for (List<NamedExpression> row : constantExprsList) {
-            ArrayList<NamedExpression> newRow = new ArrayList<>(len);
+            ImmutableList.Builder<NamedExpression> newRow = ImmutableList.builderWithExpectedSize(len);
             for (int idx : extractColumnIndex) {
                 newRow.add(row.get(idx));
             }
-            prunedConstantExprsList.add(newRow);
+            prunedConstantExprsList.add(newRow.build());
         }
 
         if (prunedOutputs.isEmpty()) {
@@ -312,7 +310,7 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         if (prunedOutputs.equals(originOutput)) {
             return union;
         } else {
-            return union.withNewOutputsAndConstExprsList(prunedOutputs, prunedConstantExprsList);
+            return union.withNewOutputsAndConstExprsList(prunedOutputs, prunedConstantExprsList.build());
         }
     }
 
@@ -329,24 +327,35 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         Set<Slot> currentUsedSlots = plan.getInputSlots();
         Set<Slot> childrenRequiredSlots = parentRequiredSlots.isEmpty()
                 ? currentUsedSlots
-                : ImmutableSet.<Slot>builder()
+                : ImmutableSet.<Slot>builderWithExpectedSize(parentRequiredSlots.size() + currentUsedSlots.size())
                         .addAll(parentRequiredSlots)
                         .addAll(currentUsedSlots)
                         .build();
 
-        List<Plan> newChildren = new ArrayList<>();
+        ImmutableList.Builder<Plan> newChildren = ImmutableList.builderWithExpectedSize(plan.arity());
         boolean hasNewChildren = false;
         for (Plan child : plan.children()) {
-            Set<Slot> childOutputSet = child.getOutputSet();
-            Set<Slot> childRequiredSlots = childOutputSet.stream()
-                    .filter(childrenRequiredSlots::contains).collect(Collectors.toSet());
+            Set<Slot> childRequiredSlots;
+            if (plan.arity() == 1) {
+                childRequiredSlots = childrenRequiredSlots;
+            } else {
+                List<Slot> childOutputs = child.getOutput();
+                ImmutableSet.Builder<Slot> childRequiredSlotBuilder
+                        = ImmutableSet.builderWithExpectedSize(childOutputs.size());
+                for (Slot childOutput : childOutputs) {
+                    if (childrenRequiredSlots.contains(childOutput)) {
+                        childRequiredSlotBuilder.add(childOutput);
+                    }
+                }
+                childRequiredSlots = childRequiredSlotBuilder.build();
+            }
             Plan prunedChild = doPruneChild(plan, child, childRequiredSlots);
             if (prunedChild != child) {
                 hasNewChildren = true;
             }
             newChildren.add(prunedChild);
         }
-        return hasNewChildren ? (P) plan.withChildren(newChildren) : plan;
+        return hasNewChildren ? (P) plan.withChildren(newChildren.build()) : plan;
     }
 
     private Plan doPruneChild(Plan plan, Plan child, Set<Slot> childRequiredSlots) {
@@ -358,7 +367,7 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
 
         // the case 2 in the class comment, prune child's output failed
         if (!isProject && !Sets.difference(prunedChild.getOutputSet(), childRequiredSlots).isEmpty()) {
-            prunedChild = new LogicalProject<>(ImmutableList.copyOf(childRequiredSlots), prunedChild);
+            prunedChild = new LogicalProject<>(Utils.fastToImmutableList(childRequiredSlots), prunedChild);
         }
         return prunedChild;
     }

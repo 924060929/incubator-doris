@@ -78,10 +78,19 @@ import java.util.stream.Collectors;
  */
 public abstract class AbstractSelectMaterializedIndexRule {
     protected boolean shouldSelectIndexWithAgg(LogicalOlapScan scan) {
-        switch (scan.getTable().getKeysType()) {
+        OlapTable table = scan.getTable();
+        switch (table.getKeysType()) {
             case AGG_KEYS:
             case UNIQUE_KEYS:
             case DUP_KEYS:
+                long baseIndexId = table.getBaseIndexId();
+                boolean hasNonBaseSchema = false;
+                for (MaterializedIndex visibleIndex : table.getVisibleIndex()) {
+                    hasNonBaseSchema |= visibleIndex.getId() != baseIndexId;
+                }
+                if (!hasNonBaseSchema) {
+                    return false;
+                }
                 // SelectMaterializedIndexWithAggregate(R1) run before SelectMaterializedIndexWithoutAggregate(R2)
                 // if R1 selects baseIndex and preAggStatus is off
                 // we should give a chance to R2 to check if some prefix-index can be selected
@@ -99,10 +108,19 @@ public abstract class AbstractSelectMaterializedIndexRule {
     }
 
     protected boolean shouldSelectIndexWithoutAgg(LogicalOlapScan scan) {
-        switch (scan.getTable().getKeysType()) {
+        OlapTable table = scan.getTable();
+        switch (table.getKeysType()) {
             case AGG_KEYS:
             case UNIQUE_KEYS:
             case DUP_KEYS:
+                long baseIndexId = table.getBaseIndexId();
+                boolean hasNonBaseSchema = false;
+                for (MaterializedIndex visibleIndex : table.getVisibleIndex()) {
+                    hasNonBaseSchema |= visibleIndex.getId() != baseIndexId;
+                }
+                if (!hasNonBaseSchema) {
+                    return false;
+                }
                 return !scan.isIndexSelected();
             default:
                 return false;

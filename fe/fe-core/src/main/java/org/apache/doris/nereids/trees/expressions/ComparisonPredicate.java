@@ -61,10 +61,10 @@ public abstract class ComparisonPredicate extends BinaryOperator {
 
     @Override
     public void checkLegalityBeforeTypeCoercion() {
-        children().forEach(c -> {
+        for (Expression c : children) {
             if (c.getDataType().isComplexType()) {
                 throw new AnalysisException("comparison predicate could not contains complex type: " + this.toSql());
             }
-        });
+        }
     }
 }

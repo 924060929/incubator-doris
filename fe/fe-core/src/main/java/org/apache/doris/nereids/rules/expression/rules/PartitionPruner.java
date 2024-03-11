@@ -21,6 +21,7 @@ import org.apache.doris.catalog.ListPartitionItem;
 import org.apache.doris.catalog.PartitionItem;
 import org.apache.doris.catalog.RangePartitionItem;
 import org.apache.doris.nereids.CascadesContext;
+import org.apache.doris.nereids.rules.expression.ExpressionRewriteContext;
 import org.apache.doris.nereids.trees.expressions.Cast;
 import org.apache.doris.nereids.trees.expressions.ComparisonPredicate;
 import org.apache.doris.nereids.trees.expressions.Expression;
@@ -81,14 +82,19 @@ public class PartitionPruner extends DefaultExpressionRewriter<Void> {
                 && ((Cast) right).child().getDataType().isDateType()) {
             DateTimeLiteral dt = (DateTimeLiteral) left;
             Cast cast = (Cast) right;
-            return cp.withChildren(new DateLiteral(dt.getYear(), dt.getMonth(), dt.getDay()), cast.child());
+            return cp.withChildren(
+                    ImmutableList.of(new DateLiteral(dt.getYear(), dt.getMonth(), dt.getDay()), cast.child())
+            );
         } else if (right instanceof DateTimeLiteral && ((DateTimeLiteral) right).isMidnight()
                 && left instanceof Cast
                 && ((Cast) left).child() instanceof SlotReference
                 && ((Cast) left).child().getDataType().isDateType()) {
             DateTimeLiteral dt = (DateTimeLiteral) right;
             Cast cast = (Cast) left;
-            return cp.withChildren(cast.child(), new DateLiteral(dt.getYear(), dt.getMonth(), dt.getDay()));
+            return cp.withChildren(ImmutableList.of(
+                    cast.child(),
+                    new DateLiteral(dt.getYear(), dt.getMonth(), dt.getDay()))
+            );
         } else {
             return cp;
         }
@@ -121,7 +127,8 @@ public class PartitionPruner extends DefaultExpressionRewriter<Void> {
                     kv.getKey(), kv.getValue(), partitionSlots, cascadesContext, partitionTableType));
         }
 
-        partitionPredicate = OrToIn.INSTANCE.rewrite(partitionPredicate, null);
+        partitionPredicate = OrToIn.INSTANCE.rewriteTree(
+                partitionPredicate, new ExpressionRewriteContext(cascadesContext));
         PartitionPruner partitionPruner = new PartitionPruner(evaluators, partitionPredicate);
         //TODO: we keep default partition because it's too hard to prune it, we return false in canPrune().
         return partitionPruner.prune();
