@@ -54,9 +54,9 @@ public class ExpressionNormalization extends ExpressionRewrite {
                 SimplifyCastRule.INSTANCE,
                 DigitalMaskingConvert.INSTANCE,
                 SimplifyArithmeticComparisonRule.INSTANCE,
+                ConvertAggStateCast.INSTANCE,
                 CheckCast.INSTANCE
-            ),
-            ConvertAggStateCast.INSTANCE
+            )
     );
 
     public ExpressionNormalization() {
