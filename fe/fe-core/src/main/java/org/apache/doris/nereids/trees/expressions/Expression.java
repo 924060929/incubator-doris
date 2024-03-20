@@ -39,6 +39,7 @@ import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.MapType;
 import org.apache.doris.nereids.types.StructField;
 import org.apache.doris.nereids.types.StructType;
+import org.apache.doris.nereids.util.ExpressionUtils;
 import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.base.Preconditions;
@@ -284,7 +285,7 @@ public abstract class Expression extends AbstractTreeNode<Expression> implements
         if (this instanceof LeafExpression) {
             return this instanceof Literal;
         } else {
-            return !(this instanceof Nondeterministic) && children().stream().allMatch(Expression::isConstant);
+            return !(this instanceof Nondeterministic) && ExpressionUtils.allMatch(children(), Expression::isConstant);
         }
     }
 

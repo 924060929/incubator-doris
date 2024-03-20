@@ -666,7 +666,7 @@ public class ExpressionUtils {
 
     /** allMatch */
     public static boolean allMatch(
-            Collection<? extends Expression> expressions, Predicate<TreeNode<Expression>> predicate) {
+            Collection<? extends Expression> expressions, Predicate<Expression> predicate) {
         for (Expression expression : expressions) {
             if (!predicate.test(expression)) {
                 return false;
@@ -675,8 +675,20 @@ public class ExpressionUtils {
         return true;
     }
 
+
     /** anyMatch */
     public static boolean anyMatch(
+            Collection<? extends Expression> expressions, Predicate<Expression> predicate) {
+        for (Expression expression : expressions) {
+            if (predicate.test(expression)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** deapAnyMatch */
+    public static boolean deapAnyMatch(
             Collection<? extends Expression> expressions, Predicate<TreeNode<Expression>> predicate) {
         for (Expression expression : expressions) {
             if (expression.anyMatch(expr -> expr.anyMatch(predicate))) {
@@ -686,8 +698,8 @@ public class ExpressionUtils {
         return false;
     }
 
-    /** noneMatch */
-    public static boolean noneMatch(
+    /** deapNoneMatch */
+    public static boolean deapNoneMatch(
             Collection<? extends Expression> expressions, Predicate<TreeNode<Expression>> predicate) {
         for (Expression expression : expressions) {
             if (expression.anyMatch(expr -> expr.anyMatch(predicate))) {
