@@ -24,6 +24,7 @@ import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
+import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.algebra.Aggregate;
 import org.apache.doris.nereids.trees.plans.algebra.SetOperation.Qualifier;
@@ -50,7 +51,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
@@ -217,7 +217,7 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         return pruneChildren(plan, requireAllOutputOfChildren.build());
     }
 
-    private static Aggregate fillUpGroupByAndOutput(Aggregate prunedOutputAgg) {
+    private static Aggregate<Plan> fillUpGroupByAndOutput(Aggregate<Plan> prunedOutputAgg) {
         List<Expression> groupBy = prunedOutputAgg.getGroupByExpressions();
         List<NamedExpression> output = prunedOutputAgg.getOutputExpressions();
 
@@ -229,20 +229,23 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         List<NamedExpression> remainedOutputExprs = Lists.newArrayList(output);
         remainedOutputExprs.removeAll(groupBy);
 
-        List<NamedExpression> newOutputList = Lists.newArrayList();
-        newOutputList.addAll((List) groupBy);
-        newOutputList.addAll(remainedOutputExprs);
+        ImmutableList.Builder<NamedExpression> newOutputListBuilder
+                = ImmutableList.builderWithExpectedSize(groupBy.size() + remainedOutputExprs.size());
+        newOutputListBuilder.addAll((List) groupBy);
+        newOutputListBuilder.addAll(remainedOutputExprs);
 
-        if (!(prunedOutputAgg instanceof LogicalAggregate)) {
-            return prunedOutputAgg.withAggOutput(newOutputList);
-        } else {
-            List<Expression> newGroupByExprList = newOutputList.stream().filter(e ->
-                    !(prunedOutputAgg.getAggregateFunctions().contains(e)
-                            || e instanceof Alias && prunedOutputAgg.getAggregateFunctions()
-                                .contains(((Alias) e).child()))
-            ).collect(Collectors.toList());
-            return ((LogicalAggregate) prunedOutputAgg).withGroupByAndOutput(newGroupByExprList, newOutputList);
+        List<NamedExpression> newOutputList = newOutputListBuilder.build();
+        Set<AggregateFunction> aggregateFunctions = prunedOutputAgg.getAggregateFunctions();
+        ImmutableList.Builder<Expression> newGroupByExprList
+                = ImmutableList.builderWithExpectedSize(newOutputList.size());
+        for (NamedExpression e : newOutputList) {
+            if (!(aggregateFunctions.contains(e)
+                    || (e instanceof Alias && aggregateFunctions.contains(e.child(0))))) {
+                newGroupByExprList.add(e);
+            }
         }
+        return ((LogicalAggregate<Plan>) prunedOutputAgg).withGroupByAndOutput(
+                newGroupByExprList.build(), newOutputList);
     }
 
     /** prune output */
