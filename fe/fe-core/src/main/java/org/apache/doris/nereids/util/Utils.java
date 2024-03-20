@@ -35,7 +35,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -386,5 +388,16 @@ public class Utils {
             }
         }
         return newList.build();
+    }
+
+    public static <M, T extends M> Optional<M> fastReduce(List<T> list, BiFunction<M, T, M> reduceOp) {
+        if (list.isEmpty()) {
+            return Optional.empty();
+        }
+        M merge = list.get(0);
+        for (int i = 1; i < list.size(); i++) {
+            reduceOp.apply(merge, list.get(i));
+        }
+        return Optional.of(merge);
     }
 }
