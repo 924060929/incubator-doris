@@ -108,14 +108,14 @@ public class ExpressionBottomUpRewriter implements ExpressionRewriteRule<Express
             changed |= !child.equals(newChild);
             newChildren.add(newChild);
         }
-        // if (changed) {
-            // Expression newExpr = parent.withChildren(newChildren.build());
-            // try {
-            //     LOG.info("WithChildren: \nbefore: " + parent + "\nafter: " + newExpr);
-            // } catch (Throwable t) {
-            //     LOG.error(t.getMessage(), t);
-            // }
-        // }
-        return changed ? parent.withChildren(newChildren.build()) : parent;
+
+        Expression result = parent;
+        if (changed) {
+            result = parent.withChildren(newChildren.build());
+        }
+        if (changed && context.cascadesContext.isEnableExprTrace()) {
+            LOG.info("WithChildren: \nbefore: " + parent + "\nafter: " + result);
+        }
+        return result;
     }
 }
