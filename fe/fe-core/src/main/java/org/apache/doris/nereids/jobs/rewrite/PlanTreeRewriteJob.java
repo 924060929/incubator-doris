@@ -86,13 +86,16 @@ public abstract class PlanTreeRewriteJob extends Job {
                 return plan;
             }
             case 1: {
-                Plan firstResult = childrenContext[0].result;
+                RewriteJobContext child = childrenContext[0];
+                Plan firstResult = child == null ? plan.child(0) : child.result;
                 return firstResult == null || firstResult == children.get(0)
                         ? plan : plan.withChildren(ImmutableList.of(firstResult));
             }
             case 2: {
-                Plan firstResult = childrenContext[0].result;
-                Plan secondResult = childrenContext[1].result;
+                RewriteJobContext left = childrenContext[0];
+                Plan firstResult = left == null ? plan.child(0) : left.result;
+                RewriteJobContext right = childrenContext[1];
+                Plan secondResult = right == null ? plan.child(1) : right.result;
                 Plan firstOrigin = children.get(0);
                 Plan secondOrigin = children.get(1);
                 boolean firstChanged = firstResult != null && firstResult != firstOrigin;
