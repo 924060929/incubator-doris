@@ -93,6 +93,9 @@ public class PatternDescribableProcessor extends AbstractProcessor {
                     = new ExpressionTypeMappingGenerator(javaAstAnalyzer);
             expressionTypeMappingGenerator.generate(processingEnv);
 
+            PlanTypeMappingGenerator planTypeMappingGenerator = new PlanTypeMappingGenerator(javaAstAnalyzer);
+            planTypeMappingGenerator.generate(processingEnv);
+
             PlanPatternGeneratorAnalyzer patternGeneratorAnalyzer = new PlanPatternGeneratorAnalyzer(javaAstAnalyzer);
             generatePlanPatterns("GeneratedMemoPatterns", "MemoPatterns", true, patternGeneratorAnalyzer);
             generatePlanPatterns("GeneratedPlanPatterns", "PlanPatterns", false, patternGeneratorAnalyzer);
