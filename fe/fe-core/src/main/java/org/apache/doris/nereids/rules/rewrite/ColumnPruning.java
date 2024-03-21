@@ -339,19 +339,15 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         boolean hasNewChildren = false;
         for (Plan child : plan.children()) {
             Set<Slot> childRequiredSlots;
-            if (plan.arity() == 1) {
-                childRequiredSlots = childrenRequiredSlots;
-            } else {
-                List<Slot> childOutputs = child.getOutput();
-                ImmutableSet.Builder<Slot> childRequiredSlotBuilder
-                        = ImmutableSet.builderWithExpectedSize(childOutputs.size());
-                for (Slot childOutput : childOutputs) {
-                    if (childrenRequiredSlots.contains(childOutput)) {
-                        childRequiredSlotBuilder.add(childOutput);
-                    }
+            List<Slot> childOutputs = child.getOutput();
+            ImmutableSet.Builder<Slot> childRequiredSlotBuilder
+                    = ImmutableSet.builderWithExpectedSize(childOutputs.size());
+            for (Slot childOutput : childOutputs) {
+                if (childrenRequiredSlots.contains(childOutput)) {
+                    childRequiredSlotBuilder.add(childOutput);
                 }
-                childRequiredSlots = childRequiredSlotBuilder.build();
             }
+            childRequiredSlots = childRequiredSlotBuilder.build();
             Plan prunedChild = doPruneChild(plan, child, childRequiredSlots);
             if (prunedChild != child) {
                 hasNewChildren = true;
