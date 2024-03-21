@@ -27,6 +27,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /** ExpressionPatternMapping */
@@ -43,7 +44,7 @@ public class ExpressionPatternRules extends TypeMappings<Expression, ExpressionP
     }
 
     /** matchesAndApply */
-    public Expression matchesAndApply(Expression expr, ExpressionRewriteContext context, Expression parent) {
+    public Optional<Expression> matchesAndApply(Expression expr, ExpressionRewriteContext context, Expression parent) {
         List<ExpressionPatternMatchRule> rules = singleMappings.get(expr.getClass());
         ExpressionMatchingContext<Expression> matchingContext
                 = new ExpressionMatchingContext<>(expr, parent, context.cascadesContext);
@@ -56,11 +57,11 @@ public class ExpressionPatternRules extends TypeMappings<Expression, ExpressionP
                             if (context.cascadesContext.isEnableExprTrace()) {
                                 traceExprChanged(multiMatchRule, expr, newExpr);
                             }
-                            return newExpr;
+                            return Optional.of(newExpr);
                         }
                     }
                 }
-                return expr;
+                return Optional.empty();
             }
             case 1: {
                 ExpressionPatternMatchRule rule = rules.get(0);
@@ -70,10 +71,10 @@ public class ExpressionPatternRules extends TypeMappings<Expression, ExpressionP
                         if (context.cascadesContext.isEnableExprTrace()) {
                             traceExprChanged(rule, expr, newExpr);
                         }
+                        return Optional.of(newExpr);
                     }
-                    return newExpr;
                 }
-                return expr;
+                return Optional.empty();
             }
             default: {
                 for (ExpressionPatternMatchRule rule : rules) {
@@ -83,11 +84,11 @@ public class ExpressionPatternRules extends TypeMappings<Expression, ExpressionP
                             if (context.cascadesContext.isEnableExprTrace()) {
                                 traceExprChanged(rule, expr, newExpr);
                             }
-                            return newExpr;
+                            return Optional.of(newExpr);
                         }
                     }
                 }
-                return expr;
+                return Optional.empty();
             }
         }
     }
