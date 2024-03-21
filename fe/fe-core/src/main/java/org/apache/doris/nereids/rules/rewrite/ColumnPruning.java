@@ -224,15 +224,15 @@ public class ColumnPruning extends DefaultPlanRewriter<PruneContext> implements 
         if (!(prunedOutputAgg instanceof LogicalAggregate)) {
             return prunedOutputAgg;
         }
-        // add back group by keys which eliminated by rule ELIMINATE_GROUP_BY_KEY
-        // if related output expressions are not in pruned output list.
-        List<NamedExpression> remainedOutputExprs = Lists.newArrayList(output);
-        remainedOutputExprs.removeAll(groupBy);
 
         ImmutableList.Builder<NamedExpression> newOutputListBuilder
-                = ImmutableList.builderWithExpectedSize(groupBy.size() + remainedOutputExprs.size());
+                = ImmutableList.builderWithExpectedSize(output.size());
         newOutputListBuilder.addAll((List) groupBy);
-        newOutputListBuilder.addAll(remainedOutputExprs);
+        for (NamedExpression ne : output) {
+            if (!groupBy.contains(ne)) {
+                newOutputListBuilder.add(ne);
+            }
+        }
 
         List<NamedExpression> newOutputList = newOutputListBuilder.build();
         Set<AggregateFunction> aggregateFunctions = prunedOutputAgg.getAggregateFunctions();
