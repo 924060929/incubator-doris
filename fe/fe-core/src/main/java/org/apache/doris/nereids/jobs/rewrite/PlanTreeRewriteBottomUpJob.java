@@ -112,17 +112,42 @@ public class PlanTreeRewriteBottomUpJob extends PlanTreeRewriteJob {
         setState(plan, RewriteState.REWRITE_THIS, batchId);
         pushJob(new PlanTreeRewriteBottomUpJob(rewriteJobContext, context, rules));
 
+        // some rule return new plan tree, which the number of new plan node > 1,
+        // we should transform this new plan nodes too.
+        // NOTICE: this relay on pull up cte anchor
+        if (!(rewriteJobContext.plan instanceof LogicalCTEAnchor)) {
+            pushChildrenJobs(plan);
+        }
+    }
+
+    private void pushChildrenJobs(Plan plan) {
         List<Plan> children = plan.children();
-        for (int i = children.size() - 1; i >= 0; i--) {
-            Plan child = children.get(i);
-            // some rule return new plan tree, which the number of new plan node > 1,
-            // we should transform this new plan nodes too.
-            RewriteJobContext childRewriteJobContext = new RewriteJobContext(
-                    child, rewriteJobContext, i, false, batchId);
-            // NOTICE: this relay on pull up cte anchor
-            if (!(rewriteJobContext.plan instanceof LogicalCTEAnchor)) {
+        switch (children.size()) {
+            case 0: return;
+            case 1:
+                Plan child = children.get(0);
+                RewriteJobContext childRewriteJobContext = new RewriteJobContext(
+                        child, rewriteJobContext, 0, false, batchId);
                 pushJob(new PlanTreeRewriteBottomUpJob(childRewriteJobContext, context, rules));
-            }
+                return;
+            case 2:
+                Plan right = children.get(1);
+                RewriteJobContext rightRewriteJobContext = new RewriteJobContext(
+                        right, rewriteJobContext, 1, false, batchId);
+                pushJob(new PlanTreeRewriteBottomUpJob(rightRewriteJobContext, context, rules));
+
+                Plan left = children.get(0);
+                RewriteJobContext leftRewriteJobContext = new RewriteJobContext(
+                        left, rewriteJobContext, 0, false, batchId);
+                pushJob(new PlanTreeRewriteBottomUpJob(leftRewriteJobContext, context, rules));
+                return;
+            default:
+                for (int i = children.size() - 1; i >= 0; i--) {
+                    child = children.get(i);
+                    childRewriteJobContext = new RewriteJobContext(
+                            child, rewriteJobContext, i, false, batchId);
+                    pushJob(new PlanTreeRewriteBottomUpJob(childRewriteJobContext, context, rules));
+                }
         }
     }
 
