@@ -45,7 +45,7 @@ public abstract class TypeMappings<K, T extends TypeMapping<K>> {
                 // add some expressions which no child class
                 // e.g. LessThanEqual
                 addSimpleMapping(mapping);
-            } else if (childrenClasses.size() <= 100) {
+            } else {
                 // add some expression which has children classes
                 // e.g. ComparisonExpression will be expanded to
                 //      ruleMappings.put(ComparisonExpression.class, rule);
@@ -55,7 +55,7 @@ public abstract class TypeMappings<K, T extends TypeMapping<K>> {
                 //      ruleMappings.put(GreaterThanEquals.class, rule);
                 //      ...
                 addThisAndChildrenMapping(mapping, childrenClasses);
-            } else {
+            }// else {
                 // some expression has lots of children classes, e.g. Expression, ExpressionTrait, BinaryExpression,
                 // we will not expand this types to child class, but also add this rules to other type matching.
                 // for example, if we have three rules to matches this types: LessThanEqual, Abs and Expression,
@@ -71,8 +71,8 @@ public abstract class TypeMappings<K, T extends TypeMapping<K>> {
                 // ruleMappings.get(LessThanEqual.class) return two rules;
                 // if we matches `a = 1`, ruleMappings.get(EqualTo.class) will return empty rules, so we use
                 // all the rules in multiMatchRules to matches and apply, the rule_of_Expression will be applied.
-                addMultiMapping(mapping);
-            }
+                //addMultiMapping(mapping);
+            //}
         }
     }
 

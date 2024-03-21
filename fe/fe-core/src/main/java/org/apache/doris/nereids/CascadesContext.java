@@ -138,6 +138,7 @@ public class CascadesContext implements ScheduleContext {
     // this field is modified by FoldConstantRuleOnFE, it matters current traverse
     // into AggregateFunction with distinct, we can not fold constant in this case
     private int distinctAggLevel;
+    private final boolean isEnableExprTrace;
 
     /**
      * Constructor of OptimizerContext.
@@ -161,6 +162,13 @@ public class CascadesContext implements ScheduleContext {
         this.subqueryExprIsAnalyzed = new HashMap<>();
         this.runtimeFilterContext = new RuntimeFilterContext(getConnectContext().getSessionVariable());
         this.materializationContexts = new ArrayList<>();
+        if (statementContext.getConnectContext() != null) {
+            ConnectContext connectContext = statementContext.getConnectContext();
+            SessionVariable sessionVariable = connectContext.getSessionVariable();
+            this.isEnableExprTrace = sessionVariable != null && sessionVariable.isEnableExprTrace();
+        } else {
+            this.isEnableExprTrace = false;
+        }
     }
 
     /**
@@ -371,11 +379,7 @@ public class CascadesContext implements ScheduleContext {
             return defaultValue;
         }
 
-        StatementContext statementContext = getStatementContext();
-        if (statementContext == null) {
-            return defaultValue;
-        }
-        return statementContext.getOrRegisterCache(cacheName,
+        return getStatementContext().getOrRegisterCache(cacheName,
                 () -> variableSupplier.apply(connectContext.getSessionVariable()));
     }
 
@@ -748,5 +752,9 @@ public class CascadesContext implements ScheduleContext {
 
     public int getDistinctAggLevel() {
         return distinctAggLevel;
+    }
+
+    public boolean isEnableExprTrace() {
+        return isEnableExprTrace;
     }
 }
