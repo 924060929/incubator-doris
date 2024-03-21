@@ -109,7 +109,7 @@ public abstract class TypeMappings<K, T extends TypeMapping<K>> {
         for (Class<? extends K> existSingleType : existSingleMappingTypes) {
             Class<? extends K> type = multiMapping.getType();
             if (type.isAssignableFrom(existSingleType)) {
-                singleMappings.put(type, multiMapping);
+                singleMappings.put(existSingleType, multiMapping);
             }
         }
     }

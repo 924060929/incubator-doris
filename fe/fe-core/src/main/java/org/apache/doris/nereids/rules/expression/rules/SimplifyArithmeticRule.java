@@ -169,13 +169,13 @@ public class SimplifyArithmeticRule implements ExpressionPatternRuleFactory {
         }
     }
 
-    private static Expression getSubOrDivide(boolean isAddOrSub, Operand x, Operand y) {
-        return isAddOrSub ? new Subtract(x.expression, y.expression)
+    private static Expression getSubOrDivide(boolean isSubOrDivide, Operand x, Operand y) {
+        return isSubOrDivide ? new Subtract(x.expression, y.expression)
                 : new Divide(x.expression, y.expression);
     }
 
-    private static Expression getAddOrMultiply(boolean isAddOrSub, Operand x, Operand y) {
-        return isAddOrSub ? new Add(x.expression, y.expression)
+    private static Expression getAddOrMultiply(boolean isAddOrMultiply, Operand x, Operand y) {
+        return isAddOrMultiply ? new Add(x.expression, y.expression)
                 : new Multiply(x.expression, y.expression);
     }
 

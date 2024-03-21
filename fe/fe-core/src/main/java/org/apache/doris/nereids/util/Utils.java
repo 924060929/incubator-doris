@@ -397,7 +397,7 @@ public class Utils {
         }
         M merge = list.get(0);
         for (int i = 1; i < list.size(); i++) {
-            reduceOp.apply(merge, list.get(i));
+            merge = reduceOp.apply(merge, list.get(i));
         }
         return Optional.of(merge);
     }
