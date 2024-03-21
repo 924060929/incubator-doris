@@ -47,8 +47,7 @@ public class ExpressionBottomUpRewriter implements ExpressionRewriteRule<Express
     @Override
     public Expression rewrite(Expression expr, ExpressionRewriteContext ctx) {
         int currentBatch = rewriteBatchId.incrementAndGet();
-        Expression expression = rewriteBottomUp(expr, ctx, currentBatch, null, rules, listeners);
-        return expression;
+        return rewriteBottomUp(expr, ctx, currentBatch, null, rules, listeners);
     }
 
     private static Expression rewriteBottomUp(
