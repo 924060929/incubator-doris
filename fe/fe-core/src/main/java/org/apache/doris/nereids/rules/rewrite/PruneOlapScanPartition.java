@@ -32,8 +32,6 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalOlapScan;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.qe.ConnectContext;
 
-import com.google.common.collect.Maps;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -59,20 +57,22 @@ public class PruneOlapScanPartition extends OneRewriteRuleFactory {
             }
 
             List<Slot> output = scan.getOutput();
-            Map<String, Slot> scanOutput = Maps.newHashMapWithExpectedSize(output.size() * 2);
-            for (Slot slot : output) {
-                scanOutput.put(slot.getName().toLowerCase(), slot);
-            }
-
             PartitionInfo partitionInfo = table.getPartitionInfo();
             List<Column> partitionColumns = partitionInfo.getPartitionColumns();
             List<Slot> partitionSlots = new ArrayList<>(partitionColumns.size());
             for (Column column : partitionColumns) {
-                Slot slot = scanOutput.get(column.getName().toLowerCase());
-                if (slot == null) {
+                Slot partitionSlot = null;
+                // loop search is faster than build a map
+                for (Slot slot : output) {
+                    if (slot.getName().equalsIgnoreCase(column.getName())) {
+                        partitionSlot = slot;
+                        break;
+                    }
+                }
+                if (partitionSlot == null) {
                     return filter;
                 } else {
-                    partitionSlots.add(slot);
+                    partitionSlots.add(partitionSlot);
                 }
             }
 

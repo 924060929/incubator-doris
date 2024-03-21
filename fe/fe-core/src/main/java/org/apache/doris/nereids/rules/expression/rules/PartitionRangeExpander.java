@@ -74,10 +74,44 @@ public class PartitionRangeExpander {
     }
 
     /** expandRangeLiterals */
-    public final List<List<Expression>> tryExpandRange(
+    public static final List<List<Expression>> tryExpandRange(
             List<Slot> partitionSlots, List<Literal> lowers, List<Literal> uppers,
             List<PartitionSlotType> partitionSlotTypes, int expandThreshold) {
+        if (partitionSlots.size() == 1) {
+            return tryExpandSingleColumnRange(partitionSlots.get(0), lowers.get(0),
+                    uppers.get(0), expandThreshold);
+        } else {
+            // slow path
+            return commonTryExpandRange(partitionSlots, lowers, uppers, partitionSlotTypes, expandThreshold);
+        }
+    }
 
+    private static List<List<Expression>> tryExpandSingleColumnRange(Slot partitionSlot, Literal lower,
+            Literal upper, int expandThreshold) {
+        // must be range slot
+        try {
+            if (canExpandRange(partitionSlot, lower, upper, 1, expandThreshold)) {
+                Iterator<? extends Expression> iterator = enumerableIterator(
+                        partitionSlot, lower, upper, true);
+                if (iterator instanceof SingletonIterator) {
+                    return ImmutableList.of(ImmutableList.of(iterator.next()));
+                } else {
+                    return ImmutableList.of(
+                            ImmutableList.copyOf(iterator)
+                    );
+                }
+            } else {
+                return ImmutableList.of(ImmutableList.of(partitionSlot));
+            }
+        } catch (Throwable t) {
+            // catch for safety, should not invoke here
+            return ImmutableList.of(ImmutableList.of(partitionSlot));
+        }
+    }
+
+    private static List<List<Expression>> commonTryExpandRange(
+            List<Slot> partitionSlots, List<Literal> lowers, List<Literal> uppers,
+            List<PartitionSlotType> partitionSlotTypes, int expandThreshold) {
         long expandedCount = 1;
         List<List<Expression>> expandedLists = Lists.newArrayListWithCapacity(lowers.size());
         for (int i = 0; i < partitionSlotTypes.size(); i++) {
@@ -126,7 +160,7 @@ public class PartitionRangeExpander {
         return expandedLists;
     }
 
-    private boolean canExpandRange(Slot slot, Literal lower, Literal upper,
+    private static boolean canExpandRange(Slot slot, Literal lower, Literal upper,
             long expandedCount, int expandThreshold) {
         DataType type = slot.getDataType();
         if (!type.isIntegerLikeType() && !type.isDateType() && !type.isDateV2Type()) {
@@ -139,7 +173,7 @@ public class PartitionRangeExpander {
             }
             // too much expanded will consuming resources of frontend,
             // e.g. [1, 100000000), we should skip expand it
-            return (expandedCount * count) <= expandThreshold;
+            return count == 1 || (expandedCount * count) <= expandThreshold;
         } catch (Throwable t) {
             // e.g. max_value can not expand
             return false;
@@ -147,7 +181,7 @@ public class PartitionRangeExpander {
     }
 
     /** the types will like this: [CONST, CONST, ..., RANGE, OTHER, OTHER, ...] */
-    public List<PartitionSlotType> computePartitionSlotTypes(List<Literal> lowers, List<Literal> uppers) {
+    public static List<PartitionSlotType> computePartitionSlotTypes(List<Literal> lowers, List<Literal> uppers) {
         PartitionSlotType previousType = PartitionSlotType.CONST;
         List<PartitionSlotType> types = Lists.newArrayListWithCapacity(lowers.size());
         for (int i = 0; i < lowers.size(); ++i) {
@@ -167,7 +201,7 @@ public class PartitionRangeExpander {
         return types;
     }
 
-    private long enumerableCount(DataType dataType, Literal startInclusive, Literal endExclusive) {
+    private static long enumerableCount(DataType dataType, Literal startInclusive, Literal endExclusive) {
         if (dataType.isIntegerLikeType()) {
             BigInteger start = new BigInteger(startInclusive.getStringValue());
             BigInteger end = new BigInteger(endExclusive.getStringValue());
@@ -175,6 +209,12 @@ public class PartitionRangeExpander {
         } else if (dataType.isDateType()) {
             DateLiteral startInclusiveDate = (DateLiteral) startInclusive;
             DateLiteral endExclusiveDate = (DateLiteral) endExclusive;
+
+            if (startInclusiveDate.getYear() == endExclusiveDate.getYear()
+                    && startInclusiveDate.getMonth() == endExclusiveDate.getMonth()) {
+                return endExclusiveDate.getDay() - startInclusiveDate.getDay();
+            }
+
             LocalDate startDate = LocalDate.of(
                     (int) startInclusiveDate.getYear(),
                     (int) startInclusiveDate.getMonth(),
@@ -192,6 +232,12 @@ public class PartitionRangeExpander {
         } else if (dataType.isDateV2Type()) {
             DateV2Literal startInclusiveDate = (DateV2Literal) startInclusive;
             DateV2Literal endExclusiveDate = (DateV2Literal) endExclusive;
+
+            if (startInclusiveDate.getYear() == endExclusiveDate.getYear()
+                    && startInclusiveDate.getMonth() == endExclusiveDate.getMonth()) {
+                return endExclusiveDate.getDay() - startInclusiveDate.getDay();
+            }
+
             LocalDate startDate = LocalDate.of(
                     (int) startInclusiveDate.getYear(),
                     (int) startInclusiveDate.getMonth(),
@@ -212,7 +258,7 @@ public class PartitionRangeExpander {
         return -1;
     }
 
-    private Iterator<? extends Expression> enumerableIterator(
+    private static Iterator<? extends Expression> enumerableIterator(
             Slot slot, Literal startInclusive, Literal endLiteral, boolean endExclusive) {
         DataType dataType = slot.getDataType();
         if (dataType.isIntegerLikeType()) {
@@ -237,6 +283,12 @@ public class PartitionRangeExpander {
         } else if (dataType.isDateType()) {
             DateLiteral startInclusiveDate = (DateLiteral) startInclusive;
             DateLiteral endLiteralDate = (DateLiteral) endLiteral;
+            if (endExclusive && startInclusiveDate.getYear() == endLiteralDate.getYear()
+                    && startInclusiveDate.getMonth() == endLiteralDate.getMonth()
+                    && startInclusiveDate.getDay() + 1 == endLiteralDate.getDay()) {
+                return new SingletonIterator(startInclusive);
+            }
+
             LocalDate startDate = LocalDate.of(
                     (int) startInclusiveDate.getYear(),
                     (int) startInclusiveDate.getMonth(),
@@ -258,6 +310,13 @@ public class PartitionRangeExpander {
         } else if (dataType.isDateV2Type()) {
             DateV2Literal startInclusiveDate = (DateV2Literal) startInclusive;
             DateV2Literal endLiteralDate = (DateV2Literal) endLiteral;
+
+            if (endExclusive && startInclusiveDate.getYear() == endLiteralDate.getYear()
+                    && startInclusiveDate.getMonth() == endLiteralDate.getMonth()
+                    && startInclusiveDate.getDay() + 1 == endLiteralDate.getDay()) {
+                return new SingletonIterator(startInclusive);
+            }
+
             LocalDate startDate = LocalDate.of(
                     (int) startInclusiveDate.getYear(),
                     (int) startInclusiveDate.getMonth(),
@@ -282,7 +341,7 @@ public class PartitionRangeExpander {
         return Iterators.singletonIterator(slot);
     }
 
-    private class IntegerLikeRangePartitionValueIterator<L extends IntegerLikeLiteral>
+    private static class IntegerLikeRangePartitionValueIterator<L extends IntegerLikeLiteral>
             extends RangePartitionValueIterator<BigInteger, L> {
 
         public IntegerLikeRangePartitionValueIterator(BigInteger startInclusive, BigInteger end,
@@ -296,7 +355,7 @@ public class PartitionRangeExpander {
         }
     }
 
-    private class DateLikeRangePartitionValueIterator<L extends Literal>
+    private static class DateLikeRangePartitionValueIterator<L extends Literal>
             extends RangePartitionValueIterator<LocalDate, L> {
 
         public DateLikeRangePartitionValueIterator(
@@ -310,7 +369,7 @@ public class PartitionRangeExpander {
         }
     }
 
-    private abstract class RangePartitionValueIterator<C extends Comparable, L extends Literal>
+    private static abstract class RangePartitionValueIterator<C extends Comparable, L extends Literal>
             implements Iterator<L> {
         private final C startInclusive;
         private final C end;

@@ -121,10 +121,15 @@ public class PartitionPruner extends DefaultExpressionRewriter<Void> {
                 partitionPredicate, ImmutableSet.copyOf(partitionSlots), cascadesContext);
         partitionPredicate = PredicateRewriteForPartitionPrune.rewrite(partitionPredicate, cascadesContext);
 
+
+        int expandThreshold = cascadesContext.getAndCacheSessionVariable(
+                "partitionPruningExpandThreshold",
+                10, sessionVariable -> sessionVariable.partitionPruningExpandThreshold);
+
         List<OnePartitionEvaluator> evaluators = Lists.newArrayListWithCapacity(idToPartitions.size());
         for (Entry<Long, PartitionItem> kv : idToPartitions.entrySet()) {
             evaluators.add(toPartitionEvaluator(
-                    kv.getKey(), kv.getValue(), partitionSlots, cascadesContext, partitionTableType));
+                    kv.getKey(), kv.getValue(), partitionSlots, cascadesContext, expandThreshold));
         }
 
         partitionPredicate = OrToIn.INSTANCE.rewriteTree(
@@ -138,13 +143,13 @@ public class PartitionPruner extends DefaultExpressionRewriter<Void> {
      * convert partition item to partition evaluator
      */
     public static final OnePartitionEvaluator toPartitionEvaluator(long id, PartitionItem partitionItem,
-            List<Slot> partitionSlots, CascadesContext cascadesContext, PartitionTableType partitionTableType) {
+            List<Slot> partitionSlots, CascadesContext cascadesContext, int expandThreshold) {
         if (partitionItem instanceof ListPartitionItem) {
             return new OneListPartitionEvaluator(
                     id, partitionSlots, (ListPartitionItem) partitionItem, cascadesContext);
         } else if (partitionItem instanceof RangePartitionItem) {
             return new OneRangePartitionEvaluator(
-                    id, partitionSlots, (RangePartitionItem) partitionItem, cascadesContext);
+                    id, partitionSlots, (RangePartitionItem) partitionItem, cascadesContext, expandThreshold);
         } else {
             return new UnknownPartitionEvaluator(id, partitionItem);
         }

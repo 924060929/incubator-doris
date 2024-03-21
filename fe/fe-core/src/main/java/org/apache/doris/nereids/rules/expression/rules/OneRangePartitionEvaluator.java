@@ -90,7 +90,7 @@ public class OneRangePartitionEvaluator
 
     /** OneRangePartitionEvaluator */
     public OneRangePartitionEvaluator(long partitionId, List<Slot> partitionSlots,
-            RangePartitionItem partitionItem, CascadesContext cascadesContext) {
+            RangePartitionItem partitionItem, CascadesContext cascadesContext, int expandThreshold) {
         this.partitionId = partitionId;
         this.partitionSlots = Objects.requireNonNull(partitionSlots, "partitionSlots cannot be null");
         this.partitionItem = Objects.requireNonNull(partitionItem, "partitionItem cannot be null");
@@ -101,41 +101,46 @@ public class OneRangePartitionEvaluator
         this.lowers = toNereidsLiterals(range.lowerEndpoint());
         this.uppers = toNereidsLiterals(range.upperEndpoint());
 
-        PartitionRangeExpander expander = new PartitionRangeExpander();
-        this.partitionSlotTypes = expander.computePartitionSlotTypes(lowers, uppers);
-        this.slotToType = Maps.newHashMapWithExpectedSize(16);
-        for (int i = 0; i < partitionSlots.size(); i++) {
-            slotToType.put(partitionSlots.get(i), partitionSlotTypes.get(i));
+        this.partitionSlotTypes = PartitionRangeExpander.computePartitionSlotTypes(lowers, uppers);
+
+        if (partitionSlots.size() == 1) {
+            // fast path
+            Slot partSlot = partitionSlots.get(0);
+            this.slotToType = ImmutableMap.of(partSlot, partitionSlotTypes.get(0));
+            this.partitionSlotContainsNull
+                    = ImmutableMap.of(partSlot, range.lowerEndpoint().getKeys().get(0).isMinValue());
+        } else {
+            // slow path
+            this.slotToType = Maps.newHashMap();
+            for (int i = 0; i < partitionSlots.size(); i++) {
+                slotToType.put(partitionSlots.get(i), partitionSlotTypes.get(i));
+            }
+
+            this.partitionSlotContainsNull = Maps.newHashMap();
+            for (int i = 0; i < partitionSlots.size(); i++) {
+                Slot slot = partitionSlots.get(i);
+                if (!slot.nullable()) {
+                    partitionSlotContainsNull.put(slot, false);
+                    continue;
+                }
+                PartitionSlotType partitionSlotType = partitionSlotTypes.get(i);
+                boolean maybeNull;
+                switch (partitionSlotType) {
+                    case CONST:
+                    case RANGE:
+                        maybeNull = range.lowerEndpoint().getKeys().get(i).isMinValue();
+                        break;
+                    case OTHER:
+                        maybeNull = true;
+                        break;
+                    default:
+                        throw new AnalysisException("Unknown partition slot type: " + partitionSlotType);
+                }
+                partitionSlotContainsNull.put(slot, maybeNull);
+            }
         }
 
-        this.partitionSlotContainsNull = Maps.newHashMapWithExpectedSize(16);
-        for (int i = 0; i < partitionSlots.size(); i++) {
-            Slot slot = partitionSlots.get(i);
-            if (!slot.nullable()) {
-                partitionSlotContainsNull.put(slot, false);
-                continue;
-            }
-            PartitionSlotType partitionSlotType = partitionSlotTypes.get(i);
-            boolean maybeNull = false;
-            switch (partitionSlotType) {
-                case CONST:
-                case RANGE:
-                    maybeNull = range.lowerEndpoint().getKeys().get(i).isMinValue();
-                    break;
-                case OTHER:
-                    maybeNull = true;
-                    break;
-                default:
-                    throw new AnalysisException("Unknown partition slot type: " + partitionSlotType);
-            }
-            partitionSlotContainsNull.put(slot, maybeNull);
-        }
-
-        int expandThreshold = cascadesContext.getAndCacheSessionVariable(
-                "partitionPruningExpandThreshold",
-                10, sessionVariable -> sessionVariable.partitionPruningExpandThreshold);
-
-        List<List<Expression>> expandInputs = expander.tryExpandRange(
+        List<List<Expression>> expandInputs = PartitionRangeExpander.tryExpandRange(
                 partitionSlots, lowers, uppers, partitionSlotTypes, expandThreshold);
         // after expand range, we will get 2 dimension list like list:
         // part_col1: [1], part_col2:[4, 5, 6], we should combine it to
@@ -555,9 +560,27 @@ public class OneRangePartitionEvaluator
     }
 
     private List<Literal> toNereidsLiterals(PartitionKey partitionKey) {
-        List<Literal> literals = Lists.newArrayListWithCapacity(partitionKey.getKeys().size());
-        for (int i = 0; i < partitionKey.getKeys().size(); i++) {
-            LiteralExpr literalExpr = partitionKey.getKeys().get(i);
+        if (partitionKey.getKeys().size() == 1) {
+            // fast path
+            return toSingleNereidsLiteral(partitionKey);
+        }
+
+        // slow path
+        return toMultiNereidsLiterals(partitionKey);
+    }
+    private List<Literal> toSingleNereidsLiteral(PartitionKey partitionKey) {
+        List<LiteralExpr> keys = partitionKey.getKeys();
+        LiteralExpr literalExpr = keys.get(0);
+        PrimitiveType primitiveType = partitionKey.getTypes().get(0);
+        Type type = Type.fromPrimitiveType(primitiveType);
+        return ImmutableList.of(Literal.fromLegacyLiteral(literalExpr, type));
+    }
+
+    private List<Literal> toMultiNereidsLiterals(PartitionKey partitionKey) {
+        List<LiteralExpr> keys = partitionKey.getKeys();
+        List<Literal> literals = Lists.newArrayListWithCapacity(keys.size());
+        for (int i = 0; i < keys.size(); i++) {
+            LiteralExpr literalExpr = keys.get(i);
             PrimitiveType primitiveType = partitionKey.getTypes().get(i);
             Type type = Type.fromPrimitiveType(primitiveType);
             literals.add(Literal.fromLegacyLiteral(literalExpr, type));
