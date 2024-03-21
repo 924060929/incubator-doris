@@ -41,7 +41,6 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Iterator;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.function.Function;
 
 /**
@@ -367,44 +366,5 @@ public class PartitionRangeExpander {
         protected LocalDate doGetNext(LocalDate current) {
             return current.plusDays(1);
         }
-    }
-
-    private static abstract class RangePartitionValueIterator<C extends Comparable, L extends Literal>
-            implements Iterator<L> {
-        private final C startInclusive;
-        private final C end;
-        private final boolean endExclusive;
-        private C current;
-
-        private final Function<C, L> toLiteral;
-
-        public RangePartitionValueIterator(C startInclusive, C end, boolean endExclusive, Function<C, L> toLiteral) {
-            this.startInclusive = startInclusive;
-            this.end = end;
-            this.endExclusive = endExclusive;
-            this.current = this.startInclusive;
-            this.toLiteral = toLiteral;
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (endExclusive) {
-                return current.compareTo(end) < 0;
-            } else {
-                return current.compareTo(end) <= 0;
-            }
-        }
-
-        @Override
-        public L next() {
-            if (hasNext()) {
-                C value = current;
-                current = doGetNext(current);
-                return toLiteral.apply(value);
-            }
-            throw new NoSuchElementException();
-        }
-
-        protected abstract C doGetNext(C current);
     }
 }

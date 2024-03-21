@@ -390,6 +390,7 @@ public class Utils {
         return newList.build();
     }
 
+    /** fastReduce */
     public static <M, T extends M> Optional<M> fastReduce(List<T> list, BiFunction<M, T, M> reduceOp) {
         if (list.isEmpty()) {
             return Optional.empty();

@@ -675,7 +675,6 @@ public class ExpressionUtils {
         return true;
     }
 
-
     /** anyMatch */
     public static boolean anyMatch(
             Collection<? extends Expression> expressions, Predicate<Expression> predicate) {

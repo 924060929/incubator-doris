@@ -568,6 +568,7 @@ public class OneRangePartitionEvaluator
         // slow path
         return toMultiNereidsLiterals(partitionKey);
     }
+
     private List<Literal> toSingleNereidsLiteral(PartitionKey partitionKey) {
         List<LiteralExpr> keys = partitionKey.getKeys();
         LiteralExpr literalExpr = keys.get(0);

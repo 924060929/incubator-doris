@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.tools.StandardLocation;
 
-/** ExpressionTypeMappingGenerator*/
+/** ExpressionTypeMappingGenerator */
 public class ExpressionTypeMappingGenerator {
     private final JavaAstAnalyzer analyzer;
 

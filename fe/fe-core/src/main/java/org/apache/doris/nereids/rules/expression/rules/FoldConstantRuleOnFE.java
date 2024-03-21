@@ -105,7 +105,6 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule
         implements ExpressionPatternRuleFactory, ExpressionTraverseListenerFactory {
 
     public static final FoldConstantRuleOnFE VISITOR_INSTANCE = new FoldConstantRuleOnFE(true);
-
     public static final FoldConstantRuleOnFE PATTERN_MATCH_INSTANCE = new FoldConstantRuleOnFE(false);
 
     // record whether current expression is in an aggregate function with distinct,
@@ -113,14 +112,14 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule
     private static final ListenAggDistinct LISTEN_AGG_DISTINCT = new ListenAggDistinct();
     private static final CheckWhetherUnderAggDistinct NOT_UNDER_AGG_DISTINCT = new CheckWhetherUnderAggDistinct();
 
-    public static Expression evaluate(Expression expression, ExpressionRewriteContext expressionRewriteContext) {
-        return VISITOR_INSTANCE.rewrite(expression, expressionRewriteContext);
-    }
-
     private final boolean deepRewrite;
 
     public FoldConstantRuleOnFE(boolean deepRewrite) {
         this.deepRewrite = deepRewrite;
+    }
+
+    public static Expression evaluate(Expression expression, ExpressionRewriteContext expressionRewriteContext) {
+        return VISITOR_INSTANCE.rewrite(expression, expressionRewriteContext);
     }
 
     @Override

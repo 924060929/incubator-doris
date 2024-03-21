@@ -121,7 +121,6 @@ public class PartitionPruner extends DefaultExpressionRewriter<Void> {
                 partitionPredicate, ImmutableSet.copyOf(partitionSlots), cascadesContext);
         partitionPredicate = PredicateRewriteForPartitionPrune.rewrite(partitionPredicate, cascadesContext);
 
-
         int expandThreshold = cascadesContext.getAndCacheSessionVariable(
                 "partitionPruningExpandThreshold",
                 10, sessionVariable -> sessionVariable.partitionPruningExpandThreshold);
