@@ -35,34 +35,28 @@ public class FoldConstantRule implements ExpressionPatternRuleFactory {
 
     public static final FoldConstantRule INSTANCE = new FoldConstantRule();
 
-    private static final FoldConstantRuleOnFE FOLD_CONSTANT_BY_FE = FoldConstantRuleOnFE.INSTANCE;
-    private static final FoldConstantRuleOnBE FOLD_CONSTANT_BY_BE = FoldConstantRuleOnBE.INSTANCE;
-
     private static final ExpressionBottomUpRewriter FULL_FOLD_REWRITER = ExpressionRewrite.bottomUp(
-            FOLD_CONSTANT_BY_FE,
-            FOLD_CONSTANT_BY_BE
+            FoldConstantRuleOnFE.VISITOR_INSTANCE,
+            FoldConstantRuleOnBE.INSTANCE
     );
 
-    private static final ExpressionBottomUpRewriter FOLD_BY_FE_REWRITER = ExpressionRewrite.bottomUp(
-            FoldConstantRuleOnFE.INSTANCE
-    );
-
+    /** evaluate by pattern match */
     @Override
     public List<ExpressionPatternMatcher<? extends Expression>> buildRules() {
         return ImmutableList.<ExpressionPatternMatcher<? extends Expression>>builder()
-                .addAll(FoldConstantRuleOnFE.INSTANCE.buildRules())
+                .addAll(FoldConstantRuleOnFE.PATTERN_MATCH_INSTANCE.buildRules())
                 .addAll(FoldConstantRuleOnBE.INSTANCE.buildRules())
                 .build();
     }
 
-    /** evaluate */
+    /** evaluate by visitor */
     public static Expression evaluate(Expression expr, ExpressionRewriteContext ctx) {
         if (ctx.cascadesContext != null
                 && ctx.cascadesContext.getConnectContext() != null
                 && ctx.cascadesContext.getConnectContext().getSessionVariable().isEnableFoldConstantByBe()) {
             return FULL_FOLD_REWRITER.rewrite(expr, ctx);
         } else {
-            return FOLD_BY_FE_REWRITER.rewrite(expr, ctx);
+            return FoldConstantRuleOnFE.VISITOR_INSTANCE.rewrite(expr, ctx);
         }
     }
 }

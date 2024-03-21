@@ -47,7 +47,7 @@ public class ExpressionPatternRules extends TypeMappings<Expression, ExpressionP
     public Optional<Expression> matchesAndApply(Expression expr, ExpressionRewriteContext context, Expression parent) {
         List<ExpressionPatternMatchRule> rules = singleMappings.get(expr.getClass());
         ExpressionMatchingContext<Expression> matchingContext
-                = new ExpressionMatchingContext<>(expr, parent, context.cascadesContext);
+                = new ExpressionMatchingContext<>(expr, parent, context);
         switch (rules.size()) {
             case 0: {
                 for (ExpressionPatternMatchRule multiMatchRule : multiMappings) {

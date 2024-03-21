@@ -26,13 +26,14 @@ import java.util.Optional;
 public class ExpressionMatchingContext<E extends Expression> {
     public final E expr;
     public final Optional<Expression> parent;
+    public final ExpressionRewriteContext rewriteContext;
     public final CascadesContext cascadesContext;
 
-    public ExpressionMatchingContext(E expr, Expression parent,
-            CascadesContext cascadesContext) {
+    public ExpressionMatchingContext(E expr, Expression parent, ExpressionRewriteContext context) {
         this.expr = expr;
         this.parent = Optional.ofNullable(parent);
-        this.cascadesContext = cascadesContext;
+        this.rewriteContext = context;
+        this.cascadesContext = context.cascadesContext;
     }
 
     public boolean isRoot() {

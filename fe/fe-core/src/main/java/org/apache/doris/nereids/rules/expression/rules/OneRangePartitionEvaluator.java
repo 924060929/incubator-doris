@@ -428,11 +428,11 @@ public class OneRangePartitionEvaluator
 
     private EvaluateRangeResult evaluateChildrenThenThis(Expression expr, EvaluateRangeInput context) {
         // evaluate children
-        List<Expression> newChildren = new ArrayList<>();
-        List<EvaluateRangeResult> childrenResults = new ArrayList<>();
+        List<Expression> children = expr.children();
+        ImmutableList.Builder<Expression> newChildren = ImmutableList.builderWithExpectedSize(children.size());
+        List<EvaluateRangeResult> childrenResults = new ArrayList<>(children.size());
         boolean hasNewChildren = false;
 
-        List<Expression> children = expr.children();
         for (int i = 0; i < children.size(); i++) {
             Expression child = children.get(i);
             EvaluateRangeResult childResult = child.accept(this, context);
@@ -443,7 +443,7 @@ public class OneRangePartitionEvaluator
             newChildren.add(childResult.result);
         }
         if (hasNewChildren) {
-            expr = expr.withChildren(newChildren);
+            expr = expr.withChildren(newChildren.build());
         }
 
         // evaluate this

@@ -47,7 +47,7 @@ public class ExpressionPatternTraverseListeners
             Expression expr, ExpressionRewriteContext context, Expression parent) {
         List<ExpressionTraverseListenerMapping> listenerSingleMappings = singleMappings.get(expr.getClass());
         ExpressionMatchingContext<Expression> matchingContext
-                = new ExpressionMatchingContext<>(expr, parent, context.cascadesContext);
+                = new ExpressionMatchingContext<>(expr, parent, context);
         switch (listenerSingleMappings.size()) {
             case 0: {
                 ImmutableList.Builder<ExpressionTraverseListener<Expression>> matchedListeners
