@@ -393,6 +393,7 @@ public class Utils {
         return newList.build();
     }
 
+    /** concatToSet */
     public static <E> Set<E> concatToSet(Collection<? extends E> left, Collection<? extends E> right) {
         ImmutableSet.Builder<E> required = ImmutableSet.builderWithExpectedSize(
                 left.size() + right.size()
