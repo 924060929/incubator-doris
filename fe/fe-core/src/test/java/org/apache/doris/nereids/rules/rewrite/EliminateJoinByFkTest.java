@@ -144,8 +144,8 @@ class EliminateJoinByFkTest extends TestWithFeService implements MemoPatternMatc
                 .rewrite()
                 .nonMatch(logicalJoin())
                 .matches(logicalFilter().when(f -> {
-                    Assertions.assertEquals("( not id3 IS NULL)", f.getExpressions().get(0).toSql());
-                    Assertions.assertEquals("(id3 = 1)", f.getExpressions().get(1).toSql());
+                    Assertions.assertEquals("(id3 = 1)", f.getExpressions().get(0).toSql());
+                    Assertions.assertEquals("( not id3 IS NULL)", f.getExpressions().get(1).toSql());
                     return true;
                 }))
                 .printlnTree();
