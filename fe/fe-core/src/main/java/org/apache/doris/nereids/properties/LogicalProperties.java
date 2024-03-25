@@ -79,9 +79,9 @@ public class LogicalProperties {
             return slots.build();
         });
         this.outputMapSupplier = Suppliers.memoize(() -> {
-            List<Slot> output = outputSupplier.get();
-            ImmutableMap.Builder<Slot, Slot> map = ImmutableMap.builderWithExpectedSize(output.size());
-            for (Slot slot : output) {
+            Set<Slot> slots = outputSetSupplier.get();
+            ImmutableMap.Builder<Slot, Slot> map = ImmutableMap.builderWithExpectedSize(slots.size());
+            for (Slot slot : slots) {
                 map.put(slot, slot);
             }
             return map.build();
