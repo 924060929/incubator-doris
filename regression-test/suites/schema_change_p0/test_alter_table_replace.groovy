@@ -96,7 +96,7 @@ suite("test_alter_table_replace") {
     test {
         sql """ select * from ${tbNameB} order by user_id"""
         // check exception message contains
-        exception "Table [${tbNameB}] does not exist in database"
+        exception "Unknown table '${tbNameB}'"
     }
 
     sql "DROP TABLE IF EXISTS ${tbNameA} FORCE;"
