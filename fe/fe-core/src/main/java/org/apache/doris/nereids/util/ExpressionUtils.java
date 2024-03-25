@@ -90,7 +90,7 @@ public class ExpressionUtils {
     }
 
     public static Set<Expression> extractConjunctionToSet(Expression expr) {
-        Set<Expression> exprSet = Sets.newHashSet();
+        Set<Expression> exprSet = Sets.newLinkedHashSet();
         extract(And.class, expr, exprSet);
         return exprSet;
     }
