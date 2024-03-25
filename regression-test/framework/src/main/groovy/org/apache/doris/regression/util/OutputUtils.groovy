@@ -92,7 +92,7 @@ class OutputUtils {
                             return null
                         }
                     }
-                    return "${info}, line ${line}, ${dataType} result mismatch.\nExpect cell is: ${expectCell}\nBut real is: ${realCell}\nrelative error is: ${realRelativeError}, bigger than ${expectRelativeError}"
+                    return "${info}, line ${line}, ${dataType} result mismatch.\nExpect cell is: ${expectCell}\nBut real is   : ${realCell}\nrelative error is: ${realRelativeError}, bigger than ${expectRelativeError}"
                 }
             }
         } else if(dataType == "DATE" || dataType =="DATETIME") {
@@ -100,11 +100,11 @@ class OutputUtils {
             realCell = realCell.replace("T", " ")
 
             if(!expectCell.equals(realCell)) {
-                return "${info}, line ${line}, ${dataType} result mismatch.\nExpect cell is: ${expectCell}\nBut real is: ${realCell}"
+                return "${info}, line ${line}, ${dataType} result mismatch.\nExpect cell is: ${expectCell}\nBut real is   : ${realCell}"
             }
         } else {
             if(!expectCell.equals(realCell)) {
-                return "${info}, line ${line}, ${dataType} result mismatch.\nExpect cell is: ${expectCell}\nBut real is: ${realCell}"
+                return "${info}, line ${line}, ${dataType} result mismatch.\nExpect cell is: ${expectCell}\nBut real is   : ${realCell}"
             }
         }
 
@@ -141,7 +141,7 @@ class OutputUtils {
 
                     def res = checkCell(info, line, expectCell, realCell, dataType)
                     if(res != null) {
-                        res += "\nline ${line} mismatch\nExpectRow: ${expectRaw}\nRealRow: ${realRaw}";
+                        res += "\nline ${line} mismatch\nExpectRow: ${expectRaw}\nRealRow  : ${realRaw}";
                         return res
                     }
                 }
@@ -149,7 +149,7 @@ class OutputUtils {
                 def expectCsvString = transform1.apply(expectRaw)
                 def realCsvString = transform2.apply(realRaw)
                 if (!expectCsvString.equals(realCsvString)) {
-                    return "${info}, line ${line} mismatch.\nExpect line is: ${expectCsvString}\nBut real is: ${realCsvString}"
+                    return "${info}, line ${line} mismatch.\nExpect line is: ${expectCsvString}\nBut real is   : ${realCsvString}"
                 }
             }
 
