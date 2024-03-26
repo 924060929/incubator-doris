@@ -737,6 +737,10 @@ public class CascadesContext implements ScheduleContext {
     }
 
     public void printPlanProcess() {
+        printPlanProcess(this.planProcesses);
+    }
+
+    public static void printPlanProcess(List<PlanProcess> planProcesses) {
         for (PlanProcess row : planProcesses) {
             LOG.info("RULE: " + row.ruleName + "\nBEFORE:\n" + row.beforeShape + "\nafter:\n" + row.afterShape);
         }
