@@ -825,7 +825,7 @@ public class ExpressionUtils {
     /**
      * Get input slot set from list of expressions.
      */
-    public static Set<Slot> getInputSlotSet(Collection<Expression> exprs) {
+    public static Set<Slot> getInputSlotSet(Collection<? extends Expression> exprs) {
         Set<Slot> set = new HashSet<>();
         for (Expression expr : exprs) {
             set.addAll(expr.getInputSlots());
