@@ -101,8 +101,8 @@ public class HyperGraphTest {
         for (int i = 0; i < 10; i++) {
             HyperGraphBuilder hyperGraphBuilder = new HyperGraphBuilder();
             HyperGraph hyperGraph = hyperGraphBuilder.randomBuildWith(tableNum, edgeNum);
-            Assertions.assertEquals(hyperGraph.getNodes().size(), tableNum);
-            Assertions.assertEquals(hyperGraph.getJoinEdges().size(), edgeNum);
+            Assertions.assertEquals(tableNum, hyperGraph.getNodes().size());
+            Assertions.assertEquals(edgeNum, hyperGraph.getJoinEdges().size());
         }
     }
 }
