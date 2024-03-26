@@ -231,17 +231,18 @@ public class NormalizeAggregate implements RewriteRuleFactory, NormalizeToSlot {
         // agg output include 2 parts
         // pushedGroupByExprs and normalized agg functions
 
-        ImmutableList.Builder<NamedExpression> normalizedAggOutput
+        ImmutableList.Builder<NamedExpression> normalizedAggOutputBuilder
                 = ImmutableList.builderWithExpectedSize(groupingByExprs.size() + normalizedAggFuncs.size());
         for (NamedExpression pushedGroupByExpr : pushedGroupByExprs) {
-            normalizedAggOutput.add(pushedGroupByExpr.toSlot());
+            normalizedAggOutputBuilder.add(pushedGroupByExpr.toSlot());
         }
-        normalizedAggOutput.addAll(
+        normalizedAggOutputBuilder.addAll(
                 normalizedAggFuncsToSlotContext.pushDownToNamedExpression(normalizedAggFuncs)
         );
         // create new agg node
+        ImmutableList<NamedExpression> normalizedAggOutput = normalizedAggOutputBuilder.build();
         LogicalAggregate<?> newAggregate =
-                aggregate.withNormalized(normalizedGroupExprs, normalizedAggOutput.build(), bottomPlan);
+                aggregate.withNormalized(normalizedGroupExprs, normalizedAggOutput, bottomPlan);
 
         // create upper projects by normalize all output exprs in old LogicalAggregate
         List<NamedExpression> upperProjects = normalizeOutput(aggregateOutput,
