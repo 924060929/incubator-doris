@@ -56,7 +56,7 @@ public class HyperGraphTest {
                 + "LOGICAL_OLAP_SCAN0 -> LOGICAL_OLAP_SCAN4 [label=\"1.00\",arrowhead=none]\n"
                 + "}\n";
 
-        Assertions.assertEquals(dottyGraph, target);
+        Assertions.assertEquals(target, dottyGraph);
     }
 
     @Test
@@ -85,12 +85,12 @@ public class HyperGraphTest {
                 + "  LOGICAL_OLAP_SCAN3 [label=\"LOGICAL_OLAP_SCAN3 \n"
                 + " rowCount=40.00\"];\n"
                 + "LOGICAL_OLAP_SCAN0 -> LOGICAL_OLAP_SCAN1 [label=\"1.00\",arrowhead=none]\n"
-                + "LOGICAL_OLAP_SCAN1 -> LOGICAL_OLAP_SCAN2 [label=\"1.00\",arrowhead=none]\n"
                 + "LOGICAL_OLAP_SCAN0 -> LOGICAL_OLAP_SCAN2 [label=\"1.00\",arrowhead=none]\n"
-                + "LOGICAL_OLAP_SCAN2 -> LOGICAL_OLAP_SCAN3 [label=\"1.00\",arrowhead=none]\n"
+                + "LOGICAL_OLAP_SCAN1 -> LOGICAL_OLAP_SCAN2 [label=\"1.00\",arrowhead=none]\n"
                 + "LOGICAL_OLAP_SCAN0 -> LOGICAL_OLAP_SCAN3 [label=\"1.00\",arrowhead=none]\n"
+                + "LOGICAL_OLAP_SCAN2 -> LOGICAL_OLAP_SCAN3 [label=\"1.00\",arrowhead=none]\n"
                 + "}\n";
-        Assertions.assertEquals(dottyGraph, target);
+        Assertions.assertEquals(target, dottyGraph);
     }
 
     @Test
