@@ -222,11 +222,15 @@ class OutputUtils {
 
     static class TagBlockIterator implements Iterator<List<String>> {
         private final String tag
+        private final int startLine
+        private int currentLine
         private Iterator<List<String>> it
 
-        TagBlockIterator(String tag, Iterator<List<String>> it) {
+        TagBlockIterator(String tag, int startLine, Iterator<List<String>> it) {
             this.tag = tag
+            this.startLine = startLine
             this.it = it
+            this.currentLine = startLine
         }
 
         String getTag() {
@@ -240,7 +244,13 @@ class OutputUtils {
 
         @Override
         List<String> next() {
-            return it.next()
+            def next = it.next()
+            currentLine++
+            return next
+        }
+
+        int currentLine() {
+            return currentLine
         }
     }
 
@@ -248,9 +258,11 @@ class OutputUtils {
         private ReusableIterator<String> lineIt
         private TagBlockIterator cache
         private boolean cached
+        private int line
 
         OutputBlocksIterator(ReusableIterator<String> lineIt) {
             this.lineIt = lineIt
+            this.line = 1
         }
 
         @Override
@@ -274,6 +286,7 @@ class OutputUtils {
                 // find next comment block
                 while (true) {
                     String blockComment = lineIt.next() // skip block comment, e.g. -- !qt_sql_1 --
+                    line++
                     if (blockComment.startsWith("-- !") && blockComment.endsWith(" --")) {
                         if (blockComment.startsWith("-- !")) {
                             tag = blockComment.substring("-- !".length(), blockComment.length() - " --".length()).trim()
@@ -284,7 +297,9 @@ class OutputUtils {
                         return false
                     }
                 }
-                cache = new TagBlockIterator(tag, new CsvParserIterator(new SkipLastEmptyLineIterator(new OutputBlockIterator(lineIt))))
+
+                def csvIt = new CsvParserIterator(new SkipLastEmptyLineIterator(new OutputBlockIterator(lineIt)))
+                cache = new TagBlockIterator(tag, line, csvIt)
                 cached = true
                 return true
             } else {
