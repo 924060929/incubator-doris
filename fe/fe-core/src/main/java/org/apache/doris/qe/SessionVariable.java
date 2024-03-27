@@ -2817,9 +2817,15 @@ public class SessionVariable implements Serializable, Writable {
         return isEnableNereidsPlanner() && enableNereidsTrace;
     }
 
+    public void setEnableExprTrace(boolean enableExprTrace) {
+        this.enableExprTrace = enableExprTrace;
+    }
+
     public boolean isEnableExprTrace() {
         return enableExprTrace;
     }
+
+
 
     public boolean isEnableSingleReplicaInsert() {
         return enableSingleReplicaInsert;
