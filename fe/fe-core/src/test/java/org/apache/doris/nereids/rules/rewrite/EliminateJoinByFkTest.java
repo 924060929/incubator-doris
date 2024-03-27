@@ -129,11 +129,12 @@ class EliminateJoinByFkTest extends TestWithFeService implements MemoPatternMatc
                 + "where pri.id1 = 1";
 
         PlanChecker.from(connectContext)
-                .printPlanProcess(sql)
+                .analyze(sql)
+                .rewrite()
                 .nonMatch(logicalJoin())
                 .matches(logicalFilter().when(f -> {
-                    Assertions.assertEquals("(id3 = 1)", f.getExpressions().get(0).toSql());
-                    Assertions.assertEquals("( not id3 IS NULL)", f.getExpressions().get(1).toSql());
+                    Assertions.assertEquals("( not id3 IS NULL)", f.getExpressions().get(0).toSql());
+                    Assertions.assertEquals("(id3 = 1)", f.getExpressions().get(1).toSql());
                     return true;
                 }))
                 .printlnTree();
@@ -144,8 +145,8 @@ class EliminateJoinByFkTest extends TestWithFeService implements MemoPatternMatc
                 .rewrite()
                 .nonMatch(logicalJoin())
                 .matches(logicalFilter().when(f -> {
-                    Assertions.assertEquals("(id3 = 1)", f.getExpressions().get(0).toSql());
-                    Assertions.assertEquals("( not id3 IS NULL)", f.getExpressions().get(1).toSql());
+                    Assertions.assertEquals("( not id3 IS NULL)", f.getExpressions().get(0).toSql());
+                    Assertions.assertEquals("(id3 = 1)", f.getExpressions().get(1).toSql());
                     return true;
                 }))
                 .printlnTree();
