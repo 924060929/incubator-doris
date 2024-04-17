@@ -51,6 +51,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalEmptyRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSqlCache;
 import org.apache.doris.proto.InternalService;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.ResultSet;
 import org.apache.doris.qe.cache.CacheAnalyzer;
 import org.apache.doris.qe.cache.SqlCache;
 
@@ -73,12 +74,53 @@ public class NereidsSqlCacheManager {
     private final Cache<String, SqlCacheContext> sqlCache;
 
     public NereidsSqlCacheManager(int sqlCacheNum, long cacheIntervalSeconds) {
-        sqlCache = Caffeine.newBuilder()
+        sqlCaches = buildSqlCaches(sqlCacheNum, cacheIntervalSeconds);
+    }
+
+    public static synchronized void updateConfig() {
+        Env currentEnv = Env.getCurrentEnv();
+        if (currentEnv == null) {
+            return;
+        }
+        NereidsSqlCacheManager sqlCacheManager = currentEnv.getSqlCacheManager();
+        if (sqlCacheManager == null) {
+            return;
+        }
+
+        Cache<String, SqlCacheContext> sqlCaches = buildSqlCaches(
+                Config.sql_cache_manage_num,
+                Config.cache_last_version_interval_second
+        );
+        sqlCaches.putAll(sqlCacheManager.sqlCaches.asMap());
+        sqlCacheManager.sqlCaches = sqlCaches;
+    }
+
+    private static Cache<String, SqlCacheContext> buildSqlCaches(int sqlCacheNum, long cacheIntervalSeconds) {
+        sqlCacheNum = sqlCacheNum < 0 ? 100 : sqlCacheNum;
+        cacheIntervalSeconds = cacheIntervalSeconds < 0 ? 30 : cacheIntervalSeconds;
+
+        return Caffeine.newBuilder()
                 .maximumSize(sqlCacheNum)
                 .expireAfterAccess(Duration.ofSeconds(cacheIntervalSeconds))
                 // auto evict cache when jvm memory too low
                 .softValues()
                 .build();
+    }
+
+    /** tryAddFeCache */
+    public void tryAddFeSqlCache(ConnectContext connectContext, String sql) {
+        Optional<SqlCacheContext> sqlCacheContextOpt = connectContext.getStatementContext().getSqlCacheContext();
+        if (!sqlCacheContextOpt.isPresent()) {
+            return;
+        }
+
+        SqlCacheContext sqlCacheContext = sqlCacheContextOpt.get();
+        UserIdentity currentUserIdentity = connectContext.getCurrentUserIdentity();
+        String key = currentUserIdentity.toString() + ":" + sql.trim();
+        if ((sqlCaches.getIfPresent(key) == null) && sqlCacheContext.getOrComputeCacheKeyMd5() != null
+                && sqlCacheContext.getResultSetInFe().isPresent()) {
+            sqlCaches.put(key, sqlCacheContext);
+        }
     }
 
     /** tryAddCache */
@@ -160,6 +202,19 @@ public class NereidsSqlCacheManager {
         }
 
         try {
+            Optional<ResultSet> resultSetInFe = sqlCacheContext.getResultSetInFe();
+            if (resultSetInFe.isPresent()) {
+                MetricRepo.COUNTER_CACHE_HIT_SQL.increase(1L);
+
+                String cachedPlan = sqlCacheContext.getPhysicalPlan();
+                LogicalSqlCache logicalSqlCache = new LogicalSqlCache(
+                        sqlCacheContext.getQueryId(), sqlCacheContext.getColLabels(),
+                        sqlCacheContext.getResultExprs(), resultSetInFe, ImmutableList.of(),
+                        "none", cachedPlan
+                );
+                return Optional.of(logicalSqlCache);
+            }
+
             Status status = new Status();
             InternalService.PFetchCacheResult cacheData =
                     SqlCache.getCacheData(sqlCacheContext.getCacheProxy(),
@@ -176,7 +231,9 @@ public class NereidsSqlCacheManager {
 
                 LogicalSqlCache logicalSqlCache = new LogicalSqlCache(
                         sqlCacheContext.getQueryId(), sqlCacheContext.getColLabels(),
-                        sqlCacheContext.getResultExprs(), cacheValues, backendAddress, cachedPlan);
+                        sqlCacheContext.getResultExprs(), Optional.empty(),
+                        cacheValues, backendAddress, cachedPlan
+                );
                 return Optional.of(logicalSqlCache);
             }
             return Optional.empty();
