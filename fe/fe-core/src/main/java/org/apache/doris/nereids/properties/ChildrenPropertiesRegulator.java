@@ -123,6 +123,10 @@ public class ChildrenPropertiesRegulator extends PlanVisitor<Boolean, Void> {
                     && agg.getOutputExpressions().size() == 1) {
                 return true;
             }
+            if (agg.getGroupByExpressions().size() > 1
+                    && agg.getGroupByExpressions().size() == agg.getOutputExpressions().size()) {
+                return true;
+            }
             return false;
         }
 

@@ -300,7 +300,7 @@ public class AggregateStrategies implements ImplementationRuleFactory {
             RuleType.FOUR_PHASE_AGGREGATE_WITH_DISTINCT.build(
                     basePattern
                             .when(agg -> agg.getDistinctArguments().size() == 1)
-                            .when(agg -> agg.getGroupByExpressions().isEmpty())
+                            // .when(agg -> agg.getGroupByExpressions().isEmpty())
                             .thenApplyMulti(ctx -> fourPhaseAggregateWithDistinct(ctx.root, ctx.connectContext))
             )
         );
