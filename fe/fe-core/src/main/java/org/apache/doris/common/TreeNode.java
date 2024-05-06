@@ -239,4 +239,32 @@ public class TreeNode<NodeType extends TreeNode<NodeType>> {
         return null;
     }
 
+    /** anyMatch */
+    public boolean anyMatch(Predicate<TreeNode<? extends NodeType>> func) {
+        if (func.apply(this)) {
+            return true;
+        }
+
+        for (NodeType child : children) {
+            if (child.anyMatch(func)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /** foreachDown */
+    public boolean foreachDown(Predicate<TreeNode<NodeType>> visitor) {
+        if (!visitor.test(this)) {
+            return false;
+        }
+
+        for (TreeNode<NodeType> child : getChildren()) {
+            if (!child.foreachDown(visitor)) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
