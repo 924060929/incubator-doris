@@ -42,7 +42,16 @@ import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
+import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
+import org.apache.doris.nereids.trees.plans.distribute.FragmentIdMapping;
 import org.apache.doris.nereids.trees.plans.physical.TopnFilter;
+import org.apache.doris.nereids.worker.Worker;
+import org.apache.doris.nereids.worker.job.AssignedJob;
+import org.apache.doris.nereids.worker.job.BucketScanSource;
+import org.apache.doris.nereids.worker.job.DefaultScanSource;
+import org.apache.doris.nereids.worker.job.ScanRanges;
+import org.apache.doris.nereids.worker.job.ScanSource;
+import org.apache.doris.nereids.worker.job.UnassignedJob;
 import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.DataStreamSink;
@@ -187,6 +196,7 @@ public class Coordinator implements CoordInterface {
 
     // copied from TQueryExecRequest; constant across all fragments
     private final TDescriptorTable descTable;
+    private FragmentIdMapping<DistributedPlan> distributedPlans;
 
     // scan node id -> TFileScanRangeParams
     private Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap = Maps.newHashMap();
@@ -341,6 +351,8 @@ public class Coordinator implements CoordInterface {
         if (!useNereids) {
             // Enable local shuffle on pipelineX engine only if Nereids planner is applied.
             queryOptions.setEnableLocalShuffle(false);
+        } else {
+            distributedPlans = ((NereidsPlanner) planner).getDistributedPlans();
         }
 
         setFromUserProperty(context);
@@ -1943,9 +1955,96 @@ public class Coordinator implements CoordInterface {
         return false;
     }
 
+    private void setForDefaultScanSource(FInstanceExecParam instanceExecParam, DefaultScanSource scanSource) {
+        for (Entry<ScanNode, ScanRanges> scanNodeIdToReplicaIds : scanSource.scanNodeToTablets.entrySet()) {
+            ScanNode scanNode = scanNodeIdToReplicaIds.getKey();
+            ScanRanges scanReplicas = scanNodeIdToReplicaIds.getValue();
+            instanceExecParam.perNodeScanRanges.put(scanNode.getId().asInt(), scanReplicas.params);
+        }
+    }
+
+    private void setForBucketScanSource(FInstanceExecParam instanceExecParam, BucketScanSource bucketScanSource) {
+        for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
+            instanceExecParam.addBucketSeq(bucketIndex);
+        }
+
+        for (Entry<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanTablets :
+                bucketScanSource.bucketIndexToScanNodeToTablets.entrySet()) {
+            Integer bucketIndex = bucketIndexToScanTablets.getKey();
+            Map<ScanNode, ScanRanges> scanNodeToRangeMap = bucketIndexToScanTablets.getValue();
+            for (Entry<ScanNode, ScanRanges> scanNodeToRange : scanNodeToRangeMap.entrySet()) {
+                ScanNode scanNode = scanNodeToRange.getKey();
+                ScanRanges scanRanges = scanNodeToRange.getValue();
+                instanceExecParam.perNodeScanRanges.put(scanNode.getId().asInt(), scanRanges.params);
+
+                if (scanNode instanceof OlapScanNode) {
+                    OlapScanNode olapScanNode = (OlapScanNode) scanNode;
+                    if (!fragmentIdToSeqToAddressMap.containsKey(scanNode.getFragmentId())) {
+                        // In bucket shuffle join, we have 2 situation.
+                        // 1. Only one partition: in this case, we use scanNode.getTotalTabletsNum() to get the right bucket num
+                        //    because when table turn on dynamic partition, the bucket number in default distribution info
+                        //    is not correct.
+                        // 2. Table is colocated: in this case, table could have more than one partition, but all partition's
+                        //    bucket number must be same, so we use default bucket num is ok.
+                        int bucketNum = 0;
+                        if (olapScanNode.getOlapTable().isColocateTable()) {
+                            bucketNum = olapScanNode.getOlapTable().getDefaultDistributionInfo()
+                                    .getBucketNum();
+                        } else {
+                            bucketNum = (int) (olapScanNode.getTotalTabletsNum());
+                        }
+                        fragmentIdToSeqToAddressMap.put(olapScanNode.getFragmentId(), new HashMap<>());
+                        bucketShuffleJoinController.fragmentIdBucketSeqToScanRangeMap
+                                .put(scanNode.getFragmentId(), new BucketSeqToScanRange());
+                        bucketShuffleJoinController.fragmentIdToBucketNumMap
+                                .put(scanNode.getFragmentId(), bucketNum);
+                        olapScanNode.getFragment().setBucketNum(bucketNum);
+                    }
+                }
+
+                BucketSeqToScanRange bucketSeqToScanRange = bucketShuffleJoinController.
+                        fragmentIdBucketSeqToScanRangeMap.get(scanNode.getFragmentId());
+
+                Map<Integer, List<TScanRangeParams>> scanNodeIdToReplicas
+                        = bucketSeqToScanRange.computeIfAbsent(bucketIndex, set -> Maps.newLinkedHashMap());
+                List<TScanRangeParams> tablets = scanNodeIdToReplicas.computeIfAbsent(
+                        scanNode.getId().asInt(), id -> new ArrayList<>());
+                tablets.addAll(scanRanges.params);
+            }
+        }
+    }
+
     // For each fragment in fragments, computes hosts on which to run the instances
     // and stores result in fragmentExecParams.hosts.
     private void computeFragmentHosts() throws Exception {
+        if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsCoordinator()) {
+            for (DistributedPlan distributedPlan : distributedPlans.values()) {
+                UnassignedJob fragmentJob = distributedPlan.getFragmentJob();
+                PlanFragment fragment = fragmentJob.getFragment();
+                FragmentExecParams fragmentExecParams = fragmentExecParamsMap.computeIfAbsent(
+                        fragment.getFragmentId(), id -> new FragmentExecParams(fragment)
+                );
+
+                bucketShuffleJoinController
+                        .isBucketShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot());
+
+                for (AssignedJob instanceJob : distributedPlan.getInstanceJobs()) {
+                    Worker worker = instanceJob.getAssignedWorker();
+                    TNetworkAddress address = new TNetworkAddress(worker.host(), worker.port());
+                    FInstanceExecParam instanceExecParam = new FInstanceExecParam(
+                            null, address, 0, fragmentExecParams);
+                    fragmentExecParams.instanceExecParams.add(instanceExecParam);
+                    addressToBackendID.put(address, worker.id());
+                    ScanSource scanSource = instanceJob.getScanSource();
+                    if (scanSource instanceof BucketScanSource) {
+                        setForBucketScanSource(instanceExecParam, (BucketScanSource) scanSource);
+                    } else {
+                        setForDefaultScanSource(instanceExecParam, (DefaultScanSource) scanSource);
+                    }
+                }
+            }
+            return;
+        }
         // compute hosts of producer fragment before those of consumer fragment(s),
         // the latter might inherit the set of hosts from the former
         // compute hosts *bottom up*.
@@ -2282,6 +2381,17 @@ public class Coordinator implements CoordInterface {
     // Populates scan_range_assignment_.
     // <fragment, <server, nodeId>>
     protected void computeScanRangeAssignment() throws Exception {
+        if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsCoordinator()) {
+            // for (ScanNode scanNode : scanNodes) {
+            //     if (bucketShuffleJoinController
+            //             .isBucketShuffleJoin(scanNode.getFragmentId().asInt(), scanNode.getFragment().getPlanRoot())) {
+            //         Map<TNetworkAddress, Long> replicaNumPerHost = getReplicaNumPerHostForOlapTable();
+            //         bucketShuffleJoinController.computeScanRangeAssignmentByBucket((OlapScanNode) scanNode,
+            //                 idToBackend, addressToBackendID, replicaNumPerHost);
+            //     }
+            // }
+            return;
+        }
         Map<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();
         Map<TNetworkAddress, Long> replicaNumPerHost = getReplicaNumPerHostForOlapTable();
         boolean isAllOlapTables = scanNodes.stream().allMatch(e -> e instanceof OlapScanNode);

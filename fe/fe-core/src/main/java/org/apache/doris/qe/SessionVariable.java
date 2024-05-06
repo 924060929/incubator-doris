@@ -288,6 +288,7 @@ public class SessionVariable implements Serializable, Writable {
     public static final String NTH_OPTIMIZED_PLAN = "nth_optimized_plan";
 
     public static final String ENABLE_NEREIDS_PLANNER = "enable_nereids_planner";
+    public static final String ENABLE_NEREIDS_COORDINATOR = "enable_nereids_coordinator";
     public static final String DISABLE_NEREIDS_RULES = "disable_nereids_rules";
     public static final String ENABLE_NEREIDS_RULES = "enable_nereids_rules";
     public static final String ENABLE_NEW_COST_MODEL = "enable_new_cost_model";
@@ -1197,6 +1198,10 @@ public class SessionVariable implements Serializable, Writable {
 
     @VariableMgr.VarAttr(name = NEREIDS_STAR_SCHEMA_SUPPORT)
     private boolean nereidsStarSchemaSupport = true;
+
+    @VariableMgr.VarAttr(name = ENABLE_NEREIDS_COORDINATOR, needForward = true,
+            fuzzy = true, varType = VariableAnnotation.EXPERIMENTAL)
+    private boolean enableNereidsCoordinator = false;
 
     @VariableMgr.VarAttr(name = REWRITE_OR_TO_IN_PREDICATE_THRESHOLD, fuzzy = true)
     private int rewriteOrToInPredicateThreshold = 2;
@@ -2992,6 +2997,14 @@ public class SessionVariable implements Serializable, Writable {
 
     public void setEnableNereidsPlanner(boolean enableNereidsPlanner) {
         this.enableNereidsPlanner = enableNereidsPlanner;
+    }
+
+    public boolean isEnableNereidsCoordinator() {
+        return enableNereidsCoordinator;
+    }
+
+    public void setEnableNereidsCoordinator(boolean enableNereidsCoordinator) {
+        this.enableNereidsCoordinator = enableNereidsCoordinator;
     }
 
     public int getNthOptimizedPlan() {

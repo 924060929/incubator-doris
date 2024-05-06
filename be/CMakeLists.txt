@@ -269,6 +269,7 @@ if (COMPILER_GCC)
 endif ()
 
 if (COMPILER_CLANG)
+    set(CMAKE_CXX_COMPILER_VERSION "17.0.10")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "16")
         message(FATAL_ERROR "Need Clang version at least 16")
     endif()
@@ -370,7 +371,7 @@ endif()
 # For CMAKE_BUILD_TYPE=Debug
 if (OS_MACOSX AND ARCH_ARM)
     # Using -O0 may meet ARM64 branch out of range errors when linking with tcmalloc.
-    set(CXX_FLAGS_DEBUG "${CXX_GCC_FLAGS} -Og")
+    set(CXX_FLAGS_DEBUG "${CXX_GCC_FLAGS} -Og -std=c++20")
 else()
     set(CXX_FLAGS_DEBUG "${CXX_GCC_FLAGS} -O0")
 endif()

@@ -227,8 +227,8 @@ public class ChildrenPropertiesRegulator extends PlanVisitor<Boolean, Void> {
     }
 
     @Override
-    public Boolean visitPhysicalHashJoin(PhysicalHashJoin<? extends Plan, ? extends Plan> hashJoin,
-            Void context) {
+    public Boolean visitPhysicalHashJoin(
+            PhysicalHashJoin<? extends Plan, ? extends Plan> hashJoin, Void context) {
         Preconditions.checkArgument(children.size() == 2, "children.size() != 2");
         Preconditions.checkArgument(childrenProperties.size() == 2);
         Preconditions.checkArgument(requiredProperties.size() == 2);
