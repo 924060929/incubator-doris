@@ -84,6 +84,7 @@ public class UnassignedJobBuilder {
         if (hasOlapScanNodes) {
             // we need assign a backend which contains the data,
             // so that the OlapScanNode can find the data in the backend
+            // select * from olap_table
             return buildScanLocalTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
         } else if (scanNodes.isEmpty()) {
             // select constant without table,
