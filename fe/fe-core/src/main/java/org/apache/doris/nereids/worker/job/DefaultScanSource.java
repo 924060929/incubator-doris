@@ -45,7 +45,7 @@ public class DefaultScanSource extends ScanSource {
         for (Entry<ScanNode, ScanRanges> entry : scanNodeToScanRanges.entrySet()) {
             ScanNode scanNode = entry.getKey();
             ScanRanges scanRanges = entry.getValue();
-            str.append(prefix).append("  {\n")
+            str.append(prefix).append("  [\n")
                     .append(prefix).append("    scanNode: ").append(scanNode).append(",\n")
                     .append(prefix).append("    scanRanges: ");
 
@@ -56,6 +56,6 @@ public class DefaultScanSource extends ScanSource {
                 str.append(",\n");
             }
         }
-        str.append("\n").append(prefix).append("}");
+        str.append("\n").append(prefix).append("]");
     }
 }
