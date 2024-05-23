@@ -62,6 +62,6 @@ public class AssignedJobImpl implements AssignedJob {
         StringBuilder scanSourceString = new StringBuilder();
         scanSource.toString(scanSourceString, "  ");
         return "AssignedJobImpl(\n  unassignedJob: " + unassignedJob
-                + ",\n  worker: " + worker + "\n  scanSource: " + scanSourceString + "\n)";
+                + ",\n  worker: " + worker + ",\n  scanSource: " + scanSourceString + "\n)";
     }
 }
