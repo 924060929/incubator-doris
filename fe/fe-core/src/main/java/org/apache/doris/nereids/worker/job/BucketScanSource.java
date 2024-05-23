@@ -36,7 +36,7 @@ public class BucketScanSource extends ScanSource {
     public void toString(StringBuilder str, String prefix) {
         int i = 0;
         String nextIndent = prefix + "  ";
-        str.append("{\n");
+        str.append("[\n");
         for (Entry<Integer, Map<ScanNode, ScanRanges>> entry : bucketIndexToScanNodeToTablets.entrySet()) {
             Integer bucketId = entry.getKey();
             Map<ScanNode, ScanRanges> scanNodeToScanRanges = entry.getValue();
@@ -46,6 +46,6 @@ public class BucketScanSource extends ScanSource {
                 str.append(",\n");
             }
         }
-        str.append("\n").append(prefix).append("}");
+        str.append("\n").append(prefix).append("]");
     }
 }

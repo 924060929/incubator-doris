@@ -41,11 +41,11 @@ public class DefaultScanSource extends ScanSource {
     public static void toString(Map<ScanNode, ScanRanges> scanNodeToScanRanges, StringBuilder str, String prefix) {
         int i = 0;
         String nextIndent = prefix + "    ";
-        str.append("{\n");
+        str.append("[\n");
         for (Entry<ScanNode, ScanRanges> entry : scanNodeToScanRanges.entrySet()) {
             ScanNode scanNode = entry.getKey();
             ScanRanges scanRanges = entry.getValue();
-            str.append(prefix).append("  [\n")
+            str.append(prefix).append("  {\n")
                     .append(prefix).append("    scanNode: ").append(scanNode).append(",\n")
                     .append(prefix).append("    scanRanges: ");
 
