@@ -1691,7 +1691,9 @@ public class Coordinator implements CoordInterface {
             for (Entry<ScanNode, ScanRanges> scanNodeToRange : scanNodeToRangeMap.entrySet()) {
                 ScanNode scanNode = scanNodeToRange.getKey();
                 ScanRanges scanRanges = scanNodeToRange.getValue();
-                instanceExecParam.perNodeScanRanges.put(scanNode.getId().asInt(), scanRanges.params);
+                List<TScanRangeParams> scanBucketTablets = instanceExecParam.perNodeScanRanges.computeIfAbsent(
+                        scanNode.getId().asInt(), id -> Lists.newArrayList());
+                scanBucketTablets.addAll(scanRanges.params);
 
                 if (scanNode instanceof OlapScanNode) {
                     OlapScanNode olapScanNode = (OlapScanNode) scanNode;
