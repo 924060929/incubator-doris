@@ -1964,13 +1964,10 @@ public class Coordinator implements CoordInterface {
     }
 
     private void setForBucketScanSource(FInstanceExecParam instanceExecParam, BucketScanSource bucketScanSource) {
-        for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
-            instanceExecParam.addBucketSeq(bucketIndex);
-        }
-
         for (Entry<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanTablets :
                 bucketScanSource.bucketIndexToScanNodeToTablets.entrySet()) {
             Integer bucketIndex = bucketIndexToScanTablets.getKey();
+            instanceExecParam.addBucketSeq(bucketIndex);
             Map<ScanNode, ScanRanges> scanNodeToRangeMap = bucketIndexToScanTablets.getValue();
             for (Entry<ScanNode, ScanRanges> scanNodeToRange : scanNodeToRangeMap.entrySet()) {
                 ScanNode scanNode = scanNodeToRange.getKey();
