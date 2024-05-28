@@ -19,8 +19,6 @@ package org.apache.doris.nereids.worker;
 
 import org.apache.doris.system.Backend;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.util.Objects;
 
 /** BackendWorker */

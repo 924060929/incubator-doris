@@ -44,7 +44,7 @@ public abstract class NereidsSpecifyInstances<S extends ScanSource> {
     public List<AssignedJob> buildAssignedJobs(UnassignedJob unassignedJob) {
         List<AssignedJob> instances = Lists.newArrayListWithCapacity(workerScanSources.size());
         int instanceNum = 0;
-        for (WorkerScanSource<S> workerToScanSource: workerScanSources) {
+        for (WorkerScanSource<S> workerToScanSource : workerScanSources) {
             Worker worker = workerToScanSource.worker;
             ScanSource scanSource = workerToScanSource.scanSource;
             AssignedJobImpl assignedJob = new AssignedJobImpl(instanceNum++, unassignedJob, worker, scanSource);
