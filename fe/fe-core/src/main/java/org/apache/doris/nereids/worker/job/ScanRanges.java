@@ -36,6 +36,7 @@ public class ScanRanges {
         this(Lists.newArrayList(), Lists.newArrayList());
     }
 
+    /** ScanRanges */
     public ScanRanges(List<TScanRangeParams> params, List<Long> bytes) {
         this.params = params;
         this.bytes = bytes;
@@ -59,6 +60,7 @@ public class ScanRanges {
         return str.toString();
     }
 
+    /** toString */
     public void toString(StringBuilder str, String prefix) {
         str.append("ScanRanges(bytes:" + totalBytes + ", ranges: [\n");
         for (int i = 0; i < params.size(); i++) {

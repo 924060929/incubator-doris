@@ -19,8 +19,6 @@ package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.nereids.worker.Worker;
 
-import java.util.Set;
-
 /**
  * AssignedJob.
  * for example: an instance job in a fragment job, which already assign to a worker and some data sources

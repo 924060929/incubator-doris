@@ -38,6 +38,7 @@ public class DefaultScanSource extends ScanSource {
         toString(scanNodeToTablets, str, prefix);
     }
 
+    /** toString */
     public static void toString(Map<ScanNode, ScanRanges> scanNodeToScanRanges, StringBuilder str, String prefix) {
         int i = 0;
         String nextIndent = prefix + "    ";

@@ -1696,11 +1696,12 @@ public class Coordinator implements CoordInterface {
                     OlapScanNode olapScanNode = (OlapScanNode) scanNode;
                     if (!fragmentIdToSeqToAddressMap.containsKey(scanNode.getFragmentId())) {
                         // In bucket shuffle join, we have 2 situation.
-                        // 1. Only one partition: in this case, we use scanNode.getTotalTabletsNum() to get the right bucket num
-                        //    because when table turn on dynamic partition, the bucket number in default distribution info
+                        // 1. Only one partition: in this case, we use scanNode.getTotalTabletsNum()
+                        //    to get the right bucket num because when table turn on dynamic partition,
+                        //    the bucket number in default distribution info
                         //    is not correct.
-                        // 2. Table is colocated: in this case, table could have more than one partition, but all partition's
-                        //    bucket number must be same, so we use default bucket num is ok.
+                        // 2. Table is colocated: in this case, table could have more than one partition,
+                        //    but all partition's bucket number must be same, so we use default bucket num is ok.
                         int bucketNum = 0;
                         if (olapScanNode.getOlapTable().isColocateTable()) {
                             bucketNum = olapScanNode.getOlapTable().getDefaultDistributionInfo()
@@ -2097,14 +2098,6 @@ public class Coordinator implements CoordInterface {
     // <fragment, <server, nodeId>>
     protected void computeScanRangeAssignment() throws Exception {
         if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsCoordinator()) {
-            // for (ScanNode scanNode : scanNodes) {
-            //     if (bucketShuffleJoinController
-            //             .isBucketShuffleJoin(scanNode.getFragmentId().asInt(), scanNode.getFragment().getPlanRoot())) {
-            //         Map<TNetworkAddress, Long> replicaNumPerHost = getReplicaNumPerHostForOlapTable();
-            //         bucketShuffleJoinController.computeScanRangeAssignmentByBucket((OlapScanNode) scanNode,
-            //                 idToBackend, addressToBackendID, replicaNumPerHost);
-            //     }
-            // }
             return;
         }
         Map<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();
