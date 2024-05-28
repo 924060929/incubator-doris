@@ -1718,8 +1718,8 @@ public class Coordinator implements CoordInterface {
                     }
                 }
 
-                BucketSeqToScanRange bucketSeqToScanRange = bucketShuffleJoinController.
-                        fragmentIdBucketSeqToScanRangeMap.get(scanNode.getFragmentId());
+                BucketSeqToScanRange bucketSeqToScanRange = bucketShuffleJoinController
+                        .fragmentIdBucketSeqToScanRangeMap.get(scanNode.getFragmentId());
 
                 Map<Integer, List<TScanRangeParams>> scanNodeIdToReplicas
                         = bucketSeqToScanRange.computeIfAbsent(bucketIndex, set -> Maps.newLinkedHashMap());
