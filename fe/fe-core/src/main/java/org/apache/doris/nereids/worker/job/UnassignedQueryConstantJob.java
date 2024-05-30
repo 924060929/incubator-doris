@@ -39,7 +39,7 @@ public class UnassignedQueryConstantJob extends AbstractUnassignedJob {
             ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
         Worker randomWorker = workerManager.randomAvailableWorker();
         return ImmutableList.of(
-                new AssignedJobImpl(0, this, randomWorker,
+                new StaticAssignedJob(0, this, randomWorker,
                         new DefaultScanSource(ImmutableMap.of())
                 )
         );

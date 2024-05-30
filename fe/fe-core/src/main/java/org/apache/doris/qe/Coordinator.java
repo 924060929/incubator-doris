@@ -44,6 +44,7 @@ import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.FragmentIdMapping;
+import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.physical.TopnFilter;
 import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.nereids.worker.job.AssignedJob;
@@ -2028,7 +2029,7 @@ public class Coordinator implements CoordInterface {
                 bucketShuffleJoinController
                         .isBucketShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot());
 
-                for (AssignedJob instanceJob : distributedPlan.getInstanceJobs()) {
+                for (AssignedJob instanceJob : ((PipelineDistributedPlan) distributedPlan).getInstanceJobs()) {
                     Worker worker = instanceJob.getAssignedWorker();
                     TNetworkAddress address = new TNetworkAddress(worker.host(), worker.port());
                     FInstanceExecParam instanceExecParam = new FInstanceExecParam(

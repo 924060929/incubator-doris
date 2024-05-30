@@ -50,6 +50,6 @@ public interface UnassignedJob extends TreeNode<UnassignedJob> {
     // e.g. build an instance job by a backends and the replica ids it contains
     default AssignedJob assignWorkerAndDataSources(
             int instanceIndexInFragment, Worker worker, ScanSource scanSource) {
-        return new AssignedJobImpl(instanceIndexInFragment, this, worker, scanSource);
+        return new StaticAssignedJob(instanceIndexInFragment, this, worker, scanSource);
     }
 }

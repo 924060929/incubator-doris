@@ -21,14 +21,14 @@ import org.apache.doris.nereids.worker.Worker;
 
 import java.util.Objects;
 
-/** AssignedJobImpl */
-public class AssignedJobImpl implements AssignedJob {
+/** StaticAssignedJob */
+public class StaticAssignedJob implements AssignedJob {
     private final int indexInUnassignedJob;
     private final UnassignedJob unassignedJob;
     private final Worker worker;
     private final ScanSource scanSource;
 
-    public AssignedJobImpl(
+    public StaticAssignedJob(
             int indexInUnassignedJob, UnassignedJob unassignedJob, Worker worker,
             ScanSource scanSource) {
         this.indexInUnassignedJob = indexInUnassignedJob;
@@ -61,7 +61,7 @@ public class AssignedJobImpl implements AssignedJob {
     public String toString() {
         StringBuilder scanSourceString = new StringBuilder();
         scanSource.toString(scanSourceString, "  ");
-        return "AssignedJobImpl(\n  unassignedJob: " + unassignedJob
+        return "StaticAssignedJob(\n  unassignedJob: " + unassignedJob
                 + ",\n  worker: " + worker + ",\n  scanSource: " + scanSourceString + "\n)";
     }
 }
