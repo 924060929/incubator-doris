@@ -22,8 +22,8 @@ package org.apache.doris.planner;
 
 import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.nereids.worker.job.AssignedJob;
-import org.apache.doris.nereids.worker.job.AssignedJobImpl;
 import org.apache.doris.nereids.worker.job.ScanSource;
+import org.apache.doris.nereids.worker.job.StaticAssignedJob;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
 import org.apache.doris.nereids.worker.job.WorkerScanSource;
 
@@ -47,7 +47,7 @@ public abstract class NereidsSpecifyInstances<S extends ScanSource> {
         for (WorkerScanSource<S> workerToScanSource : workerScanSources) {
             Worker worker = workerToScanSource.worker;
             ScanSource scanSource = workerToScanSource.scanSource;
-            AssignedJobImpl assignedJob = new AssignedJobImpl(instanceNum++, unassignedJob, worker, scanSource);
+            StaticAssignedJob assignedJob = new StaticAssignedJob(instanceNum++, unassignedJob, worker, scanSource);
             instances.add(assignedJob);
         }
         return instances;

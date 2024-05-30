@@ -50,7 +50,7 @@ public class DistributePlanner {
     private FragmentIdMapping<DistributedPlan> buildDistributePlans(
             Map<PlanFragmentId, UnassignedJob> idToUnassignedJobs,
             ListMultimap<PlanFragmentId, AssignedJob> idToAssignedJobs) {
-        FragmentIdMapping<DistributedPlan> idToDistributedPlans = new FragmentIdMapping<>();
+        FragmentIdMapping<PipelineDistributedPlan> idToDistributedPlans = new FragmentIdMapping<>();
         for (Entry<PlanFragmentId, PlanFragment> kv : idToFragments.entrySet()) {
             PlanFragmentId fragmentId = kv.getKey();
             PlanFragment fragment = kv.getValue();
@@ -58,9 +58,9 @@ public class DistributePlanner {
             UnassignedJob fragmentJob = idToUnassignedJobs.get(fragmentId);
             List<AssignedJob> instanceJobs = idToAssignedJobs.get(fragmentId);
 
-            List<DistributedPlan> childrenPlans = idToDistributedPlans.getByChildrenFragments(fragment);
-            idToDistributedPlans.put(fragmentId, new DistributedPlan(fragmentJob, instanceJobs, childrenPlans));
+            List<PipelineDistributedPlan> childrenPlans = idToDistributedPlans.getByChildrenFragments(fragment);
+            idToDistributedPlans.put(fragmentId, new PipelineDistributedPlan(fragmentJob, instanceJobs, childrenPlans));
         }
-        return idToDistributedPlans;
+        return (FragmentIdMapping) idToDistributedPlans;
     }
 }
