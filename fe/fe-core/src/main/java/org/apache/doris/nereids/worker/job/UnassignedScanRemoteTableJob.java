@@ -17,12 +17,17 @@
 
 package org.apache.doris.nereids.worker.job;
 
+import org.apache.doris.nereids.worker.ScanWorkerSelector;
+import org.apache.doris.nereids.worker.WorkerManager;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 
+import com.google.common.collect.ListMultimap;
+
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * UnassignedScanRemoteTableJob
@@ -30,10 +35,29 @@ import java.util.Map;
  * for example, select literal without table, or scan an external table
  */
 public class UnassignedScanRemoteTableJob extends AbstractUnassignedJob {
+    private final ScanWorkerSelector scanWorkerSelector;
     private int assignedJobNum;
 
     public UnassignedScanRemoteTableJob(
-            PlanFragment fragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> exchangeToChildJob) {
+            PlanFragment fragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> exchangeToChildJob,
+            ScanWorkerSelector scanWorkerSelector) {
         super(fragment, scanNodes, exchangeToChildJob);
+        this.scanWorkerSelector = Objects.requireNonNull(scanWorkerSelector, "scanWorkerSelector is not null");
     }
+
+    @Override
+    public List<AssignedJob> computeAssignedJobs(WorkerManager workerManager,
+            ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
+        for (ScanNode scanNode : scanNodes) {
+
+        }
+        return super.computeAssignedJobs(workerManager, inputJobs);
+    }
+
+    // public static Map<> splitRanges(ScanNode scanNode) {
+    //     List<TScanRangeLocations> scanLocations = scanNode.getScanRangeLocations(0);
+    //     for (TScanRangeLocations scanLocation : scanLocations) {
+    //         List<TScanRangeLocation> locations = scanLocation.getLocations();
+    //     }
+    // }
 }

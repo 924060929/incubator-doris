@@ -18,7 +18,7 @@
 package org.apache.doris.nereids.worker;
 
 import org.apache.doris.nereids.worker.job.ScanRanges;
-import org.apache.doris.nereids.worker.job.UnassignedNearStorageJob;
+import org.apache.doris.nereids.worker.job.UnassignedJob;
 import org.apache.doris.planner.ScanNode;
 
 import java.util.Map;
@@ -33,7 +33,7 @@ public interface ScanWorkerSelector {
     //   key: backend
     //   value: which data should scan
     Map<Worker, Map<ScanNode, ScanRanges>> selectReplicaAndWorkerWithoutBucket(
-            UnassignedNearStorageJob unassignedJob);
+            UnassignedJob unassignedJob);
 
     // return
     //   key:   Worker, the backend which will process this fragment
@@ -47,5 +47,5 @@ public interface ScanWorkerSelector {
     //                      and distributed by hash(id) buckets 10. And, so, there has 10 buckets from bucket 0 to
     //                      bucket 9, and every bucket contains two tablets, because there are two partitions.
     Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> selectReplicaAndWorkerWithBucket(
-            UnassignedNearStorageJob unassignedJob);
+            UnassignedJob unassignedJob);
 }

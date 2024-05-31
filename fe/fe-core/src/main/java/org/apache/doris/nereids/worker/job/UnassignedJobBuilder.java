@@ -80,20 +80,24 @@ public class UnassignedJobBuilder {
 
     private UnassignedJob buildLeafOrScanJob(
             PlanFragment planFragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> inputJobs) {
-        boolean hasOlapScanNodes = hasOlapScanNode(scanNodes);
-        if (hasOlapScanNodes) {
+        int olapScanNodeNum = olapScanNodeNum(scanNodes);
+        if (!scanNodes.isEmpty() && olapScanNodeNum == scanNodes.size()) {
             // we need assign a backend which contains the data,
             // so that the OlapScanNode can find the data in the backend
-            // select * from olap_table
+            // e.g. select * from olap_table
             return buildScanLocalTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
         } else if (scanNodes.isEmpty()) {
             // select constant without table,
             // e.g. select 100 union select 200
             return buildQueryConstantJob(planFragment);
-        } else {
+        } else if (olapScanNodeNum == 0) {
             // only scan external tables or cloud tables or table valued functions
             // e,g. select * from numbers('number'='100')
-            return buildScanRemoteTableJob(planFragment, scanNodes, inputJobs);
+            return buildScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+        } else {
+            throw new IllegalStateException(
+                    "Unsupported fragment which contains multiple scan nodes and some of them are not OlapScanNode"
+            );
         }
     }
 
@@ -112,13 +116,14 @@ public class UnassignedJobBuilder {
         return planFragment.getPlanRoot().collectInCurrentFragment(ScanNode.class::isInstance);
     }
 
-    private boolean hasOlapScanNode(List<ScanNode> scanNodes) {
+    private int olapScanNodeNum(List<ScanNode> scanNodes) {
+        int olapScanNodeNum = 0;
         for (ScanNode scanNode : scanNodes) {
             if (scanNode instanceof OlapScanNode) {
-                return true;
+                olapScanNodeNum++;
             }
         }
-        return false;
+        return olapScanNodeNum;
     }
 
     private boolean isLeafFragment(PlanFragment planFragment) {
@@ -129,9 +134,11 @@ public class UnassignedJobBuilder {
         return new UnassignedQueryConstantJob(planFragment);
     }
 
-    private UnassignedScanRemoteTableJob buildScanRemoteTableJob(
-            PlanFragment planFragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> inputJobs) {
-        return new UnassignedScanRemoteTableJob(planFragment, scanNodes, inputJobs);
+    private UnassignedJob buildScanRemoteTableJob(
+            PlanFragment planFragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> inputJobs,
+            ScanWorkerSelector scanWorkerSelector) {
+        return new UnassignedScanNativeTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+        // return new UnassignedScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
     }
 
     private UnassignedShuffleJob buildShuffleJob(
