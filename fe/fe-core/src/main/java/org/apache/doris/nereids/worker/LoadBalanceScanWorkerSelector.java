@@ -20,14 +20,17 @@ package org.apache.doris.nereids.worker;
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.worker.job.ScanRanges;
-import org.apache.doris.nereids.worker.job.UnassignedNearStorageJob;
+import org.apache.doris.nereids.worker.job.UnassignedJob;
+import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.thrift.TScanRange;
 import org.apache.doris.thrift.TScanRangeLocation;
 import org.apache.doris.thrift.TScanRangeLocations;
 import org.apache.doris.thrift.TScanRangeParams;
 
+import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
@@ -36,7 +39,7 @@ import com.google.common.collect.Maps;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
+import java.util.function.BiFunction;
 
 /** LoadBalanceScanWorkerSelector */
 public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
@@ -45,51 +48,86 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
 
     @Override
     public Map<Worker, Map<ScanNode, ScanRanges>> selectReplicaAndWorkerWithoutBucket(
-            UnassignedNearStorageJob unassignedJob) {
-        List<ScanNode> nearStorageScanNodes = unassignedJob.nearStorageScanNodes();
-        if (nearStorageScanNodes.size() != 1 || !(nearStorageScanNodes.get(0) instanceof OlapScanNode)) {
+            UnassignedJob unassignedJob) {
+        List<ScanNode> nearStorageScanNodes = unassignedJob.getScanNodes();
+        if (nearStorageScanNodes.size() != 1) {
             throw new IllegalStateException("Illegal fragment type, "
                     + "should only contains one OlapScanNode but meet " + nearStorageScanNodes);
         }
-        return selectForSingleOlapTable((OlapScanNode) nearStorageScanNodes.get(0));
+        return selectForSingleOlapTable(nearStorageScanNodes.get(0));
     }
 
     @Override
     public Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> selectReplicaAndWorkerWithBucket(
-            UnassignedNearStorageJob unassignedJob) {
+            UnassignedJob unassignedJob) {
         PlanFragment fragment = unassignedJob.getFragment();
-        List<OlapScanNode> olapScanNodes = filterOlapScanNodes(unassignedJob.getScanNodes());
-        if (olapScanNodes.size() == 1 && fragment.isBucketShuffleJoinInput()) {
-            return selectForBucket(unassignedJob, olapScanNodes);
-        } else if (!olapScanNodes.isEmpty() && fragment.hasColocatePlanNode()) {
-            return selectForBucket(unassignedJob, olapScanNodes);
-        } else {
-            throw new IllegalStateException(
-                    "Illegal bucket shuffle join or colocate join in fragment: " + fragment.getFragmentId());
+        List<ScanNode> scanNodes = unassignedJob.getScanNodes();
+        List<OlapScanNode> olapScanNodes = filterOlapScanNodes(scanNodes);
+
+        BiFunction<ScanNode, Integer, List<TScanRangeLocations>> bucketScanRangeSupplier = bucketScanRangeSupplier();
+        Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier = bucketBytesSupplier();
+        // all are olap scan nodes
+        if (!scanNodes.isEmpty() && scanNodes.size() == olapScanNodes.size()) {
+            if (olapScanNodes.size() == 1 && fragment.isBucketShuffleJoinInput()) {
+                return selectForBucket(unassignedJob, scanNodes, bucketScanRangeSupplier, bucketBytesSupplier);
+            } else if (fragment.hasColocatePlanNode()) {
+                return selectForBucket(unassignedJob, scanNodes, bucketScanRangeSupplier, bucketBytesSupplier);
+            }
+        } else if (olapScanNodes.isEmpty() && fragment.getDataPartition() == DataPartition.UNPARTITIONED) {
+            return selectForBucket(unassignedJob, scanNodes, bucketScanRangeSupplier, bucketBytesSupplier);
         }
+        throw new IllegalStateException(
+                "Illegal bucket shuffle join or colocate join in fragment: " + fragment.getFragmentId()
+        );
+    }
+
+    private BiFunction<ScanNode, Integer, List<TScanRangeLocations>> bucketScanRangeSupplier() {
+        return (scanNode, bucketIndex) -> {
+            if (scanNode instanceof OlapScanNode) {
+                return (List) ((OlapScanNode) scanNode).bucketSeq2locations.get(bucketIndex);
+            } else {
+                return scanNode.getScanRangeLocations(0);
+            }
+        };
+    }
+
+    private Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier() {
+        return scanNode -> {
+            if (scanNode instanceof OlapScanNode) {
+                return ((OlapScanNode) scanNode).bucketSeq2Bytes;
+            } else {
+                // just one bucket
+                return ImmutableMap.of(0, 0L);
+            }
+        };
     }
 
     private Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> selectForBucket(
-            UnassignedNearStorageJob unassignedJob, List<OlapScanNode> olapScanNodes) {
+            UnassignedJob unassignedJob, List<ScanNode> olapScanNodes,
+            BiFunction<ScanNode, Integer, List<TScanRangeLocations>> bucketScanRangeSupplier,
+            Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier) {
         Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> assignment = Maps.newLinkedHashMap();
 
         Map<Integer, Long> bucketIndexToBytes =
-                computeEachBucketScanBytes(unassignedJob.getFragment(), olapScanNodes);
+                computeEachBucketScanBytes(unassignedJob.getFragment(), olapScanNodes, bucketBytesSupplier);
 
-        OlapScanNode firstOlapScanNode = olapScanNodes.get(0);
+        ScanNode firstOlapScanNode = olapScanNodes.get(0);
         for (Entry<Integer, Long> kv : bucketIndexToBytes.entrySet()) {
             Integer bucketIndex = kv.getKey();
             long allScanNodeScanBytesInOneBucket = kv.getValue();
 
-            List<TScanRangeLocations> allPartitionTabletsInOneBucket
-                    = firstOlapScanNode.bucketSeq2locations.get(bucketIndex);
+            List<TScanRangeLocations> allPartitionTabletsInOneBucketInFirstTable
+                    = bucketScanRangeSupplier.apply(firstOlapScanNode, bucketIndex);
             SelectResult replicaAndWorker = selectScanReplicaAndMinWorkloadWorker(
-                    allPartitionTabletsInOneBucket.get(0), allScanNodeScanBytesInOneBucket);
+                    allPartitionTabletsInOneBucketInFirstTable.get(0), allScanNodeScanBytesInOneBucket);
             Worker selectedWorker = replicaAndWorker.selectWorker;
             long workerId = selectedWorker.id();
-            for (OlapScanNode olapScanNode : olapScanNodes) {
-                List<Pair<TScanRangeParams, Long>> selectedReplicasInOneBucket =
-                        filterReplicaByWorkerInBucket(olapScanNode, workerId, bucketIndex);
+            for (ScanNode olapScanNode : olapScanNodes) {
+                List<TScanRangeLocations> allPartitionTabletsInOneBucket
+                        = bucketScanRangeSupplier.apply(olapScanNode, bucketIndex);
+                List<Pair<TScanRangeParams, Long>> selectedReplicasInOneBucket = filterReplicaByWorkerInBucket(
+                                olapScanNode, workerId, bucketIndex, allPartitionTabletsInOneBucket
+                );
                 Map<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanNodeToTablets
                         = assignment.computeIfAbsent(selectedWorker, worker -> Maps.newLinkedHashMap());
                 Map<ScanNode, ScanRanges> scanNodeToScanRanges = bucketIndexToScanNodeToTablets
@@ -106,12 +144,12 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
     }
 
     private Map<Worker, Map<ScanNode, ScanRanges>> selectForSingleOlapTable(
-            OlapScanNode nearStorageScanNode) {
+            ScanNode nearStorageScanNode) {
         Map<Worker, Map<ScanNode, ScanRanges>> workerToScanNodeAndReplicas = Maps.newHashMap();
         List<TScanRangeLocations> allScanTabletLocations = nearStorageScanNode.getScanRangeLocations(0);
         for (TScanRangeLocations onePartitionOneTabletLocation : allScanTabletLocations) {
-            long tabletId = onePartitionOneTabletLocation.getScanRange().getPaloScanRange().getTabletId();
-            Long tabletBytes = nearStorageScanNode.getTabletSingleReplicaSize(tabletId);
+            long tabletId = 0L; // onePartitionOneTabletLocation.getScanRange().getPaloScanRange().getTabletId();
+            Long tabletBytes = 0L; //nearStorageScanNode.getTabletSingleReplicaSize(tabletId);
 
             SelectResult selectedReplicaAndWorker
                     = selectScanReplicaAndMinWorkloadWorker(onePartitionOneTabletLocation, tabletBytes);
@@ -177,34 +215,49 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
     }
 
     private List<Pair<TScanRangeParams, Long>> filterReplicaByWorkerInBucket(
-            OlapScanNode olapScanNode, long filterWorkerId, int bucketIndex) {
+            ScanNode olapScanNode, long filterWorkerId, int bucketIndex,
+            List<TScanRangeLocations> allPartitionTabletsInOneBucket) {
         List<Pair<TScanRangeParams, Long>> selectedReplicasInOneBucket = Lists.newArrayList();
-        for (TScanRangeLocations onePartitionOneTabletLocation
-                : olapScanNode.bucketSeq2locations.get(bucketIndex)) {
-            long tabletId = onePartitionOneTabletLocation.getScanRange().getPaloScanRange().getTabletId();
-            for (TScanRangeLocation replicaLocation : onePartitionOneTabletLocation.getLocations()) {
-                if (replicaLocation.getBackendId() == filterWorkerId) {
-                    TScanRangeParams scanReplicaParams =
-                            buildScanReplicaParams(onePartitionOneTabletLocation, replicaLocation);
-                    Long replicaSize = olapScanNode.getTabletSingleReplicaSize(tabletId);
-                    selectedReplicasInOneBucket.add(Pair.of(scanReplicaParams, replicaSize));
-                    break;
+        for (TScanRangeLocations onePartitionOneTabletLocation : allPartitionTabletsInOneBucket) {
+            TScanRange scanRange = onePartitionOneTabletLocation.getScanRange();
+            if (scanRange.getPaloScanRange() != null) {
+                long tabletId = scanRange.getPaloScanRange().getTabletId();
+                for (TScanRangeLocation replicaLocation : onePartitionOneTabletLocation.getLocations()) {
+                    if (replicaLocation.getBackendId() == filterWorkerId) {
+                        TScanRangeParams scanReplicaParams =
+                                buildScanReplicaParams(onePartitionOneTabletLocation, replicaLocation);
+                        Long replicaSize = ((OlapScanNode) olapScanNode).getTabletSingleReplicaSize(tabletId);
+                        selectedReplicasInOneBucket.add(Pair.of(scanReplicaParams, replicaSize));
+                        break;
+                    }
                 }
+                throw new IllegalStateException("Can not find tablet " + tabletId + " in the bucket: " + bucketIndex);
+            } else if (onePartitionOneTabletLocation.getLocations().size() == 1) {
+                TScanRangeLocation replicaLocation = onePartitionOneTabletLocation.getLocations().get(0);
+                TScanRangeParams scanReplicaParams =
+                        buildScanReplicaParams(onePartitionOneTabletLocation, replicaLocation);
+                Long replicaSize = 0L;
+                selectedReplicasInOneBucket.add(Pair.of(scanReplicaParams, replicaSize));
+            } else {
+                throw new IllegalStateException("Unsupported");
             }
         }
         return selectedReplicasInOneBucket;
     }
 
-    private Map<Integer, Long> computeEachBucketScanBytes(PlanFragment fragment, List<OlapScanNode> olapScanNodes) {
+    private Map<Integer, Long> computeEachBucketScanBytes(
+            PlanFragment fragment, List<ScanNode> olapScanNodes,
+            Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier) {
         Map<Integer, Long> bucketIndexToBytes = Maps.newLinkedHashMap();
-        for (OlapScanNode olapScanNode : olapScanNodes) {
-            Set<Entry<Integer, Long>> bucketSeq2Bytes = olapScanNode.bucketSeq2Bytes.entrySet();
+        for (ScanNode olapScanNode : olapScanNodes) {
+            Map<Integer, Long> bucketSeq2Bytes = bucketBytesSupplier.apply(olapScanNode);
+            // Set<Entry<Integer, Long>> bucketSeq2Bytes = olapScanNode.bucketSeq2Bytes.entrySet();
             if (!bucketIndexToBytes.isEmpty() && bucketIndexToBytes.size() != bucketSeq2Bytes.size()) {
                 throw new IllegalStateException("Illegal fragment " + fragment.getFragmentId()
                         + ", every OlapScanNode should has same bucket num");
             }
 
-            for (Entry<Integer, Long> bucketSeq2Byte : bucketSeq2Bytes) {
+            for (Entry<Integer, Long> bucketSeq2Byte : bucketSeq2Bytes.entrySet()) {
                 Integer bucketIndex = bucketSeq2Byte.getKey();
                 Long scanBytes = bucketSeq2Byte.getValue();
                 bucketIndexToBytes.merge(bucketIndex, scanBytes, Long::sum);

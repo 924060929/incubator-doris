@@ -1717,6 +1717,14 @@ public class Coordinator implements CoordInterface {
                                 .put(scanNode.getFragmentId(), bucketNum);
                         olapScanNode.getFragment().setBucketNum(bucketNum);
                     }
+                } else if (!fragmentIdToSeqToAddressMap.containsKey(scanNode.getFragmentId())) {
+                    int bucketNum = 1;
+                    fragmentIdToSeqToAddressMap.put(scanNode.getFragmentId(), new HashMap<>());
+                    bucketShuffleJoinController.fragmentIdBucketSeqToScanRangeMap
+                            .put(scanNode.getFragmentId(), new BucketSeqToScanRange());
+                    bucketShuffleJoinController.fragmentIdToBucketNumMap
+                            .put(scanNode.getFragmentId(), bucketNum);
+                    scanNode.getFragment().setBucketNum(bucketNum);
                 }
 
                 BucketSeqToScanRange bucketSeqToScanRange = bucketShuffleJoinController
@@ -1744,6 +1752,15 @@ public class Coordinator implements CoordInterface {
 
                 bucketShuffleJoinController
                         .isBucketShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot());
+
+                for (ScanNode scanNode : distributedPlan.getFragmentJob().getScanNodes()) {
+                    if (scanNode instanceof FileQueryScanNode) {
+                        fileScanRangeParamsMap.put(
+                                scanNode.getId().asInt(),
+                                ((FileQueryScanNode) scanNode).getFileScanRangeParams()
+                        );
+                    }
+                }
 
                 for (AssignedJob instanceJob : ((PipelineDistributedPlan) distributedPlan).getInstanceJobs()) {
                     Worker worker = instanceJob.getAssignedWorker();
