@@ -49,12 +49,12 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
     @Override
     public Map<Worker, Map<ScanNode, ScanRanges>> selectReplicaAndWorkerWithoutBucket(
             UnassignedJob unassignedJob) {
-        List<ScanNode> nearStorageScanNodes = unassignedJob.getScanNodes();
-        if (nearStorageScanNodes.size() != 1) {
+        List<ScanNode> scanNodes = unassignedJob.getScanNodes();
+        if (scanNodes.size() != 1) {
             throw new IllegalStateException("Illegal fragment type, "
-                    + "should only contains one OlapScanNode but meet " + nearStorageScanNodes);
+                    + "should only contains one ScanNode but meet " + scanNodes.size() + " ScanNodes");
         }
-        return selectForSingleOlapTable(nearStorageScanNodes.get(0));
+        return selectForSingleScanTable(scanNodes.get(0));
     }
 
     @Override
@@ -143,13 +143,12 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
         return assignment;
     }
 
-    private Map<Worker, Map<ScanNode, ScanRanges>> selectForSingleOlapTable(
-            ScanNode nearStorageScanNode) {
+    private Map<Worker, Map<ScanNode, ScanRanges>> selectForSingleScanTable(ScanNode scanNode) {
         Map<Worker, Map<ScanNode, ScanRanges>> workerToScanNodeAndReplicas = Maps.newHashMap();
-        List<TScanRangeLocations> allScanTabletLocations = nearStorageScanNode.getScanRangeLocations(0);
+        List<TScanRangeLocations> allScanTabletLocations = scanNode.getScanRangeLocations(0);
         for (TScanRangeLocations onePartitionOneTabletLocation : allScanTabletLocations) {
             long tabletId = 0L; // onePartitionOneTabletLocation.getScanRange().getPaloScanRange().getTabletId();
-            Long tabletBytes = 0L; //nearStorageScanNode.getTabletSingleReplicaSize(tabletId);
+            Long tabletBytes = 0L; //scanNode.getTabletSingleReplicaSize(tabletId);
 
             SelectResult selectedReplicaAndWorker
                     = selectScanReplicaAndMinWorkloadWorker(onePartitionOneTabletLocation, tabletBytes);
@@ -159,7 +158,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
             Map<ScanNode, ScanRanges> scanNodeToRanges
                     = workerToScanNodeAndReplicas.computeIfAbsent(selectedWorker, worker -> Maps.newLinkedHashMap());
             ScanRanges selectedReplicas
-                    = scanNodeToRanges.computeIfAbsent(nearStorageScanNode, node -> new ScanRanges());
+                    = scanNodeToRanges.computeIfAbsent(scanNode, node -> new ScanRanges());
             TScanRangeParams scanReplicaParam = buildScanReplicaParams(onePartitionOneTabletLocation, selectedReplica);
             selectedReplicas.addScanRange(scanReplicaParam, tabletBytes);
         }
@@ -168,7 +167,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
         if (workerToScanNodeAndReplicas.isEmpty()) {
             workerToScanNodeAndReplicas.put(
                     workerManager.randomAvailableWorker(),
-                    ImmutableMap.of(nearStorageScanNode, new ScanRanges())
+                    ImmutableMap.of(scanNode, new ScanRanges())
             );
         }
         return workerToScanNodeAndReplicas;
