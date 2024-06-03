@@ -90,6 +90,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
             if (scanNode instanceof OlapScanNode) {
                 return (List) ((OlapScanNode) scanNode).bucketSeq2locations.get(bucketIndex);
             } else {
+                // the backend is selected by XxxScanNode.createScanRangeLocations()
                 return scanNode.getScanRangeLocations(0);
             }
         };
@@ -100,7 +101,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
             if (scanNode instanceof OlapScanNode) {
                 return ((OlapScanNode) scanNode).bucketSeq2Bytes;
             } else {
-                // just one bucket
+                // not supported yet
                 return ImmutableMap.of(0, 0L);
             }
         };
