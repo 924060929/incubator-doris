@@ -25,6 +25,10 @@ import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.thrift.TExternalScanRange;
+import org.apache.doris.thrift.TFileRangeDesc;
+import org.apache.doris.thrift.TFileScanRange;
+import org.apache.doris.thrift.TPaloScanRange;
 import org.apache.doris.thrift.TScanRange;
 import org.apache.doris.thrift.TScanRangeLocation;
 import org.apache.doris.thrift.TScanRangeLocations;
@@ -147,8 +151,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
         Map<Worker, Map<ScanNode, ScanRanges>> workerToScanNodeAndReplicas = Maps.newHashMap();
         List<TScanRangeLocations> allScanTabletLocations = scanNode.getScanRangeLocations(0);
         for (TScanRangeLocations onePartitionOneTabletLocation : allScanTabletLocations) {
-            long tabletId = 0L; // onePartitionOneTabletLocation.getScanRange().getPaloScanRange().getTabletId();
-            Long tabletBytes = 0L; //scanNode.getTabletSingleReplicaSize(tabletId);
+            Long tabletBytes = getScanRangeSize(scanNode, onePartitionOneTabletLocation);
 
             SelectResult selectedReplicaAndWorker
                     = selectScanReplicaAndMinWorkloadWorker(onePartitionOneTabletLocation, tabletBytes);
@@ -275,6 +278,28 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
 
     private WorkerWorkload getWorkload(Worker worker) {
         return workloads.computeIfAbsent(worker, w -> new WorkerWorkload());
+    }
+
+    private long getScanRangeSize(ScanNode scanNode, TScanRangeLocations scanRangeLocations) {
+        TScanRange scanRange = scanRangeLocations.getScanRange();
+        TPaloScanRange paloScanRange = scanRange.getPaloScanRange();
+        if (paloScanRange != null) {
+            long tabletId = paloScanRange.getTabletId();
+            Long tabletBytes = ((OlapScanNode) scanNode).getTabletSingleReplicaSize(tabletId);
+            return tabletBytes == null ? 0L : tabletBytes;
+        }
+
+        TExternalScanRange extScanRange = scanRange.getExtScanRange();
+        if (extScanRange != null) {
+            TFileScanRange fileScanRange = extScanRange.getFileScanRange();
+            long size = 0;
+            for (TFileRangeDesc range : fileScanRange.getRanges()) {
+                size += range.getSize();
+            }
+            return size;
+        }
+
+        return 0L;
     }
 
     private static class SelectResult {
