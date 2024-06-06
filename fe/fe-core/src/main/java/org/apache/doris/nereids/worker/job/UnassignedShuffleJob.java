@@ -100,9 +100,7 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         return biggestParallelChildFragment;
     }
 
-    private List<AssignedJob> buildInstances(
-            int instanceNum,
-            Function<Integer, Worker> workerSelector) {
+    private List<AssignedJob> buildInstances(int instanceNum, Function<Integer, Worker> workerSelector) {
         ImmutableList.Builder<AssignedJob> instances = ImmutableList.builderWithExpectedSize(instanceNum);
         for (int i = 0; i < instanceNum; i++) {
             Worker selectedWorker = workerSelector.apply(i);
