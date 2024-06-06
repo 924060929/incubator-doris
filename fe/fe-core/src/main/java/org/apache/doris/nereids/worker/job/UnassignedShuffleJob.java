@@ -58,7 +58,7 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         // When group by cardinality is smaller than number of backend, only some backends always
         // process while other has no data to process.
         // So we shuffle instances to make different backends handle different queries.
-        List<Worker> shuffleWorkersInBiggestParallelChildFragment = shuffleWorkers(biggestParallelChildFragment);
+        List<Worker> shuffleWorkersInBiggestParallelChildFragment = distinctShuffleWorkers(biggestParallelChildFragment);
         Function<Integer, Worker> workerSelector = instanceIndex -> {
             int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
             return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
@@ -114,7 +114,7 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         return instances.build();
     }
 
-    private List<Worker> shuffleWorkers(List<AssignedJob> instances) {
+    private List<Worker> distinctShuffleWorkers(List<AssignedJob> instances) {
         Set<Worker> candidateWorkerSet = Sets.newLinkedHashSet();
         for (AssignedJob instance : instances) {
             candidateWorkerSet.add(instance.getAssignedWorker());
