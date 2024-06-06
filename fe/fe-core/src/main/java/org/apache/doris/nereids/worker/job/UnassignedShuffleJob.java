@@ -28,12 +28,14 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 /** UnassignedExchangeJob */
 public class UnassignedShuffleJob extends AbstractUnassignedJob {
@@ -103,10 +105,11 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
     }
 
     private List<Worker> shuffleWorkers(List<AssignedJob> instances) {
-        List<Worker> candidateWorkers = Lists.newArrayList();
+        Set<Worker> candidateWorkerSet = Sets.newLinkedHashSet();
         for (AssignedJob instance : instances) {
-            candidateWorkers.add(instance.getAssignedWorker());
+            candidateWorkerSet.add(instance.getAssignedWorker());
         }
+        List<Worker> candidateWorkers = Lists.newArrayList(candidateWorkerSet);
         Collections.shuffle(candidateWorkers);
         return candidateWorkers;
     }

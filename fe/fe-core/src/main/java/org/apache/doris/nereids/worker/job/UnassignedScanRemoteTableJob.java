@@ -48,9 +48,6 @@ public class UnassignedScanRemoteTableJob extends AbstractUnassignedJob {
     @Override
     public List<AssignedJob> computeAssignedJobs(WorkerManager workerManager,
             ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
-        for (ScanNode scanNode : scanNodes) {
-
-        }
         return super.computeAssignedJobs(workerManager, inputJobs);
     }
 
