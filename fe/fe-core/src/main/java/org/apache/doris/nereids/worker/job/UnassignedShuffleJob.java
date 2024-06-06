@@ -50,15 +50,16 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         int expectInstanceNum = degreeOfParallelism();
         List<AssignedJob> biggestParallelChildFragment = getInstancesOfBiggestParallelChildFragment(inputJobs);
 
-        int realInstanceNum =
-                (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size())
+        int realInstanceNum
+                = (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size())
                     ? expectInstanceNum
                     : biggestParallelChildFragment.size();
 
         // When group by cardinality is smaller than number of backend, only some backends always
         // process while other has no data to process.
         // So we shuffle instances to make different backends handle different queries.
-        List<Worker> shuffleWorkersInBiggestParallelChildFragment = distinctShuffleWorkers(biggestParallelChildFragment);
+        List<Worker> shuffleWorkersInBiggestParallelChildFragment
+                = distinctShuffleWorkers(biggestParallelChildFragment);
         Function<Integer, Worker> workerSelector = instanceIndex -> {
             int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
             return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
