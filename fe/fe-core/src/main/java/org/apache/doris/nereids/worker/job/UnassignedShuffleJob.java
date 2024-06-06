@@ -50,15 +50,23 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         List<AssignedJob> biggestParallelChildFragment = getInstancesOfBiggestParallelChildFragment(inputJobs);
 
         if (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size()) {
+            // random select some instance
+            // get distinct host, when parallel_fragment_exec_instance_num > 1,
+            // single host may execute several instances
             List<Worker> shuffleWorkersInBiggestParallelChildFragment = shuffleWorkers(biggestParallelChildFragment);
 
             // random select expectInstanceNum workers in the biggestParallelChildFragment
-            Function<Integer, Worker> workerSelector = shuffleWorkersInBiggestParallelChildFragment::get;
+            Function<Integer, Worker> workerSelector = instanceIndex -> {
+                int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
+                return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
+            };
             return buildInstances(expectInstanceNum, workerSelector);
         } else {
             // select workers based on the same position as biggestParallelChildFragment
-            Function<Integer, Worker> workerSelector =
-                    instanceIndex -> biggestParallelChildFragment.get(instanceIndex).getAssignedWorker();
+            Function<Integer, Worker> workerSelector = instanceIndex -> {
+                int selectIndex = instanceIndex % biggestParallelChildFragment.size();
+                return biggestParallelChildFragment.get(selectIndex).getAssignedWorker();
+            };
             return buildInstances(biggestParallelChildFragment.size(), workerSelector);
         }
     }
