@@ -19,8 +19,10 @@ package org.apache.doris.nereids.worker;
 
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.exceptions.AnalysisException;
+import org.apache.doris.nereids.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.worker.job.ScanRanges;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
+import org.apache.doris.nereids.worker.job.UnparallelizedScanSource;
 import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
@@ -51,8 +53,8 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
     private final Map<Worker, WorkerWorkload> workloads = Maps.newLinkedHashMap();
 
     @Override
-    public Map<Worker, ScanRanges> selectReplicaAndWorkerWithoutBucket(ScanNode scanNode) {
-        Map<Worker, ScanRanges> workerScanRanges = Maps.newLinkedHashMap();
+    public Map<Worker, UnparallelizedScanSource> selectReplicaAndWorkerWithoutBucket(ScanNode scanNode) {
+        Map<Worker, UnparallelizedScanSource> workerScanRanges = Maps.newLinkedHashMap();
         // allScanRangesLocations is all scan ranges in all partition which need to scan
         List<TScanRangeLocations> allScanRangesLocations = scanNode.getScanRangeLocations(0);
         for (TScanRangeLocations onePartitionOneScanRangeLocation : allScanRangesLocations) {
@@ -61,8 +63,14 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
 
             WorkerScanRanges assigned = selectScanReplicaAndMinWorkloadWorker(
                     onePartitionOneScanRangeLocation, bytes);
-            ScanRanges scanRanges = workerScanRanges.computeIfAbsent(assigned.worker, w -> new ScanRanges());
-            scanRanges.addScanRanges(scanRanges);
+            UnparallelizedScanSource scanRanges = workerScanRanges.computeIfAbsent(
+                    assigned.worker,
+                    w -> new UnparallelizedScanSource(
+                            new DefaultScanSource(ImmutableMap.of(scanNode, new ScanRanges()))
+                    )
+            );
+            DefaultScanSource scanSource = (DefaultScanSource) scanRanges.scanSource;
+            scanSource.scanNodeToScanRanges.get(scanNode).addScanRanges(assigned.scanRanges);
         }
         return workerScanRanges;
     }

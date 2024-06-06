@@ -27,15 +27,24 @@ public class DefaultScanSource extends ScanSource {
     // for example:
     //   1. use OlapScanNode(tableName=`tbl1`) to scan with tablet: [tablet 10001, tablet 10002]
     //   2. use OlapScanNode(tableName=`tbl2`) to scan with tablet: [tablet 10003, tablet 10004]
-    public final Map<ScanNode, ScanRanges> scanNodeToTablets;
+    public final Map<ScanNode, ScanRanges> scanNodeToScanRanges;
 
-    public DefaultScanSource(Map<ScanNode, ScanRanges> scanNodeToTablets) {
-        this.scanNodeToTablets = scanNodeToTablets;
+    public DefaultScanSource(Map<ScanNode, ScanRanges> scanNodeToScanRanges) {
+        this.scanNodeToScanRanges = scanNodeToScanRanges;
+    }
+
+    @Override
+    int maxParallel(ScanNode scanNode) {
+        ScanRanges scanRanges = scanNodeToScanRanges.get(scanNode);
+        if (scanRanges != null) {
+            return scanRanges.params.size();
+        }
+        return 0;
     }
 
     @Override
     public void toString(StringBuilder str, String prefix) {
-        toString(scanNodeToTablets, str, prefix);
+        toString(scanNodeToScanRanges, str, prefix);
     }
 
     /** toString */

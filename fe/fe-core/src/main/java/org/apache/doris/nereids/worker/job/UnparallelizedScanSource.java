@@ -17,22 +17,14 @@
 
 package org.apache.doris.nereids.worker.job;
 
-import org.apache.doris.planner.ScanNode;
+/**
+ * UnparallelizedScanRanges:
+ * a ScanRanges which doesn't parallelize/split to instances
+ */
+public class UnparallelizedScanSource {
+    public final ScanSource scanSource;
 
-import java.util.List;
-
-/** ScanSource */
-public abstract class ScanSource {
-    @Override
-    public String toString() {
-        StringBuilder str = new StringBuilder();
-        toString(str, "");
-        return str.toString();
+    public UnparallelizedScanSource(ScanSource scanSource) {
+        this.scanSource = scanSource;
     }
-
-    abstract int maxParallel(ScanNode scanNode);
-
-    abstract List<ScanSource> parallelize(ScanNode scanNode, int instanceNum);
-
-    abstract void toString(StringBuilder str, String prefix);
 }

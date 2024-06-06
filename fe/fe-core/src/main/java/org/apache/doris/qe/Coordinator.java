@@ -1673,7 +1673,7 @@ public class Coordinator implements CoordInterface {
     }
 
     private void setForDefaultScanSource(FInstanceExecParam instanceExecParam, DefaultScanSource scanSource) {
-        for (Entry<ScanNode, ScanRanges> scanNodeIdToReplicaIds : scanSource.scanNodeToTablets.entrySet()) {
+        for (Entry<ScanNode, ScanRanges> scanNodeIdToReplicaIds : scanSource.scanNodeToScanRanges.entrySet()) {
             ScanNode scanNode = scanNodeIdToReplicaIds.getKey();
             ScanRanges scanReplicas = scanNodeIdToReplicaIds.getValue();
             instanceExecParam.perNodeScanRanges.put(scanNode.getId().asInt(), scanReplicas.params);

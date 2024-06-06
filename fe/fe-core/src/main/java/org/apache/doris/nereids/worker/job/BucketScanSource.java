@@ -33,6 +33,11 @@ public class BucketScanSource extends ScanSource {
         this.bucketIndexToScanNodeToTablets = bucketIndexToScanNodeToTablets;
     }
 
+    @Override
+    int maxParallel(ScanNode scanNode) {
+        return bucketIndexToScanNodeToTablets.size();
+    }
+
     /** toString */
     public void toString(StringBuilder str, String prefix) {
         int i = 0;
