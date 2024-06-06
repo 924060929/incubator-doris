@@ -19,6 +19,10 @@ package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.planner.ScanNode;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -34,12 +38,31 @@ public class DefaultScanSource extends ScanSource {
     }
 
     @Override
-    int maxParallel(ScanNode scanNode) {
+    public int maxParallel(ScanNode scanNode) {
         ScanRanges scanRanges = scanNodeToScanRanges.get(scanNode);
         if (scanRanges != null) {
             return scanRanges.params.size();
         }
         return 0;
+    }
+
+    @Override
+    public List<ScanSource> parallelize(ScanNode scanNode, int instanceNum) {
+        ScanRanges scanRanges = scanNodeToScanRanges.get(scanNode);
+        if (scanRanges == null) {
+            return ImmutableList.of();
+        }
+
+        List<ScanRanges> scanRangesPerInstance = scanRanges.split(instanceNum);
+
+        ImmutableList.Builder<ScanSource> instancesSource
+                = ImmutableList.builderWithExpectedSize(scanRangesPerInstance.size());
+        for (ScanRanges oneInstanceScanRanges : scanRangesPerInstance) {
+            instancesSource.add(
+                    new DefaultScanSource(ImmutableMap.of(scanNode, oneInstanceScanRanges))
+            );
+        }
+        return instancesSource.build();
     }
 
     @Override

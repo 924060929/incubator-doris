@@ -17,8 +17,15 @@
 
 package org.apache.doris.nereids.worker.job;
 
+import org.apache.doris.common.util.ListUtil;
 import org.apache.doris.planner.ScanNode;
 
+import com.clearspring.analytics.util.Lists;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
+
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -34,8 +41,49 @@ public class BucketScanSource extends ScanSource {
     }
 
     @Override
-    int maxParallel(ScanNode scanNode) {
+    public int maxParallel(ScanNode scanNode) {
         return bucketIndexToScanNodeToTablets.size();
+    }
+
+    @Override
+    public List<ScanSource> parallelize(ScanNode scanNode, int instanceNum) {
+        // collect the scan ranges about current scan nodes
+        List<Entry<Integer, ScanRanges>> bucketIndexToScanRanges
+                = Lists.newArrayList(getBucketIndexToScanRanges(scanNode).entrySet());
+
+        // split to some instance scan sources
+        List<List<Entry<Integer, ScanRanges>>> scanBucketsPerInstance
+                = ListUtil.splitBySize(bucketIndexToScanRanges, instanceNum);
+
+        // rebuild BucketScanSource for each instance
+        ImmutableList.Builder<ScanSource> instancesScanSource = ImmutableList.builder();
+        for (List<Entry<Integer, ScanRanges>> oneInstanceScanBuckets : scanBucketsPerInstance) {
+            ImmutableMap.Builder<Integer, Map<ScanNode, ScanRanges>> bucketsScanSources = ImmutableMap.builder();
+            for (Entry<Integer, ScanRanges> bucketIndexToScanRange : oneInstanceScanBuckets) {
+                Integer bucketIndex = bucketIndexToScanRange.getKey();
+                ScanRanges scanRanges = bucketIndexToScanRange.getValue();
+                bucketsScanSources.put(bucketIndex, ImmutableMap.of(scanNode, scanRanges));
+            }
+
+            instancesScanSource.add(new BucketScanSource(
+                    bucketsScanSources.build()
+            ));
+        }
+        return instancesScanSource.build();
+    }
+
+    public Map<Integer, ScanRanges> getBucketIndexToScanRanges(ScanNode scanNode) {
+        Map<Integer, ScanRanges> bucketIndexToScanRanges = Maps.newLinkedHashMap();
+        for (Entry<Integer, Map<ScanNode, ScanRanges>> entry : bucketIndexToScanNodeToTablets.entrySet()) {
+            Integer bucketIndex = entry.getKey();
+            Map<ScanNode, ScanRanges> scanNodeToScanRanges = entry.getValue();
+            ScanRanges scanRanges = scanNodeToScanRanges.get(scanNode);
+            if (scanRanges != null) {
+                bucketIndexToScanRanges.put(bucketIndex, scanRanges);
+            }
+        }
+
+        return bucketIndexToScanRanges;
     }
 
     /** toString */

@@ -30,9 +30,9 @@ public abstract class ScanSource {
         return str.toString();
     }
 
-    abstract int maxParallel(ScanNode scanNode);
+    public abstract int maxParallel(ScanNode scanNode);
 
-    abstract List<ScanSource> parallelize(ScanNode scanNode, int instanceNum);
+    public abstract List<ScanSource> parallelize(ScanNode scanNode, int instanceNum);
 
-    abstract void toString(StringBuilder str, String prefix);
+    public abstract void toString(StringBuilder str, String prefix);
 }
