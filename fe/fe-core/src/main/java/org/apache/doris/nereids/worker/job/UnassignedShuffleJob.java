@@ -71,8 +71,8 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
             return 1;
         }
 
-        // TODO: when we use nested loop join do right outer / semi / anti join, we should add an exchange node with
-        //       gather distribute under the nested loop join
+        // TODO: check we use nested loop join do right outer / semi / anti join,
+        //       we should add an exchange node with gather distribute under the nested loop join
 
         int expectInstanceNum = -1;
         if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null) {
