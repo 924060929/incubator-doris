@@ -20,6 +20,7 @@ package org.apache.doris.nereids.worker.job;
 import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.nereids.worker.WorkerManager;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.NestedLoopJoinNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.qe.ConnectContext;
 
@@ -49,30 +50,28 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         int expectInstanceNum = degreeOfParallelism();
         List<AssignedJob> biggestParallelChildFragment = getInstancesOfBiggestParallelChildFragment(inputJobs);
 
-        if (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size()) {
-            // random select some instance
-            // get distinct host, when parallel_fragment_exec_instance_num > 1,
-            // single host may execute several instances
-            List<Worker> shuffleWorkersInBiggestParallelChildFragment = shuffleWorkers(biggestParallelChildFragment);
+        int realInstanceNum =
+                (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size())
+                    ? expectInstanceNum
+                    : biggestParallelChildFragment.size();
 
-            // random select expectInstanceNum workers in the biggestParallelChildFragment
-            Function<Integer, Worker> workerSelector = instanceIndex -> {
-                int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
-                return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
-            };
-            return buildInstances(expectInstanceNum, workerSelector);
-        } else {
-            // select workers based on the same position as biggestParallelChildFragment
-            Function<Integer, Worker> workerSelector = instanceIndex -> {
-                int selectIndex = instanceIndex % biggestParallelChildFragment.size();
-                return biggestParallelChildFragment.get(selectIndex).getAssignedWorker();
-            };
-            return buildInstances(biggestParallelChildFragment.size(), workerSelector);
-        }
+        List<Worker> shuffleWorkersInBiggestParallelChildFragment = shuffleWorkers(biggestParallelChildFragment);
+        Function<Integer, Worker> workerSelector = instanceIndex -> {
+            int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
+            return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
+        };
+        return buildInstances(realInstanceNum, workerSelector);
     }
 
-    private int degreeOfParallelism() {
+    protected int degreeOfParallelism() {
         if (!fragment.getDataPartition().isPartitioned()) {
+            return 1;
+        }
+
+        List<NestedLoopJoinNode> nestedLoopJoins = fragment.getPlanRoot()
+                .collectInCurrentFragment(NestedLoopJoinNode.class::isInstance);
+        // when we use nested loop join do right outer / semi / anti join, the instance must be 1.
+        if (!nestedLoopJoins.isEmpty()) {
             return 1;
         }
 
