@@ -20,7 +20,6 @@ package org.apache.doris.nereids.worker.job;
 import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.nereids.worker.WorkerManager;
 import org.apache.doris.planner.ExchangeNode;
-import org.apache.doris.planner.NestedLoopJoinNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.qe.ConnectContext;
 
@@ -72,12 +71,8 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
             return 1;
         }
 
-        List<NestedLoopJoinNode> nestedLoopJoins = fragment.getPlanRoot()
-                .collectInCurrentFragment(NestedLoopJoinNode.class::isInstance);
-        // when we use nested loop join do right outer / semi / anti join, the instance must be 1.
-        if (!nestedLoopJoins.isEmpty()) {
-            return 1;
-        }
+        // TODO: when we use nested loop join do right outer / semi / anti join, we should add an exchange node with
+        //       gather distribute under the nested loop join
 
         int expectInstanceNum = -1;
         if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null) {
