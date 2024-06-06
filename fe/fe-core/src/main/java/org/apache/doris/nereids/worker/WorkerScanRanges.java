@@ -15,13 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.worker.job;
+package org.apache.doris.nereids.worker;
 
-import org.apache.doris.planner.ScanNode;
+import org.apache.doris.nereids.worker.job.ScanRanges;
 
-import java.util.List;
+import java.util.Objects;
 
-/** UnassignedNearStorageJob */
-public interface UnassignedNearStorageJob extends UnassignedJob {
-    List<ScanNode> nearStorageScanNodes();
+/** WorkerScanRange */
+public class WorkerScanRanges {
+    public final Worker worker;
+    public final ScanRanges scanRanges;
+
+    public WorkerScanRanges(Worker worker, ScanRanges scanRanges) {
+        this.worker = Objects.requireNonNull(worker, "scanRangeParams can not be null");
+        this.scanRanges = Objects.requireNonNull(scanRanges, "scanRanges can not be null");
+    }
 }

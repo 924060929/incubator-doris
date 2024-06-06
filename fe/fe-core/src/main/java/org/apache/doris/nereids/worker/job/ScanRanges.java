@@ -25,7 +25,7 @@ import com.google.common.collect.Lists;
 import java.util.List;
 
 /**ScanRanges */
-public class ScanRanges {
+public class ScanRanges implements Splittable<ScanRanges> {
     // usually, it's tablets
     public final List<TScanRangeParams> params;
     // size corresponding to tablets one by one
@@ -47,10 +47,31 @@ public class ScanRanges {
         this.totalBytes = totalBytes;
     }
 
+    public void addScanRanges(ScanRanges scanRanges) {
+        this.params.addAll(scanRanges.params);
+        this.bytes.addAll(scanRanges.bytes);
+        this.totalBytes += scanRanges.totalBytes;
+    }
+
     public void addScanRange(TScanRangeParams params, long bytes) {
         this.params.add(params);
         this.bytes.add(bytes);
         this.totalBytes += bytes;
+    }
+
+    @Override
+    public int itemSize() {
+        return params.size();
+    }
+
+    @Override
+    public void addItem(ScanRanges other, int index) {
+        addScanRange(other.params.get(index), other.bytes.get(index));
+    }
+
+    @Override
+    public ScanRanges newSplittable() {
+        return new ScanRanges();
     }
 
     @Override

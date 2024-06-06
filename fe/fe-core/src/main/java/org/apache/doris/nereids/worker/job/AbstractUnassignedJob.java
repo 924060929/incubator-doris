@@ -17,8 +17,10 @@
 
 package org.apache.doris.nereids.worker.job;
 
+import org.apache.doris.common.util.ListUtil;
 import org.apache.doris.nereids.trees.AbstractTreeNode;
 import org.apache.doris.nereids.util.Utils;
+import org.apache.doris.nereids.worker.WorkerScanRanges;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
@@ -44,6 +46,21 @@ public abstract class AbstractUnassignedJob
         );
         this.exchangeToChildJob
                 = Objects.requireNonNull(exchangeToChildJob, "exchangeToChildJob can not be null");
+    }
+
+    // one instance per tablets is too expensive, we should coalesce to less instances.
+    // for example:
+    //    assignedScanRanges: [tablet_1001, tablet_1002, tablet_1003, tablet_1004],
+    //    instanceNumPerWorker: 2
+    //
+    // we will generate two instances, every instance process two tablets:
+    // [
+    //    [tablet_1001, tablet_1002],
+    //    [tablet_1003, tablet_1004]
+    // ]
+    protected List<List<WorkerScanRanges>> coalesceInstances(
+            List<WorkerScanRanges> assignedScanRanges, int instanceNumPerWorker) {
+        return ListUtil.splitBySize(assignedScanRanges, instanceNumPerWorker);
     }
 
     @Override

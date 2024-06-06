@@ -25,15 +25,9 @@ import java.util.Map;
 
 /** ScanWorkerSelector */
 public interface ScanWorkerSelector {
-    // for a scan job:
-    // 1. select some workers
-    // 2. select replicas for each worker
-    //
-    // return
-    //   key: backend
-    //   value: which data should scan
-    Map<Worker, Map<ScanNode, ScanRanges>> selectReplicaAndWorkerWithoutBucket(
-            UnassignedJob unassignedJob);
+    // for a scan node, select replica for each scan range(denote tablet if the ScanNode is OlapScanNode),
+    // use the replica location to build a worker execute the instance
+    Map<Worker, ScanRanges> selectReplicaAndWorkerWithoutBucket(ScanNode scanNode);
 
     // return
     //   key:   Worker, the backend which will process this fragment
