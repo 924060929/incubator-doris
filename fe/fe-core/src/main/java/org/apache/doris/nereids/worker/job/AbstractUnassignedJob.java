@@ -25,6 +25,8 @@ import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
 
+import com.google.common.base.Preconditions;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,6 +51,7 @@ public abstract class AbstractUnassignedJob
     }
 
     protected int degreeOfParallelism(int maxParallel) {
+        Preconditions.checkArgument(maxParallel > 0, "maxParallel must be positive");
         if (!fragment.getDataPartition().isPartitioned()) {
             return 1;
         }
