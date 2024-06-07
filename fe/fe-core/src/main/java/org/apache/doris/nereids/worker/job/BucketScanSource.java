@@ -20,9 +20,9 @@ package org.apache.doris.nereids.worker.job;
 import org.apache.doris.common.util.ListUtil;
 import org.apache.doris.planner.ScanNode;
 
-import com.clearspring.analytics.util.Lists;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.List;
@@ -72,6 +72,7 @@ public class BucketScanSource extends ScanSource {
         return instancesScanSource.build();
     }
 
+    /** getBucketIndexToScanRanges */
     public Map<Integer, ScanRanges> getBucketIndexToScanRanges(ScanNode scanNode) {
         Map<Integer, ScanRanges> bucketIndexToScanRanges = Maps.newLinkedHashMap();
         for (Entry<Integer, Map<ScanNode, ScanRanges>> entry : bucketIndexToScanNodeToTablets.entrySet()) {

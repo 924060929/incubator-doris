@@ -29,11 +29,11 @@ public interface Splittable<S extends Splittable<S>> {
 
     void addItem(S other, int index);
 
+    S newSplittable();
+
     default List<S> split(int splitSize) {
         return Splittable.split(this, splitSize);
     }
-
-    S newSplittable();
 
     /**
      * split a list to multi expected number sublist

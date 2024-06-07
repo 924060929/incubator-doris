@@ -23,16 +23,17 @@ import java.util.List;
 
 /** ScanSource */
 public abstract class ScanSource {
-    @Override
-    public String toString() {
-        StringBuilder str = new StringBuilder();
-        toString(str, "");
-        return str.toString();
-    }
 
     public abstract int maxParallel(ScanNode scanNode);
 
     public abstract List<ScanSource> parallelize(ScanNode scanNode, int instanceNum);
 
     public abstract void toString(StringBuilder str, String prefix);
+
+    @Override
+    public String toString() {
+        StringBuilder str = new StringBuilder();
+        toString(str, "");
+        return str.toString();
+    }
 }
