@@ -241,7 +241,7 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
 
             // now we should compute how many instances to process the data,
             // for example: two instances
-            int instanceNum = degreeOfParallelism(scanNodes, maxParallel);
+            int instanceNum = degreeOfParallelism(maxParallel);
 
             // split the scanRanges to some partitions, one partition for one instance
             // for example:

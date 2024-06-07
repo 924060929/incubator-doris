@@ -40,12 +40,14 @@ public class DefaultScanSource extends ScanSource {
 
     @Override
     public int maxParallel(List<ScanNode> scanNodes) {
-        ScanRanges scanRanges = scanNodeToScanRanges.get(scanNodes.get(0));
-        if (scanRanges != null) {
-            // max parallel is the scan ranges(tablets) num
-            return scanRanges.params.size();
+        if (scanNodes.size() == 1) {
+            ScanRanges scanRanges = scanNodeToScanRanges.get(scanNodes.get(0));
+            if (scanRanges != null) {
+                // max parallel is the scan ranges(tablets) num
+                return Math.max(scanRanges.params.size(), 1);
+            }
         }
-        return 0;
+        return 1;
     }
 
     @Override
