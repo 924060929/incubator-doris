@@ -140,8 +140,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
             Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier) {
         Map<Worker, UninstancedScanSource> assignment = Maps.newLinkedHashMap();
 
-        Map<Integer, Long> bucketIndexToBytes =
-                computeEachBucketScanBytes(unassignedJob.getFragment(), scanNodes, bucketBytesSupplier);
+        Map<Integer, Long> bucketIndexToBytes = computeEachBucketScanBytes(scanNodes, bucketBytesSupplier);
 
         ScanNode firstScanNode = scanNodes.get(0);
         for (Entry<Integer, Long> kv : bucketIndexToBytes.entrySet()) {
@@ -258,16 +257,10 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
     }
 
     private Map<Integer, Long> computeEachBucketScanBytes(
-            PlanFragment fragment, List<ScanNode> scanNodes,
-            Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier) {
+            List<ScanNode> scanNodes, Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier) {
         Map<Integer, Long> bucketIndexToBytes = Maps.newLinkedHashMap();
         for (ScanNode scanNode : scanNodes) {
             Map<Integer, Long> bucketSeq2Bytes = bucketBytesSupplier.apply(scanNode);
-            if (!bucketIndexToBytes.isEmpty() && bucketIndexToBytes.size() != bucketSeq2Bytes.size()) {
-                throw new IllegalStateException("Illegal fragment " + fragment.getFragmentId()
-                        + ", every ScanNode should has same bucket num");
-            }
-
             for (Entry<Integer, Long> bucketSeq2Byte : bucketSeq2Bytes.entrySet()) {
                 Integer bucketIndex = bucketSeq2Byte.getKey();
                 Long scanBytes = bucketSeq2Byte.getValue();
