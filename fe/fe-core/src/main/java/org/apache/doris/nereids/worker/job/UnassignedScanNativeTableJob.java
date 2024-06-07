@@ -238,7 +238,7 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
             // }
             ScanSource scanSource = entry.getValue().scanSource;
 
-            // usually, its tablets num
+            // usually, its tablets num, or buckets num
             int maxParallel = scanSource.maxParallel(olapScanNode);
 
             // now we should compute how many instances to process the data,
