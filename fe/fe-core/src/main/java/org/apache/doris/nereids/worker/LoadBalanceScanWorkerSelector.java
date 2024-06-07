@@ -148,9 +148,9 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
 
             List<TScanRangeLocations> allPartitionTabletsInOneBucketInFirstTable
                     = bucketScanRangeSupplier.apply(firstScanNode, bucketIndex);
-            SelectResult replicaAndWorker = selectScanReplicaAndMinWorkloadWorker(
+            WorkerScanRanges replicaAndWorker = selectScanReplicaAndMinWorkloadWorker(
                     allPartitionTabletsInOneBucketInFirstTable.get(0), allScanNodeScanBytesInOneBucket);
-            Worker selectedWorker = replicaAndWorker.selectWorker;
+            Worker selectedWorker = replicaAndWorker.worker;
             long workerId = selectedWorker.id();
             for (ScanNode scanNode : scanNodes) {
                 List<TScanRangeLocations> allPartitionTabletsInOneBucket
