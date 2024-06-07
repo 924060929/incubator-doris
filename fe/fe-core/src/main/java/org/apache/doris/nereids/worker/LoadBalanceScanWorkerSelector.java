@@ -19,9 +19,11 @@ package org.apache.doris.nereids.worker;
 
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.exceptions.AnalysisException;
+import org.apache.doris.nereids.worker.job.BucketScanSource;
 import org.apache.doris.nereids.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.worker.job.ScanRanges;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
+import org.apache.doris.nereids.worker.job.UnassignedScanNativeTableJob;
 import org.apache.doris.nereids.worker.job.UninstancedScanSource;
 import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.OlapScanNode;
@@ -87,11 +89,11 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
     // }
 
     @Override
-    public Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> selectReplicaAndWorkerWithBucket(
-            UnassignedJob unassignedJob) {
+    public Map<Worker, UninstancedScanSource> selectReplicaAndWorkerWithBucket(
+            UnassignedScanNativeTableJob unassignedJob) {
         PlanFragment fragment = unassignedJob.getFragment();
         List<ScanNode> scanNodes = unassignedJob.getScanNodes();
-        List<OlapScanNode> olapScanNodes = filterOlapScanNodes(scanNodes);
+        List<OlapScanNode> olapScanNodes = unassignedJob.getOlapScanNodes();
 
         BiFunction<ScanNode, Integer, List<TScanRangeLocations>> bucketScanRangeSupplier = bucketScanRangeSupplier();
         Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier = bucketBytesSupplier();
@@ -132,11 +134,11 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
         };
     }
 
-    private Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> selectForBucket(
+    private Map<Worker, UninstancedScanSource> selectForBucket(
             UnassignedJob unassignedJob, List<ScanNode> scanNodes,
             BiFunction<ScanNode, Integer, List<TScanRangeLocations>> bucketScanRangeSupplier,
             Function<ScanNode, Map<Integer, Long>> bucketBytesSupplier) {
-        Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> assignment = Maps.newLinkedHashMap();
+        Map<Worker, UninstancedScanSource> assignment = Maps.newLinkedHashMap();
 
         Map<Integer, Long> bucketIndexToBytes =
                 computeEachBucketScanBytes(unassignedJob.getFragment(), scanNodes, bucketBytesSupplier);
@@ -158,9 +160,13 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
                 List<Pair<TScanRangeParams, Long>> selectedReplicasInOneBucket = filterReplicaByWorkerInBucket(
                                 scanNode, workerId, bucketIndex, allPartitionTabletsInOneBucket
                 );
-                Map<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanNodeToTablets
-                        = assignment.computeIfAbsent(selectedWorker, worker -> Maps.newLinkedHashMap());
-                Map<ScanNode, ScanRanges> scanNodeToScanRanges = bucketIndexToScanNodeToTablets
+                UninstancedScanSource bucketIndexToScanNodeToTablets
+                        = assignment.computeIfAbsent(
+                            selectedWorker,
+                            worker -> new UninstancedScanSource(new BucketScanSource(Maps.newLinkedHashMap()))
+                        );
+                BucketScanSource scanSource = (BucketScanSource) bucketIndexToScanNodeToTablets.scanSource;
+                Map<ScanNode, ScanRanges> scanNodeToScanRanges = scanSource.bucketIndexToScanNodeToTablets
                         .computeIfAbsent(bucketIndex, bucket -> Maps.newLinkedHashMap());
                 ScanRanges scanRanges = scanNodeToScanRanges.computeIfAbsent(scanNode, node -> new ScanRanges());
                 for (Pair<TScanRangeParams, Long> replica : selectedReplicasInOneBucket) {

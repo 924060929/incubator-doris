@@ -26,7 +26,7 @@ public abstract class ScanSource {
 
     public abstract int maxParallel(ScanNode scanNode);
 
-    public abstract List<ScanSource> parallelize(ScanNode scanNode, int instanceNum);
+    public abstract List<ScanSource> parallelize(List<ScanNode> scanNodes, int instanceNum);
 
     public abstract void toString(StringBuilder str, String prefix);
 

@@ -19,6 +19,7 @@ package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.planner.ScanNode;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
@@ -48,7 +49,11 @@ public class DefaultScanSource extends ScanSource {
     }
 
     @Override
-    public List<ScanSource> parallelize(ScanNode scanNode, int instanceNum) {
+    public List<ScanSource> parallelize(List<ScanNode> scanNodes, int instanceNum) {
+        Preconditions.checkArgument(scanNodes.size() == 1,
+                "Only support parallelize one ScanNode, but meet " + scanNodes.size() + " ScanNodes");
+
+        ScanNode scanNode = scanNodes.get(0);
         ScanRanges scanRanges = scanNodeToScanRanges.get(scanNode);
         if (scanRanges == null) {
             return ImmutableList.of();

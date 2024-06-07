@@ -47,7 +47,7 @@ public class BucketScanSource extends ScanSource {
     }
 
     @Override
-    public List<ScanSource> parallelize(ScanNode scanNode, int instanceNum) {
+    public List<ScanSource> parallelize(List<ScanNode> scanNodes, int instanceNum) {
         // collect the scan ranges about current scan nodes
         List<Entry<Integer, ScanRanges>> bucketIndexToScanRanges
                 = Lists.newArrayList(getBucketIndexToScanRanges(scanNode).entrySet());

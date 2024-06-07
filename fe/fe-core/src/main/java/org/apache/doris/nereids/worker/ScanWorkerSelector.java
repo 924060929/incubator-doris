@@ -17,8 +17,7 @@
 
 package org.apache.doris.nereids.worker;
 
-import org.apache.doris.nereids.worker.job.ScanRanges;
-import org.apache.doris.nereids.worker.job.UnassignedJob;
+import org.apache.doris.nereids.worker.job.UnassignedScanNativeTableJob;
 import org.apache.doris.nereids.worker.job.UninstancedScanSource;
 import org.apache.doris.planner.ScanNode;
 
@@ -41,6 +40,6 @@ public interface ScanWorkerSelector {
     //                      p1 values[(1), (10)) and p2 values[(10), 11) with integer partition column part,
     //                      and distributed by hash(id) buckets 10. And, so, there has 10 buckets from bucket 0 to
     //                      bucket 9, and every bucket contains two tablets, because there are two partitions.
-    Map<Worker, Map<Integer, Map<ScanNode, ScanRanges>>> selectReplicaAndWorkerWithBucket(
-            UnassignedJob unassignedJob);
+    Map<Worker, UninstancedScanSource> selectReplicaAndWorkerWithBucket(
+            UnassignedScanNativeTableJob unassignedJob);
 }
