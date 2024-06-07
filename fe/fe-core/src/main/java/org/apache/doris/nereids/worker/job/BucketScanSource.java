@@ -68,7 +68,7 @@ public class BucketScanSource extends ScanSource {
         List<Entry<Integer, Map<ScanNode, ScanRanges>>> bucketIndexToScanRanges
                 = Lists.newArrayList(bucketIndexToScanNodeToTablets.entrySet());
 
-        // split buckets to instanceNum groups.
+        // separate buckets to instanceNum groups.
         // for example:
         // [
         //   // instance 1 process two buckets
