@@ -61,6 +61,7 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
             };
             return buildInstances(expectInstanceNum, workerSelector);
         } else {
+            // keep same instance num like child fragment
             Function<Integer, Worker> workerSelector = instanceIndex -> {
                 int selectIndex = instanceIndex % biggestParallelChildFragment.size();
                 return biggestParallelChildFragment.get(selectIndex).getAssignedWorker();
