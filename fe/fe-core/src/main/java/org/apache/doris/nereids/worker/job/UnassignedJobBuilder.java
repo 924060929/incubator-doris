@@ -137,8 +137,7 @@ public class UnassignedJobBuilder {
     private UnassignedJob buildScanRemoteTableJob(
             PlanFragment planFragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> inputJobs,
             ScanWorkerSelector scanWorkerSelector) {
-        return new UnassignedScanNativeTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
-        // return new UnassignedScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+        return new UnassignedScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
     }
 
     private UnassignedShuffleJob buildShuffleJob(

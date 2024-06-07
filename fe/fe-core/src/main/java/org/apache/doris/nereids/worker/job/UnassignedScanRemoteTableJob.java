@@ -18,11 +18,14 @@
 package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.nereids.worker.ScanWorkerSelector;
+import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.nereids.worker.WorkerManager;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ListMultimap;
 
 import java.util.List;
@@ -36,25 +39,29 @@ import java.util.Objects;
  */
 public class UnassignedScanRemoteTableJob extends AbstractUnassignedJob {
     private final ScanWorkerSelector scanWorkerSelector;
-    private int assignedJobNum;
 
     public UnassignedScanRemoteTableJob(
             PlanFragment fragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> exchangeToChildJob,
             ScanWorkerSelector scanWorkerSelector) {
         super(fragment, scanNodes, exchangeToChildJob);
+        Preconditions.checkArgument(scanNodes.size() == 1 && !(scanNodes.get(0) instanceof OlapScanNode),
+                "Only support one non OlapScanNode in one fragment"
+        );
         this.scanWorkerSelector = Objects.requireNonNull(scanWorkerSelector, "scanWorkerSelector is not null");
     }
 
     @Override
     public List<AssignedJob> computeAssignedJobs(WorkerManager workerManager,
             ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
-        return super.computeAssignedJobs(workerManager, inputJobs);
+
+        Map<Worker, UninstancedScanSource> workerToScanSource = multipleMachinesParallelization();
+
+        Map<Worker, List<ScanSource>> workerToInstanceScanSource = insideMachineParallelization(workerToScanSource);
+
+        return buildInstances(workerToInstanceScanSource);
     }
 
-    // public static Map<> splitRanges(ScanNode scanNode) {
-    //     List<TScanRangeLocations> scanLocations = scanNode.getScanRangeLocations(0);
-    //     for (TScanRangeLocations scanLocation : scanLocations) {
-    //         List<TScanRangeLocation> locations = scanLocation.getLocations();
-    //     }
-    // }
+    protected Map<Worker, UninstancedScanSource> multipleMachinesParallelization() {
+        return scanWorkerSelector.selectReplicaAndWorkerWithoutBucket(scanNodes.get(0));
+    }
 }
