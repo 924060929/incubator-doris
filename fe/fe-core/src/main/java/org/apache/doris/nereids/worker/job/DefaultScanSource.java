@@ -59,9 +59,9 @@ public class DefaultScanSource extends ScanSource {
         ImmutableList.Builder<ScanSource> instancesSource
                 = ImmutableList.builderWithExpectedSize(scanRangesPerInstance.size());
         for (ScanRanges oneInstanceScanRanges : scanRangesPerInstance) {
-            instancesSource.add(
-                    new DefaultScanSource(ImmutableMap.of(scanNode, oneInstanceScanRanges))
-            );
+            DefaultScanSource oneInstanceScanSource
+                    = new DefaultScanSource(ImmutableMap.of(scanNode, oneInstanceScanRanges));
+            instancesSource.add(oneInstanceScanSource);
         }
         return instancesSource.build();
     }
