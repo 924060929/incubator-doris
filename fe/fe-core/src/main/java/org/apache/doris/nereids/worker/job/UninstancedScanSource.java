@@ -18,13 +18,13 @@
 package org.apache.doris.nereids.worker.job;
 
 /**
- * UnparallelizedScanRanges:
- * a ScanRanges which doesn't parallelize/split to instances
+ * UninstancedScanSource:
+ * a ScanSource which doesn't parallelize/split to instances
  */
-public class UnparallelizedScanSource {
+public class UninstancedScanSource {
     public final ScanSource scanSource;
 
-    public UnparallelizedScanSource(ScanSource scanSource) {
+    public UninstancedScanSource(ScanSource scanSource) {
         this.scanSource = scanSource;
     }
 }

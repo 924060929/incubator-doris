@@ -19,7 +19,7 @@ package org.apache.doris.nereids.worker;
 
 import org.apache.doris.nereids.worker.job.ScanRanges;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
-import org.apache.doris.nereids.worker.job.UnparallelizedScanSource;
+import org.apache.doris.nereids.worker.job.UninstancedScanSource;
 import org.apache.doris.planner.ScanNode;
 
 import java.util.Map;
@@ -28,7 +28,7 @@ import java.util.Map;
 public interface ScanWorkerSelector {
     // for a scan node, select replica for each scan range(denote tablet if the ScanNode is OlapScanNode),
     // use the replica location to build a worker execute the instance
-    Map<Worker, UnparallelizedScanSource> selectReplicaAndWorkerWithoutBucket(ScanNode scanNode);
+    Map<Worker, UninstancedScanSource> selectReplicaAndWorkerWithoutBucket(ScanNode scanNode);
 
     // return
     //   key:   Worker, the backend which will process this fragment

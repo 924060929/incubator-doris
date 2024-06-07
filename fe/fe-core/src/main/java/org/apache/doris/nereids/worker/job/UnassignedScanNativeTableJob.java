@@ -128,7 +128,7 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         //    BackendWorker("172.0.0.2"):
         //          olapScanNode1: ScanRanges([tablet_10005, tablet_10006, tablet_10007, tablet_10008, tablet_10009])
         // }
-        Map<Worker, UnparallelizedScanSource> assignedScanRanges = multipleMachinesParallelization(olapScanNode);
+        Map<Worker, UninstancedScanSource> assignedScanRanges = multipleMachinesParallelization(olapScanNode);
 
         // for each worker, compute how many instances should be generated, and which data should be scanned.
         // for example:
@@ -158,16 +158,16 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         return buildInstances(workerToPerInstanceScanRanges);
     }
 
-    protected Map<Worker, UnparallelizedScanSource> multipleMachinesParallelization(OlapScanNode olapScanNode) {
+    protected Map<Worker, UninstancedScanSource> multipleMachinesParallelization(OlapScanNode olapScanNode) {
         return scanWorkerSelector.selectReplicaAndWorkerWithoutBucket(olapScanNode);
     }
 
     protected Map<Worker, List<ScanSource>> insideMachineParallelization(
-            OlapScanNode olapScanNode, Map<Worker, UnparallelizedScanSource> workerToScanRanges) {
+            OlapScanNode olapScanNode, Map<Worker, UninstancedScanSource> workerToScanRanges) {
 
         Map<Worker, List<ScanSource>> workerToInstances = Maps.newLinkedHashMap();
 
-        for (Entry<Worker, UnparallelizedScanSource> entry : workerToScanRanges.entrySet()) {
+        for (Entry<Worker, UninstancedScanSource> entry : workerToScanRanges.entrySet()) {
             Worker worker = entry.getKey();
 
             // the scanRanges which this worker should scan,
