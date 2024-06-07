@@ -48,11 +48,48 @@ public class BucketScanSource extends ScanSource {
 
     @Override
     public List<ScanSource> parallelize(List<ScanNode> scanNodes, int instanceNum) {
-        // collect the scan ranges about current scan nodes
+        // current state, no any instance, we only known how many buckets
+        // this worker should process, and the data that this buckets should process:
+        //
+        // [
+        //   bucket 0: {
+        //     scanNode1: ScanRanges([tablet_10001, tablet_10004, tablet_10007]),
+        //     scanNode2: ScanRanges([tablet_10010, tablet_10013, tablet_10016])
+        //   },
+        //   bucket 1: {
+        //     scanNode1: ScanRanges([tablet_10002, tablet_10005, tablet_10008]),
+        //     scanNode2: ScanRanges([tablet_10011, tablet_10014, tablet_10017])
+        //   },
+        //   bucket 3: {
+        //     scanNode1: ScanRanges([tablet_10003, tablet_10006, tablet_10009]),
+        //     scanNode2: ScanRanges([tablet_10012, tablet_10015, tablet_10018])
+        //   }
+        // ]
         List<Entry<Integer, Map<ScanNode, ScanRanges>>> bucketIndexToScanRanges
                 = Lists.newArrayList(bucketIndexToScanNodeToTablets.entrySet());
 
-        // split to some instances scan sources
+        // split buckets to instanceNum groups.
+        // for example:
+        // [
+        //   // instance 1 process two buckets
+        //   [
+        //     bucket 0: {
+        //       scanNode1: ScanRanges([tablet_10001, tablet_10004, tablet_10007]),
+        //       scanNode2: ScanRanges([tablet_10010, tablet_10013, tablet_10016])
+        //     },
+        //     bucket 3: {
+        //       scanNode1: ScanRanges([tablet_10003, tablet_10006, tablet_10009]),
+        //       scanNode2: ScanRanges([tablet_10012, tablet_10015, tablet_10018])
+        //     }
+        //   ],
+        //   // instance 2 process one bucket
+        //   [
+        //     bucket 1: {
+        //       scanNode1: ScanRanges([tablet_10002, tablet_10005, tablet_10008]),
+        //       scanNode2: ScanRanges([tablet_10011, tablet_10014, tablet_10017])
+        //     }
+        //   ]
+        // ]
         List<List<Entry<Integer, Map<ScanNode, ScanRanges>>>> scanBucketsPerInstance
                 = ListUtil.splitBySize(bucketIndexToScanRanges, instanceNum);
 

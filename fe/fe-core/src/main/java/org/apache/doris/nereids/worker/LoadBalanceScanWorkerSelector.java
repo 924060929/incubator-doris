@@ -230,16 +230,20 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
             TScanRange scanRange = onePartitionOneTabletLocation.getScanRange();
             if (scanRange.getPaloScanRange() != null) {
                 long tabletId = scanRange.getPaloScanRange().getTabletId();
+                boolean foundTabletInThisWorker = false;
                 for (TScanRangeLocation replicaLocation : onePartitionOneTabletLocation.getLocations()) {
                     if (replicaLocation.getBackendId() == filterWorkerId) {
                         TScanRangeParams scanReplicaParams =
                                 buildScanReplicaParams(onePartitionOneTabletLocation, replicaLocation);
                         Long replicaSize = ((OlapScanNode) scanNode).getTabletSingleReplicaSize(tabletId);
                         selectedReplicasInOneBucket.add(Pair.of(scanReplicaParams, replicaSize));
+                        foundTabletInThisWorker = true;
                         break;
                     }
                 }
-                throw new IllegalStateException("Can not find tablet " + tabletId + " in the bucket: " + bucketIndex);
+                if (!foundTabletInThisWorker) {
+                    throw new IllegalStateException("Can not find tablet " + tabletId + " in the bucket: " + bucketIndex);
+                }
             } else if (onePartitionOneTabletLocation.getLocations().size() == 1) {
                 TScanRangeLocation replicaLocation = onePartitionOneTabletLocation.getLocations().get(0);
                 TScanRangeParams scanReplicaParams =
