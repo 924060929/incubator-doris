@@ -29,7 +29,6 @@ import org.apache.doris.qe.SessionVariable;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.List;
@@ -257,20 +256,5 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         }
 
         return workerToInstances;
-    }
-
-    protected List<AssignedJob> buildInstances(Map<Worker, List<ScanSource>> workerToPerInstanceScanSource) {
-        List<AssignedJob> assignments = Lists.newArrayList();
-        int instanceIndexInFragment = 0;
-        for (Entry<Worker, List<ScanSource>> entry : workerToPerInstanceScanSource.entrySet()) {
-            Worker selectedWorker = entry.getKey();
-            List<ScanSource> scanSourcePerInstance = entry.getValue();
-            for (ScanSource oneInstanceScanSource : scanSourcePerInstance) {
-                AssignedJob instanceJob = assignWorkerAndDataSources(
-                        instanceIndexInFragment++, selectedWorker, oneInstanceScanSource);
-                assignments.add(instanceJob);
-            }
-        }
-        return assignments;
     }
 }

@@ -19,6 +19,7 @@ package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.nereids.trees.AbstractTreeNode;
 import org.apache.doris.nereids.util.Utils;
+import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
@@ -26,9 +27,11 @@ import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 
 /** AbstractUnassignedJob */
@@ -67,6 +70,21 @@ public abstract class AbstractUnassignedJob
 
         // the scan instance num should not larger than the tablets num
         return Math.min(maxParallel, Math.max(fragment.getParallelExecNum(), 1));
+    }
+
+    protected List<AssignedJob> buildInstances(Map<Worker, List<ScanSource>> workerToPerInstanceScanSource) {
+        List<AssignedJob> assignments = Lists.newArrayList();
+        int instanceIndexInFragment = 0;
+        for (Entry<Worker, List<ScanSource>> entry : workerToPerInstanceScanSource.entrySet()) {
+            Worker selectedWorker = entry.getKey();
+            List<ScanSource> scanSourcePerInstance = entry.getValue();
+            for (ScanSource oneInstanceScanSource : scanSourcePerInstance) {
+                AssignedJob instanceJob = assignWorkerAndDataSources(
+                        instanceIndexInFragment++, selectedWorker, oneInstanceScanSource);
+                assignments.add(instanceJob);
+            }
+        }
+        return assignments;
     }
 
     @Override
