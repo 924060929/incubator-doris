@@ -273,21 +273,4 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         }
         return assignments;
     }
-
-    protected int degreeOfParallelism(int maxParallel) {
-        if (!fragment.getDataPartition().isPartitioned()) {
-            return 1;
-        }
-        if (scanNodes.size() == 1 && scanNodes.get(0) instanceof OlapScanNode) {
-            OlapScanNode olapScanNode = (OlapScanNode) scanNodes.get(0);
-            // if the scan node have limit and no conjuncts, only need 1 instance to save cpu and mem resource,
-            // e.g. select * from tbl limit 10
-            if (ConnectContext.get() != null && olapScanNode.shouldUseOneInstance(ConnectContext.get())) {
-                return 1;
-            }
-        }
-
-        // the scan instance num should not larger than the tablets num
-        return Math.min(maxParallel, Math.max(fragment.getParallelExecNum(), 1));
-    }
 }
