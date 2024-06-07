@@ -173,7 +173,7 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
             // the scanRanges which this worker should scan,
             // for example:
             // {
-            //   scan tbl1: [tablet_10001, tablet_10002, tablet_10003, tablet_10004]
+            //   scan tbl1: [tablet_10001, tablet_10002, tablet_10003, tablet_10004] // no instances
             // }
             ScanSource scanSource = entry.getValue().scanSource;
 
