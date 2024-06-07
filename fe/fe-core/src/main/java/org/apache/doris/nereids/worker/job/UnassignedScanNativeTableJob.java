@@ -171,7 +171,10 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
             Worker worker = entry.getKey();
 
             // the scanRanges which this worker should scan,
-            // for example: scan [tablet_10001, tablet_10002, tablet_10003, tablet_10004]
+            // for example:
+            // {
+            //   scan tbl1: [tablet_10001, tablet_10002, tablet_10003, tablet_10004]
+            // }
             ScanSource scanSource = entry.getValue().scanSource;
 
             // usually, its tablets num
@@ -184,8 +187,8 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
             // split the scanRanges to some partitions, one partition for one instance
             // for example:
             //  [
-            //     instance 1: [tablet_10001, tablet_10003]
-            //     instance 2: [tablet_10002, tablet_10004]
+            //     scan tbl1: [tablet_10001, tablet_10003], // instance 1
+            //     scan tbl1: [tablet_10002, tablet_10004]  // instance 2
             //  ]
             List<ScanSource> instanceToScanRanges = scanSource.parallelize(olapScanNode, instanceNum);
 
