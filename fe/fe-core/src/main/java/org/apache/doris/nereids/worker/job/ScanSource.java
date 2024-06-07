@@ -24,7 +24,7 @@ import java.util.List;
 /** ScanSource */
 public abstract class ScanSource {
 
-    public abstract int maxParallel(ScanNode scanNode);
+    public abstract int maxParallel(List<ScanNode> scanNodes);
 
     public abstract List<ScanSource> parallelize(List<ScanNode> scanNodes, int instanceNum);
 

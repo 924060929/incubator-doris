@@ -41,7 +41,7 @@ public class BucketScanSource extends ScanSource {
     }
 
     @Override
-    public int maxParallel(ScanNode scanNode) {
+    public int maxParallel(List<ScanNode> scanNodes) {
         // maxParallel is buckets num
         return bucketIndexToScanNodeToTablets.size();
     }

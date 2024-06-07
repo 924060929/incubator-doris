@@ -28,7 +28,6 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -226,7 +225,6 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
     protected Map<Worker, List<ScanSource>> insideMachineParallelization(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
 
-        OlapScanNode olapScanNode = olapScanNodes.get(0);
         Map<Worker, List<ScanSource>> workerToInstances = Maps.newLinkedHashMap();
         for (Entry<Worker, UninstancedScanSource> entry : workerToScanRanges.entrySet()) {
             Worker worker = entry.getKey();
@@ -239,11 +237,11 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
             ScanSource scanSource = entry.getValue().scanSource;
 
             // usually, its tablets num, or buckets num
-            int maxParallel = scanSource.maxParallel(olapScanNode);
+            int maxParallel = scanSource.maxParallel(scanNodes);
 
             // now we should compute how many instances to process the data,
             // for example: two instances
-            int instanceNum = degreeOfParallelism(olapScanNode, maxParallel);
+            int instanceNum = degreeOfParallelism(scanNodes, maxParallel);
 
             // split the scanRanges to some partitions, one partition for one instance
             // for example:
@@ -252,7 +250,7 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
             //     scan tbl1: [tablet_10002, tablet_10004]  // instance 2
             //  ]
             List<ScanSource> instanceToScanRanges = scanSource.parallelize(
-                    ImmutableList.of(olapScanNode), instanceNum
+                    scanNodes, instanceNum
             );
 
             workerToInstances.put(worker, instanceToScanRanges);
@@ -276,10 +274,14 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         return assignments;
     }
 
-    protected int degreeOfParallelism(ScanNode olapScanNode, int maxParallel) {
-        // if the scan node have limit and no conjuncts, only need 1 instance to save cpu and mem resource
-        if (ConnectContext.get() != null && olapScanNode.shouldUseOneInstance(ConnectContext.get())) {
-            return 1;
+    protected int degreeOfParallelism(List<ScanNode> scanNodes, int maxParallel) {
+        if (scanNodes.size() == 1 && scanNodes.get(0) instanceof OlapScanNode) {
+            OlapScanNode olapScanNode = (OlapScanNode) scanNodes.get(0);
+            // if the scan node have limit and no conjuncts, only need 1 instance to save cpu and mem resource,
+            // e.g. select * from tbl limit 10
+            if (ConnectContext.get() != null && olapScanNode.shouldUseOneInstance(ConnectContext.get())) {
+                return 1;
+            }
         }
 
         // the scan instance num should not larger than the tablets num
