@@ -135,7 +135,7 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         //       {
         //         bucket 0: {
         //           olapScanNode1: ScanRanges([tablet_10001, tablet_10002, tablet_10003, tablet_10004]),
-        //           olapScanNode2: ScanRanges([tablet_10009, tablet_100010, tablet_10011, tablet_10012])
+        //           olapScanNode2: ScanRanges([tablet_10009, tablet_10010, tablet_10011, tablet_10012])
         //         },
         //         bucket 1: {
         //           olapScanNode1: ScanRanges([tablet_10005, tablet_10006, tablet_10007, tablet_10008])
