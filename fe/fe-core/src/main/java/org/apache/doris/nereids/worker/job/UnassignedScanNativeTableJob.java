@@ -158,11 +158,10 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         // flatten to instances.
         // for example:
         // [
-        //   instance 1: AssignedJob(BackendWorker("172.0.0.1"), ScanRanges([tablet_10001, tablet_10003])),
-        //   instance 2: AssignedJob(BackendWorker("172.0.0.1"), ScanRanges([tablet_10002, tablet_10004])),
-        //   instance 3: AssignedJob(BackendWorker("172.0.0.2"), ScanRanges([tablet_10005, tablet_10008])),
-        //   instance 4: AssignedJob(BackendWorker("172.0.0.2"), ScanRanges([tablet_10006, tablet_10009])),
-        //   instance 5: AssignedJob(BackendWorker("172.0.0.2"), ScanRanges([tablet_10007])),
+        //   instance 1: AssignedJob(BackendWorker("172.0.0.1"), BucketScanSource(...)),
+        //   instance 2: AssignedJob(BackendWorker("172.0.0.1"), BucketScanSource(...)),
+        //   instance 3: AssignedJob(BackendWorker("172.0.0.2"), BucketScanSource(...)),
+        //   instance 4: AssignedJob(BackendWorker("172.0.0.2"), BucketScanSource(...)),
         // ]
         return buildInstances(parallelizedBuckets);
     }
@@ -182,13 +181,13 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         // for example:
         // {
         //    BackendWorker("172.0.0.1"): [
-        //        instance 1: ScanRanges([tablet_10001, tablet_10003])
-        //        instance 2: ScanRanges([tablet_10002, tablet_10004])
+        //        instance 1: olapScanNode1: ScanRanges([tablet_10001, tablet_10003])
+        //        instance 2: olapScanNode1: ScanRanges([tablet_10002, tablet_10004])
         //    ],
         //    BackendWorker("172.0.0.2"): [
-        //        instance 3: ScanRanges([tablet_10005, tablet_10008])
-        //        instance 4: ScanRanges([tablet_10006, tablet_10009])
-        //        instance 5: ScanRanges([tablet_10007])
+        //        instance 3: olapScanNode1: ScanRanges([tablet_10005, tablet_10008])
+        //        instance 4: olapScanNode1: ScanRanges([tablet_10006, tablet_10009])
+        //        instance 5: olapScanNode1: ScanRanges([tablet_10007])
         //    ],
         // }
         Map<Worker, List<ScanSource>> workerToPerInstanceScanRanges
@@ -197,11 +196,21 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         // flatten to instances.
         // for example:
         // [
-        //   instance 1: AssignedJob(BackendWorker("172.0.0.1"), ScanRanges([tablet_10001, tablet_10003])),
-        //   instance 2: AssignedJob(BackendWorker("172.0.0.1"), ScanRanges([tablet_10002, tablet_10004])),
-        //   instance 3: AssignedJob(BackendWorker("172.0.0.2"), ScanRanges([tablet_10005, tablet_10008])),
-        //   instance 4: AssignedJob(BackendWorker("172.0.0.2"), ScanRanges([tablet_10006, tablet_10009])),
-        //   instance 5: AssignedJob(BackendWorker("172.0.0.2"), ScanRanges([tablet_10007])),
+        //   instance 1: AssignedJob(BackendWorker("172.0.0.1"), DefaultScanRange(
+        //     olapScanNode1: [tablet_10001, tablet_10003])
+        //   ),
+        //   instance 2: AssignedJob(BackendWorker("172.0.0.1"), DefaultScanRange(
+        //      olapScanNode1: [tablet_10002, tablet_10004])
+        //   ),
+        //   instance 3: AssignedJob(BackendWorker("172.0.0.2"), DefaultScanRange(
+        //     olapScanNode1: [tablet_10005, tablet_10008])
+        //   ),
+        //   instance 4: AssignedJob(BackendWorker("172.0.0.2"), DefaultScanRange(
+        //     olapScanNode1[tablet_10006, tablet_10009])
+        //   ),
+        //   instance 5: AssignedJob(BackendWorker("172.0.0.2"), DefaultScanRange(
+        //     olapScanNode1: [tablet_10007])
+        //   ),
         // ]
         return buildInstances(workerToPerInstanceScanRanges);
     }
