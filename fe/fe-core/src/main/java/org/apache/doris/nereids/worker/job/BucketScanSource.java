@@ -49,21 +49,21 @@ public class BucketScanSource extends ScanSource {
     @Override
     public List<ScanSource> parallelize(List<ScanNode> scanNodes, int instanceNum) {
         // collect the scan ranges about current scan nodes
-        List<Entry<Integer, ScanRanges>> bucketIndexToScanRanges
-                = Lists.newArrayList(getBucketIndexToScanRanges(scanNode).entrySet());
+        List<Entry<Integer, Map<ScanNode, ScanRanges>>> bucketIndexToScanRanges
+                = Lists.newArrayList(bucketIndexToScanNodeToTablets.entrySet());
 
         // split to some instances scan sources
-        List<List<Entry<Integer, ScanRanges>>> scanBucketsPerInstance
+        List<List<Entry<Integer, Map<ScanNode, ScanRanges>>>> scanBucketsPerInstance
                 = ListUtil.splitBySize(bucketIndexToScanRanges, instanceNum);
 
         // rebuild BucketScanSource for each instance
         ImmutableList.Builder<ScanSource> instancesScanSource = ImmutableList.builder();
-        for (List<Entry<Integer, ScanRanges>> oneInstanceScanBuckets : scanBucketsPerInstance) {
+        for (List<Entry<Integer, Map<ScanNode, ScanRanges>>> oneInstanceScanBuckets : scanBucketsPerInstance) {
             ImmutableMap.Builder<Integer, Map<ScanNode, ScanRanges>> bucketsScanSources = ImmutableMap.builder();
-            for (Entry<Integer, ScanRanges> bucketIndexToScanRange : oneInstanceScanBuckets) {
-                Integer bucketIndex = bucketIndexToScanRange.getKey();
-                ScanRanges scanRanges = bucketIndexToScanRange.getValue();
-                bucketsScanSources.put(bucketIndex, ImmutableMap.of(scanNode, scanRanges));
+            for (Entry<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanNodeToScanRange : oneInstanceScanBuckets) {
+                Integer bucketIndex = bucketIndexToScanNodeToScanRange.getKey();
+                Map<ScanNode, ScanRanges> scanNodeToScanRanges = bucketIndexToScanNodeToScanRange.getValue();
+                bucketsScanSources.put(bucketIndex, scanNodeToScanRanges);
             }
 
             instancesScanSource.add(new BucketScanSource(
