@@ -117,14 +117,42 @@ public class UnassignedScanNativeTableJob extends AbstractUnassignedJob {
         //       bucket 1: {
         //         olapScanNode1: ScanRanges([tablet_10005, tablet_10006, tablet_10007, tablet_10008])
         //         olapScanNode2: ScanRanges([tablet_10013, tablet_10014, tablet_10015, tablet_10016])
-        //       }
-        //    }
+        //       },
+        //       ...
+        //    },
         //    BackendWorker("172.0.0.2"): {
         //       ...
         //    }
         // }
         Map<Worker, UninstancedScanSource> assignedBucketScanRanges = multipleMachinesParallelizationWithBuckets();
 
+        // separate buckets to instanceNum groups, let one instance process some buckets.
+        // for example, colocate join:
+        // {
+        //    // 172.0.0.1 has two instances
+        //    BackendWorker("172.0.0.1"): [
+        //       // instance 1 process two buckets
+        //       {
+        //         bucket 0: {
+        //           olapScanNode1: ScanRanges([tablet_10001, tablet_10002, tablet_10003, tablet_10004]),
+        //           olapScanNode2: ScanRanges([tablet_10009, tablet_100010, tablet_10011, tablet_10012])
+        //         },
+        //         bucket 1: {
+        //           olapScanNode1: ScanRanges([tablet_10005, tablet_10006, tablet_10007, tablet_10008])
+        //           olapScanNode2: ScanRanges([tablet_10013, tablet_10014, tablet_10015, tablet_10016])
+        //         }
+        //       },
+        //       // instance 1 process one bucket
+        //       {
+        //         bucket 3: ...
+        //       }
+        //    ]
+        //    // instance 4... in "172.0.0.1"
+        //    BackendWorker("172.0.0.2"): [
+        //       ...
+        //    ],
+        //    ...
+        // }
         Map<Worker, List<ScanSource>> parallelizedBuckets = insideMachineParallelization(assignedBucketScanRanges);
 
         // flatten to instances.
