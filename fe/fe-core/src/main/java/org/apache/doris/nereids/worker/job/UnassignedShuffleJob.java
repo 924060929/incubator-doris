@@ -49,21 +49,24 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         int expectInstanceNum = degreeOfParallelism();
         List<AssignedJob> biggestParallelChildFragment = getInstancesOfBiggestParallelChildFragment(inputJobs);
 
-        int realInstanceNum
-                = (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size())
-                    ? expectInstanceNum
-                    : biggestParallelChildFragment.size();
-
-        // When group by cardinality is smaller than number of backend, only some backends always
-        // process while other has no data to process.
-        // So we shuffle instances to make different backends handle different queries.
-        List<Worker> shuffleWorkersInBiggestParallelChildFragment
-                = distinctShuffleWorkers(biggestParallelChildFragment);
-        Function<Integer, Worker> workerSelector = instanceIndex -> {
-            int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
-            return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
-        };
-        return buildInstances(realInstanceNum, workerSelector);
+        if (expectInstanceNum > 0 && expectInstanceNum < biggestParallelChildFragment.size()) {
+            // When group by cardinality is smaller than number of backend, only some backends always
+            // process while other has no data to process.
+            // So we shuffle instances to make different backends handle different queries.
+            List<Worker> shuffleWorkersInBiggestParallelChildFragment
+                    = distinctShuffleWorkers(biggestParallelChildFragment);
+            Function<Integer, Worker> workerSelector = instanceIndex -> {
+                int selectIndex = instanceIndex % shuffleWorkersInBiggestParallelChildFragment.size();
+                return shuffleWorkersInBiggestParallelChildFragment.get(selectIndex);
+            };
+            return buildInstances(expectInstanceNum, workerSelector);
+        } else {
+            Function<Integer, Worker> workerSelector = instanceIndex -> {
+                int selectIndex = instanceIndex % biggestParallelChildFragment.size();
+                return biggestParallelChildFragment.get(selectIndex).getAssignedWorker();
+            };
+            return buildInstances(biggestParallelChildFragment.size(), workerSelector);
+        }
     }
 
     protected int degreeOfParallelism() {

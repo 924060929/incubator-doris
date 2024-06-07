@@ -41,7 +41,6 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         super(fragment, scanNodes, exchangeToChildJob);
     }
 
-
     @Override
     public List<AssignedJob> computeAssignedJobs(WorkerManager workerManager,
             ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
