@@ -34,6 +34,7 @@ public class UnassignedQueryConstantJob extends AbstractUnassignedJob {
         super(fragment, ImmutableList.of(), ImmutableMap.of());
     }
 
+
     @Override
     public List<AssignedJob> computeAssignedJobs(WorkerManager workerManager,
             ListMultimap<ExchangeNode, AssignedJob> inputJobs) {

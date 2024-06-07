@@ -17,6 +17,8 @@
 
 package org.apache.doris.nereids.worker.job;
 
+import com.google.common.collect.ImmutableMap;
+
 /**
  * UninstancedScanSource:
  * a ScanSource which doesn't parallelize/split to instances
@@ -26,5 +28,9 @@ public class UninstancedScanSource {
 
     public UninstancedScanSource(ScanSource scanSource) {
         this.scanSource = scanSource;
+    }
+
+    public static UninstancedScanSource emptyDefaultScanSource() {
+        return new UninstancedScanSource(new DefaultScanSource(ImmutableMap.of()));
     }
 }

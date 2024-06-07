@@ -21,47 +21,33 @@ import org.apache.doris.nereids.worker.ScanWorkerSelector;
 import org.apache.doris.nereids.worker.Worker;
 import org.apache.doris.nereids.worker.WorkerManager;
 import org.apache.doris.planner.ExchangeNode;
-import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 
-import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ListMultimap;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * UnassignedScanRemoteTableJob
+ * UnassignedScanSingleRemoteTableJob
  * it should be a leaf job which not contains scan native olap table node,
  * for example, select literal without table, or scan an external table
  */
-public class UnassignedScanRemoteTableJob extends AbstractUnassignedJob {
+public class UnassignedScanSingleRemoteTableJob extends AbstractUnassignedScanJob {
     private final ScanWorkerSelector scanWorkerSelector;
 
-    public UnassignedScanRemoteTableJob(
-            PlanFragment fragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> exchangeToChildJob,
+    public UnassignedScanSingleRemoteTableJob(
+            PlanFragment fragment, ScanNode scanNode, Map<ExchangeNode, UnassignedJob> exchangeToChildJob,
             ScanWorkerSelector scanWorkerSelector) {
-        super(fragment, scanNodes, exchangeToChildJob);
-        Preconditions.checkArgument(scanNodes.size() == 1 && !(scanNodes.get(0) instanceof OlapScanNode),
-                "Only support one non OlapScanNode in one fragment"
-        );
+        super(fragment, ImmutableList.of(scanNode), exchangeToChildJob);
         this.scanWorkerSelector = Objects.requireNonNull(scanWorkerSelector, "scanWorkerSelector is not null");
     }
 
     @Override
-    public List<AssignedJob> computeAssignedJobs(WorkerManager workerManager,
-            ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
-
-        Map<Worker, UninstancedScanSource> workerToScanSource = multipleMachinesParallelization();
-
-        Map<Worker, List<ScanSource>> workerToInstanceScanSource = insideMachineParallelization(workerToScanSource);
-
-        return buildInstances(workerToInstanceScanSource);
-    }
-
-    protected Map<Worker, UninstancedScanSource> multipleMachinesParallelization() {
+    protected Map<Worker, UninstancedScanSource> multipleMachinesParallelization(
+            WorkerManager workerManager, ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
         return scanWorkerSelector.selectReplicaAndWorkerWithoutBucket(scanNodes.get(0));
     }
 }

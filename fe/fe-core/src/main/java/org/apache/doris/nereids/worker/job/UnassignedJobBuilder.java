@@ -28,6 +28,8 @@ import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 import org.apache.doris.planner.PlanNodeId;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.SessionVariable;
 
 import com.google.common.collect.Maps;
 
@@ -85,15 +87,15 @@ public class UnassignedJobBuilder {
             // we need assign a backend which contains the data,
             // so that the OlapScanNode can find the data in the backend
             // e.g. select * from olap_table
-            return buildScanLocalTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+            return buildScanOlapTableJob(planFragment, (List) scanNodes, inputJobs, scanWorkerSelector);
         } else if (scanNodes.isEmpty()) {
             // select constant without table,
             // e.g. select 100 union select 200
             return buildQueryConstantJob(planFragment);
-        } else if (olapScanNodeNum == 0) {
+        } else if (olapScanNodeNum == 0 && scanNodes.size() == 1) {
             // only scan external tables or cloud tables or table valued functions
             // e,g. select * from numbers('number'='100')
-            return buildScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+            return buildScanRemoteTableJob(planFragment, scanNodes.get(0), inputJobs, scanWorkerSelector);
         } else {
             throw new IllegalStateException(
                     "Unsupported fragment which contains multiple scan nodes and some of them are not OlapScanNode"
@@ -106,10 +108,19 @@ public class UnassignedJobBuilder {
         return new UnassignedSpecifyInstancesJob(planFragment, scanNodes, inputJobs);
     }
 
-    private UnassignedScanNativeTableJob buildScanLocalTableJob(
-            PlanFragment planFragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> inputJobs,
+    private UnassignedJob buildScanOlapTableJob(
+            PlanFragment planFragment, List<OlapScanNode> olapScanNodes, Map<ExchangeNode, UnassignedJob> inputJobs,
             ScanWorkerSelector scanWorkerSelector) {
-        return new UnassignedScanNativeTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+        if (shouldAssignByBucket(planFragment)) {
+            return new UnassignedScanBucketOlapTableJob(
+                    planFragment, olapScanNodes, inputJobs, scanWorkerSelector);
+        } else if(olapScanNodes.size() == 1) {
+            return new UnassignedScanSingleOlapTableJob(
+                    planFragment, olapScanNodes.get(0), inputJobs, scanWorkerSelector);
+        } else {
+            throw new IllegalStateException("Not supported multiple scan multiple "
+                    + "OlapTable but not contains colocate join or bucket shuffle join");
+        }
     }
 
     private List<ScanNode> collectScanNodesInThisFragment(PlanFragment planFragment) {
@@ -135,9 +146,9 @@ public class UnassignedJobBuilder {
     }
 
     private UnassignedJob buildScanRemoteTableJob(
-            PlanFragment planFragment, List<ScanNode> scanNodes, Map<ExchangeNode, UnassignedJob> inputJobs,
+            PlanFragment planFragment, ScanNode scanNode, Map<ExchangeNode, UnassignedJob> inputJobs,
             ScanWorkerSelector scanWorkerSelector) {
-        return new UnassignedScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+        return new UnassignedScanSingleRemoteTableJob(planFragment, scanNode, inputJobs, scanWorkerSelector);
     }
 
     private UnassignedShuffleJob buildShuffleJob(
@@ -191,6 +202,28 @@ public class UnassignedJobBuilder {
         }
 
         return new FragmentLineage(fragments, parentFragmentToExchangeNode, exchangeToChildFragment);
+    }
+
+
+
+    private static boolean shouldAssignByBucket(PlanFragment fragment) {
+        if (fragment.hasColocatePlanNode()) {
+            return true;
+        }
+        if (enableBucketShuffleJoin() && fragment.isBucketShuffleJoinInput()) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean enableBucketShuffleJoin() {
+        if (ConnectContext.get() != null) {
+            SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
+            if (!sessionVariable.isEnableBucketShuffleJoin() && !sessionVariable.isEnableNereidsPlanner()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // the class support find exchange nodes in the fragment, and find child fragment by exchange node id

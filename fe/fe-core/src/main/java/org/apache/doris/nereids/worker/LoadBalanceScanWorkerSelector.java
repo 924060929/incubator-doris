@@ -23,7 +23,7 @@ import org.apache.doris.nereids.worker.job.BucketScanSource;
 import org.apache.doris.nereids.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.worker.job.ScanRanges;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
-import org.apache.doris.nereids.worker.job.UnassignedScanNativeTableJob;
+import org.apache.doris.nereids.worker.job.UnassignedScanBucketOlapTableJob;
 import org.apache.doris.nereids.worker.job.UninstancedScanSource;
 import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.OlapScanNode;
@@ -90,7 +90,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
 
     @Override
     public Map<Worker, UninstancedScanSource> selectReplicaAndWorkerWithBucket(
-            UnassignedScanNativeTableJob unassignedJob) {
+            UnassignedScanBucketOlapTableJob unassignedJob) {
         PlanFragment fragment = unassignedJob.getFragment();
         List<ScanNode> scanNodes = unassignedJob.getScanNodes();
         List<OlapScanNode> olapScanNodes = unassignedJob.getOlapScanNodes();
