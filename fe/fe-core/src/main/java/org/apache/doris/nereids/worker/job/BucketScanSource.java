@@ -52,7 +52,7 @@ public class BucketScanSource extends ScanSource {
         List<Entry<Integer, ScanRanges>> bucketIndexToScanRanges
                 = Lists.newArrayList(getBucketIndexToScanRanges(scanNode).entrySet());
 
-        // split to some instance scan sources
+        // split to some instances scan sources
         List<List<Entry<Integer, ScanRanges>>> scanBucketsPerInstance
                 = ListUtil.splitBySize(bucketIndexToScanRanges, instanceNum);
 
