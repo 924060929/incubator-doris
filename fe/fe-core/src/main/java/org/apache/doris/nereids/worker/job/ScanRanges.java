@@ -83,7 +83,7 @@ public class ScanRanges implements Splittable<ScanRanges> {
 
     /** toString */
     public void toString(StringBuilder str, String prefix) {
-        str.append("ScanRanges(bytes:" + totalBytes + ", ranges: [\n");
+        str.append("ScanRanges(bytes: " + totalBytes + ", ranges: [\n");
         for (int i = 0; i < params.size(); i++) {
             str.append(prefix).append("  " + toString(params.get(i)) + ", bytes: " + bytes.get(i));
             if (i + 1 < params.size()) {
