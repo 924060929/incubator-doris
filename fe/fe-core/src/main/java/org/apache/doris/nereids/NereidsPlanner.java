@@ -530,7 +530,7 @@ public class NereidsPlanner extends Planner {
                         + rewrittenPlan.treeString() + "\n\n"
                         + "========== OPTIMIZED PLAN "
                         + getTimeMetricString(SummaryProfile::getPrettyNereidsOptimizeTime) + " ==========\n"
-                        + optimizedPlan.treeString();
+                        + optimizedPlan.treeString() + "\n\n";
 
                 if (distributedPlans != null && !distributedPlans.isEmpty()) {
                     plan += "========== DISTRIBUTED PLAN "
@@ -539,7 +539,7 @@ public class NereidsPlanner extends Planner {
                     for (DistributedPlan distributedPlan : distributedPlans.values()) {
                         distributedPlanStringBuilder.append(distributedPlan).append("\n");
                     }
-                    plan += distributedPlanStringBuilder.toString();
+                    plan += distributedPlanStringBuilder + "\n\n";
                 }
                 break;
             default:
