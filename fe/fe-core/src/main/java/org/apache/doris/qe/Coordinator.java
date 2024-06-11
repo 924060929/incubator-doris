@@ -1742,7 +1742,7 @@ public class Coordinator implements CoordInterface {
     // For each fragment in fragments, computes hosts on which to run the instances
     // and stores result in fragmentExecParams.hosts.
     private void computeFragmentHosts() throws Exception {
-        if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsCoordinator()) {
+        if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsDistributePlanner()) {
             for (DistributedPlan distributedPlan : distributedPlans.values()) {
                 UnassignedJob fragmentJob = distributedPlan.getFragmentJob();
                 PlanFragment fragment = fragmentJob.getFragment();
@@ -2115,7 +2115,7 @@ public class Coordinator implements CoordInterface {
     // Populates scan_range_assignment_.
     // <fragment, <server, nodeId>>
     protected void computeScanRangeAssignment() throws Exception {
-        if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsCoordinator()) {
+        if (context.getState().isNereids && context.getSessionVariable().isEnableNereidsDistributePlanner()) {
             return;
         }
         Map<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();

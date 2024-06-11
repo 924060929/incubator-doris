@@ -365,7 +365,7 @@ public class NereidsPlanner extends Planner {
     private void distribute(PhysicalPlan physicalPlan) throws UserException {
         splitFragments(physicalPlan);
 
-        if (!statementContext.getConnectContext().getSessionVariable().isEnableNereidsCoordinator()) {
+        if (!statementContext.getConnectContext().getSessionVariable().isEnableNereidsDistributePlanner()) {
             return;
         }
         distributedPlans = new DistributePlanner(fragments).plan();
@@ -510,7 +510,7 @@ public class NereidsPlanner extends Planner {
 
                 distributedPlanStringBuilder.append("========== DISTRIBUTED PLAN ==========\n");
                 if (distributedPlans == null || distributedPlans.isEmpty()) {
-                    plan = "Distributed plan not generated, please set experimental_enable_nereids_coordinator to true";
+                    plan = "Distributed plan not generated, please set enable_nereids_distribute_planner to true";
                 } else {
                     for (DistributedPlan distributedPlan : distributedPlans.values()) {
                         distributedPlanStringBuilder.append(distributedPlan).append("\n");
