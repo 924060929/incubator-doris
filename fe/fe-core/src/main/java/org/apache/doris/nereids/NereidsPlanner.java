@@ -140,9 +140,6 @@ public class NereidsPlanner extends Planner {
         Plan resultPlan = plan(parsedPlan, requireProperties, explainLevel, showPlanProcess);
         statementContext.getStopwatch().stop();
         setOptimizedPlan(resultPlan);
-        if (explainLevel.isPlanLevel) {
-            return;
-        }
 
         physicalPlan = (PhysicalPlan) resultPlan;
         distribute(physicalPlan);
@@ -504,6 +501,19 @@ public class NereidsPlanner extends Planner {
                         + optimizedPlan.treeString()
                         + "\n\n========== MATERIALIZATIONS ==========\n"
                         + materializationStringBuilder;
+                break;
+            case DISTRIBUTED_PLAN:
+                StringBuilder distributedPlanStringBuilder = new StringBuilder();
+
+                distributedPlanStringBuilder.append("========== DISTRIBUTED PLAN ==========\n");
+                if (distributedPlans == null || distributedPlans.isEmpty()) {
+                    plan = "Distributed plan not generated, please set experimental_enable_nereids_coordinator to true";
+                } else {
+                    for (DistributedPlan distributedPlan : distributedPlans.values()) {
+                        distributedPlanStringBuilder.append(distributedPlan).append("\n");
+                    }
+                    plan = distributedPlanStringBuilder.toString();
+                }
                 break;
             case ALL_PLAN:
                 plan = "========== PARSED PLAN "
