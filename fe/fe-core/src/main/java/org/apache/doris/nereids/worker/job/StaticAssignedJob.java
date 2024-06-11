@@ -60,7 +60,11 @@ public class StaticAssignedJob implements AssignedJob {
     @Override
     public String toString() {
         StringBuilder scanSourceString = new StringBuilder();
-        scanSource.toString(scanSourceString, "  ");
+        if (!scanSource.isEmpty()) {
+            scanSource.toString(scanSourceString, "  ");
+        } else {
+            scanSourceString = new StringBuilder("[]");
+        }
         return "StaticAssignedJob(\n  unassignedJob: " + unassignedJob
                 + ",\n  worker: " + worker + ",\n  scanSource: " + scanSourceString + "\n)";
     }

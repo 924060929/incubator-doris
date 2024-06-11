@@ -78,6 +78,11 @@ public class DefaultScanSource extends ScanSource {
         toString(scanNodeToScanRanges, str, prefix);
     }
 
+    @Override
+    public boolean isEmpty() {
+        return scanNodeToScanRanges.isEmpty();
+    }
+
     /** toString */
     public static void toString(Map<ScanNode, ScanRanges> scanNodeToScanRanges, StringBuilder str, String prefix) {
         int i = 0;

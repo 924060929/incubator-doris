@@ -141,4 +141,9 @@ public class BucketScanSource extends ScanSource {
         }
         str.append("\n").append(prefix).append("]");
     }
+
+    @Override
+    public boolean isEmpty() {
+        return bucketIndexToScanNodeToTablets.isEmpty();
+    }
 }
