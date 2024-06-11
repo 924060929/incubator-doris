@@ -369,6 +369,9 @@ public class NereidsPlanner extends Planner {
             return;
         }
         distributedPlans = new DistributePlanner(fragments).plan();
+        if (statementContext.getConnectContext().getExecutor() != null) {
+            statementContext.getConnectContext().getExecutor().getSummaryProfile().setNereidsDistributeTime();
+        }
     }
 
     private PhysicalPlan postProcess(PhysicalPlan physicalPlan) {
@@ -528,6 +531,16 @@ public class NereidsPlanner extends Planner {
                         + "========== OPTIMIZED PLAN "
                         + getTimeMetricString(SummaryProfile::getPrettyNereidsOptimizeTime) + " ==========\n"
                         + optimizedPlan.treeString();
+
+                if (distributedPlans != null && !distributedPlans.isEmpty()) {
+                    plan += "========== DISTRIBUTED PLAN "
+                            + getTimeMetricString(SummaryProfile::getPrettyNereidsDistributeTime) + " ==========\n";
+                    distributedPlanStringBuilder = new StringBuilder();
+                    for (DistributedPlan distributedPlan : distributedPlans.values()) {
+                        distributedPlanStringBuilder.append(distributedPlan).append("\n");
+                    }
+                    plan += distributedPlanStringBuilder.toString();
+                }
                 break;
             default:
                 plan = super.getExplainString(explainOptions)

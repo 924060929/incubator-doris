@@ -201,6 +201,7 @@ public class SummaryProfile {
     private long nereidsRewriteFinishTime = -1;
     private long nereidsOptimizeFinishTime = -1;
     private long nereidsTranslateFinishTime = -1;
+    private long nereidsDistributeFinishTime = -1;
     // timestamp of query begin
     private long queryBeginTime = -1;
     // Analysis end time
@@ -419,6 +420,10 @@ public class SummaryProfile {
 
     public void setNereidsTranslateTime() {
         this.nereidsTranslateFinishTime = TimeUtils.getStartTimeMs();
+    }
+
+    public void setNereidsDistributeTime() {
+        this.nereidsDistributeFinishTime = TimeUtils.getStartTimeMs();
     }
 
     public void setQueryBeginTime() {
@@ -659,6 +664,10 @@ public class SummaryProfile {
 
     public String getPrettyNereidsTranslateTime() {
         return getPrettyTime(nereidsTranslateFinishTime, nereidsOptimizeFinishTime, TUnit.TIME_MS);
+    }
+
+    public String getPrettyNereidsDistributeTime() {
+        return getPrettyTime(nereidsDistributeFinishTime, nereidsTranslateFinishTime, TUnit.TIME_MS);
     }
 
     private String getPrettyGetPartitionVersionTime() {
