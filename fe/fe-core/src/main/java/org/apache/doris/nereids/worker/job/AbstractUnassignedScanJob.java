@@ -83,7 +83,17 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                         scanNodes, 1 // don't split scan ranges
                 );
 
-                // reference same ScanSource to generate some instances
+                // Some tablets too big, we need add parallel to process this tablet,
+                // for example, use one OlapScanNode to scan data, and use some instances
+                // to process Aggregation parallel. we call this `share scan`. Backend will
+                // know this instances share the same ScanSource, and will not scan same data
+                // multiple times.
+                //
+                //          instance1      instance2     instance3     instance4
+                //            \              \             /            /
+                //
+                //                             OlapScanNode
+                // (share scan node, and local shuffle data to other local instance to parallel compute this data)
                 ScanSource instanceToScanRange = instanceToScanRanges.get(0);
                 for (int i = 0; i < instanceNum; i++) {
                     ShareScanAssignedJob shareScanAssignedJob = new ShareScanAssignedJob(
