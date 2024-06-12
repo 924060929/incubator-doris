@@ -133,10 +133,10 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
     }
 
     protected boolean parallelTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
-        if (scanNodes.size() > 1) {
-            return noEnoughScanRange(workerToScanRanges) && noEnoughBuckets(workerToScanRanges);
-        } else if (scanNodes.size() == 1) {
+        if (scanNodes.size() == 1) {
             return noEnoughScanRange(workerToScanRanges);
+        } else if (scanNodes.size() > 1) {
+            return noEnoughScanRange(workerToScanRanges) && noEnoughBuckets(workerToScanRanges);
         } else {
             return false;
         }
