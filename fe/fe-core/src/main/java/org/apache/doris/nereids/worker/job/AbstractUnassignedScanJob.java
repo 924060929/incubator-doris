@@ -28,7 +28,6 @@ import org.apache.doris.qe.ConnectContext;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 
 import java.util.List;
 import java.util.Map;
@@ -48,18 +47,19 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         Map<Worker, UninstancedScanSource> workerToScanSource = multipleMachinesParallelization(
                 workerManager, inputJobs);
 
-        Map<Worker, List<ScanSource>> workerToInstanceScanSource = insideMachineParallelization(workerToScanSource);
-
-        return buildInstances(workerToInstanceScanSource);
+        return insideMachineParallelization(workerToScanSource);
     }
 
     protected abstract Map<Worker, UninstancedScanSource> multipleMachinesParallelization(
             WorkerManager workerManager, ListMultimap<ExchangeNode, AssignedJob> inputJobs);
 
-    protected Map<Worker, List<ScanSource>> insideMachineParallelization(
+    protected List<AssignedJob> insideMachineParallelization(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
 
-        Map<Worker, List<ScanSource>> workerToInstances = Maps.newLinkedHashMap();
+        boolean useLocalShuffle = useShareScan(workerToScanRanges);
+        int instanceIndexInFragment = 0;
+
+        List<AssignedJob> instances = Lists.newArrayList();
         for (Entry<Worker, UninstancedScanSource> entry : workerToScanRanges.entrySet()) {
             Worker worker = entry.getKey();
 
@@ -71,26 +71,68 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
             ScanSource scanSource = entry.getValue().scanSource;
 
             // usually, its tablets num, or buckets num
-            int maxParallel = scanSource.maxParallel(scanNodes);
+            int scanSourceMaxParallel = scanSource.maxParallel(scanNodes);
 
             // now we should compute how many instances to process the data,
             // for example: two instances
-            int instanceNum = degreeOfParallelism(maxParallel);
+            int instanceNum = degreeOfParallelism(scanSourceMaxParallel);
 
-            // split the scanRanges to some partitions, one partition for one instance
-            // for example:
-            //  [
-            //     scan tbl1: [tablet_10001, tablet_10003], // instance 1
-            //     scan tbl1: [tablet_10002, tablet_10004]  // instance 2
-            //  ]
-            List<ScanSource> instanceToScanRanges = scanSource.parallelize(
-                    scanNodes, instanceNum
-            );
+            List<ScanSource> instanceToScanRanges;
+            if (useLocalShuffle) {
+                instanceToScanRanges = scanSource.parallelize(
+                        scanNodes, 1 // don't split scan ranges
+                );
 
-            workerToInstances.put(worker, instanceToScanRanges);
+                // copy same ScanSource generate some instances
+                ScanSource instanceToScanRange = instanceToScanRanges.get(0);
+                for (int i = 0; i < instanceNum; i++) {
+                    ShareScanAssignedJob shareScanAssignedJob = new ShareScanAssignedJob(
+                            instanceIndexInFragment++, this, worker, instanceToScanRange);
+                    instances.add(shareScanAssignedJob);
+                }
+            } else {
+                // split the scanRanges to some partitions, one partition for one instance
+                // for example:
+                //  [
+                //     scan tbl1: [tablet_10001, tablet_10003], // instance 1
+                //     scan tbl1: [tablet_10002, tablet_10004]  // instance 2
+                //  ]
+                instanceToScanRanges = scanSource.parallelize(
+                        scanNodes, instanceNum
+                );
+
+                for (ScanSource instanceToScanRange : instanceToScanRanges) {
+                    instances.add(assignWorkerAndDataSources(instanceIndexInFragment++, worker, instanceToScanRange));
+                }
+            }
         }
 
-        return workerToInstances;
+        return instances;
+    }
+
+    private boolean useShareScan(Map<Worker, UninstancedScanSource> workerToScanRanges) {
+        /**
+         * Ignore storage data distribution if:
+         * 1. `parallelExecInstanceNum * numBackends` is larger than scan ranges.
+         * 2. Use Nereids planner.
+         */
+        ConnectContext context = ConnectContext.get();
+        if (context == null) {
+            return false;
+        }
+        boolean forceToLocalShuffle = context.getSessionVariable().isForceToLocalShuffle();
+        boolean noStorageDataDistributionRequire = scanNodes.stream()
+                    .allMatch(scanNode -> scanNode.ignoreStorageDataDistribution(context, workerToScanRanges.size()));
+
+        if (forceToLocalShuffle || noStorageDataDistributionRequire) {
+            return true;
+        }
+
+        if (scanNodes.size() == 1 && !scanNodes.get(0).shouldDisableSharedScan(context)) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     protected int degreeOfParallelism(int maxParallel) {
@@ -110,28 +152,5 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
 
         // the scan instance num should not larger than the tablets num
         return Math.min(maxParallel, Math.max(fragment.getParallelExecNum(), 1));
-    }
-
-    protected List<AssignedJob> buildInstances(Map<Worker, List<ScanSource>> workerToPerInstanceScanSource) {
-        // flatten to instances.
-        // for example:
-        // [
-        //   instance 1: AssignedJob(BackendWorker("172.0.0.1"), ScanSource(...)),
-        //   instance 2: AssignedJob(BackendWorker("172.0.0.1"), ScanSource(...)),
-        //   instance 3: AssignedJob(BackendWorker("172.0.0.2"), ScanSource(...)),
-        //   instance 4: AssignedJob(BackendWorker("172.0.0.2"), ScanSource(...)),
-        // ]
-        List<AssignedJob> assignments = Lists.newArrayList();
-        int instanceIndexInFragment = 0;
-        for (Entry<Worker, List<ScanSource>> entry : workerToPerInstanceScanSource.entrySet()) {
-            Worker selectedWorker = entry.getKey();
-            List<ScanSource> scanSourcePerInstance = entry.getValue();
-            for (ScanSource oneInstanceScanSource : scanSourcePerInstance) {
-                AssignedJob instanceJob = assignWorkerAndDataSources(
-                        instanceIndexInFragment++, selectedWorker, oneInstanceScanSource);
-                assignments.add(instanceJob);
-            }
-        }
-        return assignments;
     }
 }

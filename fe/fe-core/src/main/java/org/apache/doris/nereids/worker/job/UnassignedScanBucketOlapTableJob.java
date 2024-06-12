@@ -81,7 +81,7 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
     }
 
     @Override
-    protected Map<Worker, List<ScanSource>> insideMachineParallelization(
+    protected List<AssignedJob> insideMachineParallelization(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
         // separate buckets to instanceNum groups, let one instance process some buckets.
         // for example, colocate join:

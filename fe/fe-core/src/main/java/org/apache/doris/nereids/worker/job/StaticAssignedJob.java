@@ -65,7 +65,7 @@ public class StaticAssignedJob implements AssignedJob {
         } else {
             scanSourceString = new StringBuilder("[]");
         }
-        return "StaticAssignedJob(\n  unassignedJob: " + unassignedJob
+        return getClass().getSimpleName() + "(\n  unassignedJob: " + unassignedJob
                 + ",\n  worker: " + worker + ",\n  scanSource: " + scanSourceString + "\n)";
     }
 }

@@ -51,6 +51,7 @@ import org.apache.doris.nereids.worker.job.BucketScanSource;
 import org.apache.doris.nereids.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.worker.job.ScanRanges;
 import org.apache.doris.nereids.worker.job.ScanSource;
+import org.apache.doris.nereids.worker.job.ShareScanAssignedJob;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
 import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.DataSink;
@@ -1672,15 +1673,18 @@ public class Coordinator implements CoordInterface {
         return false;
     }
 
-    private void setForDefaultScanSource(FInstanceExecParam instanceExecParam, DefaultScanSource scanSource) {
+    private void setForDefaultScanSource(
+            FInstanceExecParam instanceExecParam, DefaultScanSource scanSource, boolean isShareScan) {
         for (Entry<ScanNode, ScanRanges> scanNodeIdToReplicaIds : scanSource.scanNodeToScanRanges.entrySet()) {
             ScanNode scanNode = scanNodeIdToReplicaIds.getKey();
             ScanRanges scanReplicas = scanNodeIdToReplicaIds.getValue();
             instanceExecParam.perNodeScanRanges.put(scanNode.getId().asInt(), scanReplicas.params);
+            instanceExecParam.perNodeSharedScans.put(scanNode.getId().asInt(), isShareScan);
         }
     }
 
-    private void setForBucketScanSource(FInstanceExecParam instanceExecParam, BucketScanSource bucketScanSource) {
+    private void setForBucketScanSource(FInstanceExecParam instanceExecParam,
+            BucketScanSource bucketScanSource, boolean isShareScan) {
         for (Entry<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanTablets :
                 bucketScanSource.bucketIndexToScanNodeToTablets.entrySet()) {
             Integer bucketIndex = bucketIndexToScanTablets.getKey();
@@ -1692,6 +1696,7 @@ public class Coordinator implements CoordInterface {
                 List<TScanRangeParams> scanBucketTablets = instanceExecParam.perNodeScanRanges.computeIfAbsent(
                         scanNode.getId().asInt(), id -> Lists.newArrayList());
                 scanBucketTablets.addAll(scanRanges.params);
+                instanceExecParam.perNodeSharedScans.put(scanNode.getId().asInt(), isShareScan);
 
                 if (scanNode instanceof OlapScanNode) {
                     OlapScanNode olapScanNode = (OlapScanNode) scanNode;
@@ -1762,7 +1767,23 @@ public class Coordinator implements CoordInterface {
                     }
                 }
 
-                for (AssignedJob instanceJob : ((PipelineDistributedPlan) distributedPlan).getInstanceJobs()) {
+                List<AssignedJob> instanceJobs = ((PipelineDistributedPlan) distributedPlan).getInstanceJobs();
+                boolean isShareScan = false;
+                for (AssignedJob instanceJob : instanceJobs) {
+                    if (instanceJob instanceof ShareScanAssignedJob) {
+                        isShareScan = true;
+                        break;
+                    }
+                }
+
+                if (isShareScan) {
+                    fragmentExecParams.ignoreDataDistribution = true;
+                    fragmentExecParams.parallelTasksNum = 1;
+                } else {
+                    fragmentExecParams.parallelTasksNum = instanceJobs.size();
+                }
+
+                for (AssignedJob instanceJob : instanceJobs) {
                     Worker worker = instanceJob.getAssignedWorker();
                     TNetworkAddress address = new TNetworkAddress(worker.host(), worker.port());
                     FInstanceExecParam instanceExecParam = new FInstanceExecParam(
@@ -1771,9 +1792,9 @@ public class Coordinator implements CoordInterface {
                     addressToBackendID.put(address, worker.id());
                     ScanSource scanSource = instanceJob.getScanSource();
                     if (scanSource instanceof BucketScanSource) {
-                        setForBucketScanSource(instanceExecParam, (BucketScanSource) scanSource);
+                        setForBucketScanSource(instanceExecParam, (BucketScanSource) scanSource, isShareScan);
                     } else {
-                        setForDefaultScanSource(instanceExecParam, (DefaultScanSource) scanSource);
+                        setForDefaultScanSource(instanceExecParam, (DefaultScanSource) scanSource, isShareScan);
                     }
                 }
             }

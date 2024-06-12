@@ -61,7 +61,7 @@ public class UnassignedScanSingleOlapTableJob extends AbstractUnassignedScanJob 
     }
 
     @Override
-    protected Map<Worker, List<ScanSource>> insideMachineParallelization(
+    protected List<AssignedJob> insideMachineParallelization(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
         // for each worker, compute how many instances should be generated, and which data should be scanned.
         // for example:
