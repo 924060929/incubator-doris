@@ -94,10 +94,10 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                 //
                 //                             OlapScanNode
                 // (share scan node, and local shuffle data to other local instance to parallel compute this data)
-                ScanSource instanceToScanRange = instanceToScanRanges.get(0);
+                ScanSource shareScanSource = instanceToScanRanges.get(0);
                 for (int i = 0; i < instanceNum; i++) {
                     ShareScanAssignedJob shareScanAssignedJob = new ShareScanAssignedJob(
-                            instanceIndexInFragment++, shareScanIndex, this, worker, instanceToScanRange);
+                            instanceIndexInFragment++, shareScanIndex, this, worker, shareScanSource);
                     instances.add(shareScanAssignedJob);
                 }
                 shareScanIndex++;
