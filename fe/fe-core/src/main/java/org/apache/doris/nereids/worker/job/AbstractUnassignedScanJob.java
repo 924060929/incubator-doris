@@ -56,7 +56,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
     protected List<AssignedJob> insideMachineParallelization(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
 
-        boolean useLocalShuffle = useShareScan(workerToScanRanges);
+        boolean useShareScan = useShareScan(workerToScanRanges);
         int instanceIndexInFragment = 0;
         int shareScanIndex = 0;
         List<AssignedJob> instances = Lists.newArrayList();
@@ -78,7 +78,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
             int instanceNum = degreeOfParallelism(scanSourceMaxParallel);
 
             List<ScanSource> instanceToScanRanges;
-            if (useLocalShuffle) {
+            if (useShareScan) {
                 // only generate one instance to scan all data, in this step
                 instanceToScanRanges = scanSource.parallelize(
                         scanNodes, 1
