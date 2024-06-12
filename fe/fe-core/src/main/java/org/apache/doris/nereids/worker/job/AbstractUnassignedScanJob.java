@@ -97,7 +97,8 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                 // +-----------------------------------------------------------------------------------------------+
                 ScanSource shareScanSource = instanceToScanRanges.get(0);
                 for (int i = 0; i < instanceNum; i++) {
-                    // different instance reference the same scan source
+                    // one scan range generate instanceNum instances,
+                    // different instances reference the same scan source
                     ShareScanAssignedJob instance = new ShareScanAssignedJob(
                             instanceIndexInFragment++, shareScanIndex, this, worker, shareScanSource);
                     instances.add(instance);
