@@ -89,11 +89,13 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                 // know this instances share the same ScanSource, and will not scan same data
                 // multiple times.
                 //
-                //          instance1      instance2     instance3     instance4
-                //            \              \             /            /
-                //
-                //                             OlapScanNode
-                // (share scan node, and local shuffle data to other local instance to parallel compute this data)
+                // +-------------------------------- same fragment in one host ------------------------------------+
+                // |                instance1      instance2     instance3     instance4                           |
+                // |                    \              \             /            /                                |
+                // |                                                                                               |
+                // |                                     OlapScanNode                                              |
+                // |(share scan node, and local shuffle data to other local instance to parallel compute this data)|
+                // +-----------------------------------------------------------------------------------------------+
                 ScanSource shareScanSource = instanceToScanRanges.get(0);
                 for (int i = 0; i < instanceNum; i++) {
                     // different instance reference the same scan source
