@@ -83,7 +83,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                         scanNodes, 1 // don't split scan ranges
                 );
 
-                // Some tablets too big, we need add parallel to process this tablet,
+                // Some tablets too big, we need add parallel to process this tablet after scan,
                 // for example, use one OlapScanNode to scan data, and use some instances
                 // to process Aggregation parallel. we call this `share scan`. Backend will
                 // know this instances share the same ScanSource, and will not scan same data
