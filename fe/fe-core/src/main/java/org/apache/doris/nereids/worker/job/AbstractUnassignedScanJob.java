@@ -133,22 +133,25 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
     }
 
     protected boolean parallelTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
-        if (scanNodes.size() == 1) {
-            return noEnoughScanRange(workerToScanRanges);
-        } else if (scanNodes.size() > 1) {
-            return noEnoughScanRange(workerToScanRanges) && noEnoughBuckets(workerToScanRanges);
+        if (this instanceof UnassignedScanBucketOlapTableJob) {
+            return scanRangeToLittle(workerToScanRanges) && bucketTooLittle(workerToScanRanges);
+        } else if (!scanNodes.isEmpty()) {
+            return scanRangeToLittle(workerToScanRanges);
         } else {
             return false;
         }
     }
 
-    protected boolean noEnoughScanRange(
+    protected boolean scanRangeToLittle(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
-        // use share scan if `parallelExecInstanceNum * numBackends` is larger than scan ranges.
-        return !scanNodes.stream()
-                .allMatch(scanNode -> scanNode.ignoreStorageDataDistribution(
-                        ConnectContext.get(), workerToScanRanges.size())
-                );
+        ConnectContext context = ConnectContext.get();
+        int backendNum = workerToScanRanges.size();
+        for (ScanNode scanNode : scanNodes) {
+            if (!scanNode.ignoreStorageDataDistribution(context, backendNum)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     protected int degreeOfParallelism(int maxParallel) {
@@ -170,18 +173,18 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         return Math.min(maxParallel, Math.max(fragment.getParallelExecNum(), 1));
     }
 
-    protected boolean noEnoughBuckets(Map<Worker, UninstancedScanSource> workerToScanRanges) {
+    protected boolean bucketTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
         int parallelExecNum = fragment.getParallelExecNum();
         for (UninstancedScanSource uninstancedScanSource : workerToScanRanges.values()) {
             ScanSource scanSource = uninstancedScanSource.scanSource;
             if (scanSource instanceof BucketScanSource) {
                 BucketScanSource bucketScanSource = (BucketScanSource) scanSource;
                 int bucketNum = bucketScanSource.bucketIndexToScanNodeToTablets.size();
-                if (bucketNum < parallelExecNum) {
-                    return true;
+                if (bucketNum >= parallelExecNum) {
+                    return false;
                 }
             }
         }
-        return false;
+        return true;
     }
 }
