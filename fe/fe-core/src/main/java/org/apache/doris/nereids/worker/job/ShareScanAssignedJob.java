@@ -23,7 +23,7 @@ import com.google.common.collect.ImmutableMap;
 
 import java.util.Map;
 
-/** LocalShuffleAssignedJob */
+/** ShareScanAssignedJob */
 public class ShareScanAssignedJob extends StaticAssignedJob {
     public final int shareScanId;
 
