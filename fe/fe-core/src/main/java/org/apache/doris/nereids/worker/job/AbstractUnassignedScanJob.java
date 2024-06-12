@@ -126,30 +126,29 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
     }
 
     protected boolean useShareScan(Map<Worker, UninstancedScanSource> workerToScanRanges) {
-        ConnectContext context = ConnectContext.get();
-        if (context != null) {
-            if (context.getSessionVariable().isForceToLocalShuffle()) {
-                return true;
-            }
-            return parallelTooLittle(workerToScanRanges, context);
+        if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().isForceToLocalShuffle()) {
+            return true;
         }
-        return false;
+        return parallelTooLittle(workerToScanRanges);
     }
 
-    protected boolean parallelTooLittle(
-        Map<Worker, UninstancedScanSource> workerToScanRanges, ConnectContext context) {
+    protected boolean parallelTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
         if (scanNodes.size() > 1) {
-            return noEnoughScanRange(workerToScanRanges, context) && noEnoughBuckets(workerToScanRanges);
+            return noEnoughScanRange(workerToScanRanges) && noEnoughBuckets(workerToScanRanges);
+        } else if (scanNodes.size() == 1) {
+            return noEnoughScanRange(workerToScanRanges);
         } else {
-            return noEnoughScanRange(workerToScanRanges, context);
+            return false;
         }
     }
 
     protected boolean noEnoughScanRange(
-            Map<Worker, UninstancedScanSource> workerToScanRanges, ConnectContext context) {
+            Map<Worker, UninstancedScanSource> workerToScanRanges) {
         // use share scan if `parallelExecInstanceNum * numBackends` is larger than scan ranges.
         return !scanNodes.stream()
-                .allMatch(scanNode -> scanNode.ignoreStorageDataDistribution(context, workerToScanRanges.size()));
+                .allMatch(scanNode -> scanNode.ignoreStorageDataDistribution(
+                        ConnectContext.get(), workerToScanRanges.size())
+                );
     }
 
     protected int degreeOfParallelism(int maxParallel) {
