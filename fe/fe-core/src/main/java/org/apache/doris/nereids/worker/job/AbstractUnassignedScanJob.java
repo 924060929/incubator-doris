@@ -125,29 +125,31 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         return instances;
     }
 
-    private boolean useShareScan(Map<Worker, UninstancedScanSource> workerToScanRanges) {
-        /**
-         * Ignore storage data distribution if:
-         * 1. `parallelExecInstanceNum * numBackends` is larger than scan ranges.
-         * 2. Use Nereids planner.
-         */
+    protected boolean useShareScan(Map<Worker, UninstancedScanSource> workerToScanRanges) {
         ConnectContext context = ConnectContext.get();
-        if (context == null) {
-            return false;
+        if (context != null) {
+            if (context.getSessionVariable().isForceToLocalShuffle()) {
+                return true;
+            }
+            return parallelTooLittle(workerToScanRanges, context);
         }
-        boolean forceToLocalShuffle = context.getSessionVariable().isForceToLocalShuffle();
-        boolean noStorageDataDistributionRequire = scanNodes.stream()
-                    .allMatch(scanNode -> scanNode.ignoreStorageDataDistribution(context, workerToScanRanges.size()));
+        return false;
+    }
 
-        if (forceToLocalShuffle || noStorageDataDistributionRequire) {
-            return true;
-        }
-
-        if (scanNodes.size() == 1 && !scanNodes.get(0).shouldDisableSharedScan(context)) {
-            return true;
+    protected boolean parallelTooLittle(
+        Map<Worker, UninstancedScanSource> workerToScanRanges, ConnectContext context) {
+        if (scanNodes.size() > 1) {
+            return noEnoughScanRange(workerToScanRanges, context) && noEnoughBuckets(workerToScanRanges);
         } else {
-            return false;
+            return noEnoughScanRange(workerToScanRanges, context);
         }
+    }
+
+    protected boolean noEnoughScanRange(
+            Map<Worker, UninstancedScanSource> workerToScanRanges, ConnectContext context) {
+        // use share scan if `parallelExecInstanceNum * numBackends` is larger than scan ranges.
+        return !scanNodes.stream()
+                .allMatch(scanNode -> scanNode.ignoreStorageDataDistribution(context, workerToScanRanges.size()));
     }
 
     protected int degreeOfParallelism(int maxParallel) {
@@ -167,5 +169,20 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
 
         // the scan instance num should not larger than the tablets num
         return Math.min(maxParallel, Math.max(fragment.getParallelExecNum(), 1));
+    }
+
+    protected boolean noEnoughBuckets(Map<Worker, UninstancedScanSource> workerToScanRanges) {
+        int parallelExecNum = fragment.getParallelExecNum();
+        for (UninstancedScanSource uninstancedScanSource : workerToScanRanges.values()) {
+            ScanSource scanSource = uninstancedScanSource.scanSource;
+            if (scanSource instanceof BucketScanSource) {
+                BucketScanSource bucketScanSource = (BucketScanSource) scanSource;
+                int bucketNum = bucketScanSource.bucketIndexToScanNodeToTablets.size();
+                if (bucketNum < parallelExecNum) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }
