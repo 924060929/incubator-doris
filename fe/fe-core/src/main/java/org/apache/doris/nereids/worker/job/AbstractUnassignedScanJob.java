@@ -135,7 +135,8 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
     protected boolean parallelTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
         if (this instanceof UnassignedScanBucketOlapTableJob) {
             return scanRangesToLittle(workerToScanRanges) && bucketsTooLittle(workerToScanRanges);
-        } else if (!scanNodes.isEmpty()) {
+        } else if (this instanceof UnassignedScanSingleOlapTableJob
+                || this instanceof UnassignedScanSingleRemoteTableJob) {
             return scanRangesToLittle(workerToScanRanges);
         } else {
             return false;
