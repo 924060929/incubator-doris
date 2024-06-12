@@ -80,7 +80,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
             List<ScanSource> instanceToScanRanges;
             if (useLocalShuffle) {
                 instanceToScanRanges = scanSource.parallelize(
-                        scanNodes, 1 // one scan range one instance
+                        scanNodes, 1 // one scan range(tablet) one instance
                 );
 
                 // Some tablets too big, we need add parallel to process these tablets after scan,
