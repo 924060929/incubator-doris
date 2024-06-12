@@ -96,6 +96,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                 // (share scan node, and local shuffle data to other local instance to parallel compute this data)
                 ScanSource shareScanSource = instanceToScanRanges.get(0);
                 for (int i = 0; i < instanceNum; i++) {
+                    // different instance reference the same scan source
                     ShareScanAssignedJob shareScanAssignedJob = new ShareScanAssignedJob(
                             instanceIndexInFragment++, shareScanIndex, this, worker, shareScanSource);
                     instances.add(shareScanAssignedJob);
