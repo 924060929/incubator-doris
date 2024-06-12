@@ -76,9 +76,9 @@ public class StaticAssignedJob implements AssignedJob {
         }
         StringBuilder str = new StringBuilder(getClass().getSimpleName()).append("(");
         if (showUnassignedJob) {
-            str.append("\n  unassignedJob: " + unassignedJob);
+            str.append("\n  unassignedJob: ").append(unassignedJob).append(",");
         }
-        str.append(",\n  index: " + indexInUnassignedJob)
+        str.append("\n  index: " + indexInUnassignedJob)
                 .append(",\n  worker: " + worker);
         for (Entry<String, String> kv : extraInfo().entrySet()) {
             str.append(",\n  ").append(kv.getKey()).append(": ").append(kv.getValue());
