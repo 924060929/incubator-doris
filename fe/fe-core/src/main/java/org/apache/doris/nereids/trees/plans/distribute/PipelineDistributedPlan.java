@@ -21,8 +21,6 @@ import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.nereids.worker.job.AssignedJob;
 import org.apache.doris.nereids.worker.job.UnassignedJob;
 
-import org.apache.commons.lang3.StringUtils;
-
 import java.util.List;
 import java.util.Objects;
 
@@ -46,8 +44,14 @@ public class PipelineDistributedPlan extends DistributedPlan {
 
     @Override
     public String toString() {
-        String instancesStr = StringUtils.join(instanceJobs, ",\n");
-        String instancesStrWithIndent = Utils.addLinePrefix(instancesStr, "    ");
+        StringBuilder instancesStr = new StringBuilder();
+        for (int i = 0; i < instanceJobs.size(); i++) {
+            instancesStr.append(instanceJobs.get(i).toString(false));
+            if (i + 1 < instanceJobs.size()) {
+                instancesStr.append(",\n");
+            }
+        }
+        String instancesStrWithIndent = Utils.addLinePrefix(instancesStr.toString(), "    ");
 
         return "PipelineDistributedPlan(\n"
                 + "  parallel: " + instanceJobs.size() + ",\n"

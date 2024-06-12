@@ -31,4 +31,6 @@ public interface AssignedJob {
     Worker getAssignedWorker();
 
     ScanSource getScanSource();
+
+    String toString(boolean showUnassignedJob);
 }

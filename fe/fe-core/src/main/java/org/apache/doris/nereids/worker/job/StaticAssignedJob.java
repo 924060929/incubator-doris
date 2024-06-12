@@ -63,15 +63,22 @@ public class StaticAssignedJob implements AssignedJob {
 
     @Override
     public String toString() {
+        return toString(true);
+    }
+
+    @Override
+    public String toString(boolean showUnassignedJob) {
         StringBuilder scanSourceString = new StringBuilder();
         if (!scanSource.isEmpty()) {
             scanSource.toString(scanSourceString, "  ");
         } else {
             scanSourceString = new StringBuilder("[]");
         }
-        StringBuilder str = new StringBuilder(getClass().getSimpleName()).append("(")
-                .append("\n  unassignedJob: " + unassignedJob)
-                .append(",\n  index: " + indexInUnassignedJob)
+        StringBuilder str = new StringBuilder(getClass().getSimpleName()).append("(");
+        if (showUnassignedJob) {
+            str.append("\n  unassignedJob: " + unassignedJob);
+        }
+        str.append(",\n  index: " + indexInUnassignedJob)
                 .append(",\n  worker: " + worker);
         for (Entry<String, String> kv : extraInfo().entrySet()) {
             str.append(",\n  ").append(kv.getKey()).append(": ").append(kv.getValue());
