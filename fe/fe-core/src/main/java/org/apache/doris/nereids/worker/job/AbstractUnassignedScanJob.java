@@ -134,15 +134,15 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
 
     protected boolean parallelTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
         if (this instanceof UnassignedScanBucketOlapTableJob) {
-            return scanRangeToLittle(workerToScanRanges) && bucketTooLittle(workerToScanRanges);
+            return scanRangesToLittle(workerToScanRanges) && bucketsTooLittle(workerToScanRanges);
         } else if (!scanNodes.isEmpty()) {
-            return scanRangeToLittle(workerToScanRanges);
+            return scanRangesToLittle(workerToScanRanges);
         } else {
             return false;
         }
     }
 
-    protected boolean scanRangeToLittle(
+    protected boolean scanRangesToLittle(
             Map<Worker, UninstancedScanSource> workerToScanRanges) {
         ConnectContext context = ConnectContext.get();
         int backendNum = workerToScanRanges.size();
@@ -173,7 +173,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         return Math.min(maxParallel, Math.max(fragment.getParallelExecNum(), 1));
     }
 
-    protected boolean bucketTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
+    protected boolean bucketsTooLittle(Map<Worker, UninstancedScanSource> workerToScanRanges) {
         int parallelExecNum = fragment.getParallelExecNum();
         for (UninstancedScanSource uninstancedScanSource : workerToScanRanges.values()) {
             ScanSource scanSource = uninstancedScanSource.scanSource;
