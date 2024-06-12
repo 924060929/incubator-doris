@@ -58,7 +58,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
 
         boolean useLocalShuffle = useShareScan(workerToScanRanges);
         int instanceIndexInFragment = 0;
-
+        int shareScanId = 0;
         List<AssignedJob> instances = Lists.newArrayList();
         for (Entry<Worker, UninstancedScanSource> entry : workerToScanRanges.entrySet()) {
             Worker worker = entry.getKey();
@@ -87,9 +87,10 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                 ScanSource instanceToScanRange = instanceToScanRanges.get(0);
                 for (int i = 0; i < instanceNum; i++) {
                     ShareScanAssignedJob shareScanAssignedJob = new ShareScanAssignedJob(
-                            instanceIndexInFragment++, this, worker, instanceToScanRange);
+                            instanceIndexInFragment++, shareScanId, this, worker, instanceToScanRange);
                     instances.add(shareScanAssignedJob);
                 }
+                shareScanId++;
             } else {
                 // split the scanRanges to some partitions, one partition for one instance
                 // for example:

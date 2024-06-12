@@ -19,10 +19,24 @@ package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.nereids.worker.Worker;
 
+import com.google.common.collect.ImmutableMap;
+
+import java.util.Map;
+
 /** LocalShuffleAssignedJob */
 public class ShareScanAssignedJob extends StaticAssignedJob {
-    public ShareScanAssignedJob(int indexInUnassignedJob, UnassignedJob unassignedJob,
+    public final int shareScanId;
+
+    public ShareScanAssignedJob(
+            int indexInUnassignedJob, int shareScanId,
+            UnassignedJob unassignedJob,
             Worker worker, ScanSource scanSource) {
         super(indexInUnassignedJob, unassignedJob, worker, scanSource);
+        this.shareScanId = shareScanId;
+    }
+
+    @Override
+    protected Map<String, String> extraInfo() {
+        return ImmutableMap.of("shareScanIndex", String.valueOf(shareScanId));
     }
 }

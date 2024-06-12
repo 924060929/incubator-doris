@@ -19,6 +19,10 @@ package org.apache.doris.nereids.worker.job;
 
 import org.apache.doris.nereids.worker.Worker;
 
+import com.google.common.collect.ImmutableMap;
+
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 
 /** StaticAssignedJob */
@@ -65,7 +69,21 @@ public class StaticAssignedJob implements AssignedJob {
         } else {
             scanSourceString = new StringBuilder("[]");
         }
-        return getClass().getSimpleName() + "(\n  unassignedJob: " + unassignedJob
-                + ",\n  worker: " + worker + ",\n  scanSource: " + scanSourceString + "\n)";
+        StringBuilder str = new StringBuilder(getClass().getSimpleName()).append("(")
+                .append("\n  unassignedJob: " + unassignedJob)
+                .append(",\n  index: " + indexInUnassignedJob)
+                .append(",\n  worker: " + worker);
+        for (Entry<String, String> kv : extraInfo().entrySet()) {
+            str.append(",\n  ").append(kv.getKey()).append(": ").append(kv.getValue());
+        }
+
+        return str
+                .append(",\n  scanSource: " + scanSourceString)
+                .append("\n)")
+                .toString();
+    }
+
+    protected Map<String, String> extraInfo() {
+        return ImmutableMap.of();
     }
 }
