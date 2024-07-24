@@ -36,6 +36,8 @@ import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.scheduler.protocol.GroupWorkerPipelineThriftProtocol;
+import org.apache.doris.qe.scheduler.protocol.WorkerProtocol;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TScanRangeParams;
 
@@ -61,6 +63,14 @@ public class NereidsCoordinator extends Coordinator {
         this.distributedPlans = Objects.requireNonNull(
                 nereidsPlanner.getDistributedPlans(), "distributedPlans can not be null"
         );
+    }
+
+    @Override
+    protected void execInternal() throws Exception {
+        WorkerProtocol workersClient = new GroupWorkerPipelineThriftProtocol(nereidsPlanner);
+        workersClient.serialize();
+
+        super.execInternal();
     }
 
     @Override

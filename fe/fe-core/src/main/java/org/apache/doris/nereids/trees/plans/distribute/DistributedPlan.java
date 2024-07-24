@@ -35,6 +35,14 @@ public abstract class DistributedPlan extends AbstractTreeNode<DistributedPlan> 
         this.inputs = Utils.fastToImmutableList(Objects.requireNonNull(inputs, "inputs can not be null"));
     }
 
+    public UnassignedJob getFragmentJob() {
+        return fragmentJob;
+    }
+
+    public List<DistributedPlan> getInputs() {
+        return inputs;
+    }
+
     @Override
     public DistributedPlan withChildren(List<DistributedPlan> children) {
         throw new UnsupportedOperationException();

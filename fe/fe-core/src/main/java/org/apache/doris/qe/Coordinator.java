@@ -691,7 +691,7 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    private void execInternal() throws Exception {
+    protected void execInternal() throws Exception {
         if (LOG.isDebugEnabled() && !scanNodes.isEmpty()) {
             LOG.debug("debug: in Coordinator::exec. query id: {}, planNode: {}",
                     DebugUtil.printId(queryId), scanNodes.get(0).treeToThrift());

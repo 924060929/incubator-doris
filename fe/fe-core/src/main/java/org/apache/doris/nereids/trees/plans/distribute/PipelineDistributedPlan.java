@@ -44,6 +44,11 @@ public class PipelineDistributedPlan extends DistributedPlan {
     }
 
     @Override
+    public int hashCode() {
+        return fragmentJob.getFragment().getFragmentId().asInt();
+    }
+
+    @Override
     public String toString(int displayFragmentId) {
         StringBuilder instancesStr = new StringBuilder();
         for (int i = 0; i < instanceJobs.size(); i++) {
