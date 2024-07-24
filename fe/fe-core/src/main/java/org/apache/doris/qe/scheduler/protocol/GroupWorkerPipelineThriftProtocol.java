@@ -224,11 +224,13 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                 //             except add instanceParam into local_params
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
-                        currentFragmentThrift, fileScanRangeParams, exchangeSenderNum,
+                        exchangeSenderNum, currentFragmentThrift, fileScanRangeParams,
                         workerProcessInstanceNum, execContext);
                 TPipelineInstanceParams instanceParam
                         = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
-                currentFragmentParam.local_params.add(instanceParam);
+                List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
+                // currentFragmentParam.getShuffleIdxToInstanceIdx().put(instanceParam.recvrId, instancesParams.size());
+                instancesParams.add(instanceParam);
             }
 
             // arrange fragments by the same worker,
