@@ -19,6 +19,7 @@ package org.apache.doris.qe;
 
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.thrift.TDescriptorTable;
+import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineWorkloadGroup;
 import org.apache.doris.thrift.TQueryGlobals;
 import org.apache.doris.thrift.TQueryOptions;
@@ -35,6 +36,8 @@ public class ExecContext {
     public final TQueryOptions queryOptions;
     public final TDescriptorTable descriptorTable;
     public final List<TPipelineWorkloadGroup> workloadGroups;
+    public final TNetworkAddress coordinatorAddress;
+    public final TNetworkAddress directConnectFrontendAddress;
 
     // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
     // else use exec_plan_fragments directly.
@@ -51,7 +54,9 @@ public class ExecContext {
             TQueryGlobals queryGlobals,
             TQueryOptions queryOptions,
             TDescriptorTable descriptorTable,
-            List<TPipelineWorkloadGroup> workloadGroups) {
+            List<TPipelineWorkloadGroup> workloadGroups,
+            TNetworkAddress coordinatorAddress,
+            TNetworkAddress directConnectFrontendAddress) {
         this.connectContext = connectContext;
         this.planner = planner;
         this.queryId = connectContext.queryId();
@@ -59,6 +64,8 @@ public class ExecContext {
         this.queryOptions = queryOptions;
         this.descriptorTable = descriptorTable;
         this.workloadGroups = workloadGroups;
+        this.coordinatorAddress = coordinatorAddress;
+        this.directConnectFrontendAddress = directConnectFrontendAddress;
         this.twoPhaseExecution = planner.getDistributedPlans().size() > 1;
     }
 }

@@ -41,6 +41,7 @@ import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.service.ExecuteEnv;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
 import org.apache.doris.thrift.TDescriptorTable;
+import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineInstanceParams;
 import org.apache.doris.thrift.TPipelineWorkloadGroup;
@@ -60,6 +61,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -116,7 +118,25 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         TQueryOptions queryOptions = initQueryOptions(connectContext);
         TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
         TDescriptorTable descriptorTable = planner.getDescTable().toThrift();
+        TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
+        String currentConnectedFEIp = connectContext.getCurrentConnectedFEIp();
+        TNetworkAddress directConnectFrontendAddress =
+                connectContext.isProxy() && !StringUtils.isBlank(currentConnectedFEIp)
+                                ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
+                                : coordinatorAddress;
+        List<TPipelineWorkloadGroup> workloadGroup = computeWorkloadGroups(connectContext);
 
+        this.execContext = new ExecContext(
+                connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup,
+                coordinatorAddress, directConnectFrontendAddress
+        );
+        List<PipelineDistributedPlan> distributedPlans = planner.getDistributedPlans().valueList();
+
+        ListMultimap<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentsParam
+                = plansToThrift(distributedPlans, execContext);
+    }
+
+    private List<TPipelineWorkloadGroup> computeWorkloadGroups(ConnectContext connectContext) {
         List<TPipelineWorkloadGroup> workloadGroup = ImmutableList.of();
         if (Config.enable_workload_group) {
             try {
@@ -125,14 +145,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                 throw new NereidsException(e.getMessage(), e);
             }
         }
-
-        this.execContext = new ExecContext(
-                connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup
-        );
-        List<PipelineDistributedPlan> distributedPlans = planner.getDistributedPlans().valueList();
-
-        ListMultimap<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentsParam
-                = plansToThrift(distributedPlans, execContext);
+        return workloadGroup;
     }
 
     private TQueryOptions initQueryOptions(ConnectContext context) {
@@ -236,11 +249,14 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             ExecContext execContext) {
         return workerToFragmentParams.computeIfAbsent(assignedJob.getAssignedWorker(), worker -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();
+            ConnectContext connectContext = execContext.connectContext;
 
             TPipelineFragmentParams params = new TPipelineFragmentParams();
-            // Set global param
             params.setIsNereids(true);
             params.setBackendId(worker.id());
+            params.setProtocolVersion(PaloInternalServiceVersion.V1);
+            params.setDescTbl(execContext.descriptorTable);
+            params.setQueryId(execContext.queryId);
             params.setFragmentId(fragment.getFragmentId().asInt());
 
             // Each tParam will set the total number of Fragments that need to be executed on the same BE,
@@ -249,29 +265,27 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             params.setFragmentNumOnHost(workerProcessInstanceNum.count(worker));
 
             params.setNeedWaitExecutionTrigger(execContext.twoPhaseExecution);
-            params.setProtocolVersion(PaloInternalServiceVersion.V1);
-            params.setDescTbl(execContext.descriptorTable);
-            params.setQueryId(execContext.queryId);
             // params.setPerExchNumSenders(perExchNumSenders);
             // params.setDestinations(destinations);
-            // params.setNumSenders(instanceExecParams.size());
-            // params.setCoord(coordAddress);
-            // params.setCurrentConnectFe(currentConnectFE);
-            params.setQueryGlobals(execContext.queryGlobals);
-            params.setQueryOptions(execContext.queryOptions);
+
+            int instanceNumInThisFragment = fragmentPlan.getInstanceJobs().size();
+            params.setNumSenders(instanceNumInThisFragment);
+            params.setTotalInstances(instanceNumInThisFragment);
 
             long memLimit = execContext.queryOptions.getMemLimit();
-            ConnectContext connectContext = execContext.connectContext;
             if (connectContext.getSessionVariable().isDisableJoinReorder()
                     && fragment.hasColocatePlanNode()) {
-                int instanceNum = fragmentPlan.getInstanceJobs().size();
-                int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNum);
+                int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNumInThisFragment);
                 memLimit = execContext.queryOptions.getMemLimit() / rate;
             }
             params.query_options.setMemLimit(memLimit);
 
-            params.setSendQueryStatisticsWithEveryBatch(
-                    fragment.isTransferQueryStatisticsWithEveryBatch());
+            params.setCoord(execContext.coordinatorAddress);
+            params.setCurrentConnectFe(execContext.directConnectFrontendAddress);
+            params.setQueryGlobals(execContext.queryGlobals);
+            params.setQueryOptions(execContext.queryOptions);
+
+            params.setSendQueryStatisticsWithEveryBatch(fragment.isTransferQueryStatisticsWithEveryBatch());
             params.setFragment(fragmentThrift);
             params.setLocalParams(Lists.newArrayList());
             params.setWorkloadGroups(execContext.workloadGroups);
@@ -279,7 +293,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             // params.setFileScanParams(fileScanRangeParamsMap);
             // params.setNumBuckets(fragment.getBucketNum());
             // params.setPerNodeSharedScans(perNodeSharedScans);
-            // params.setTotalInstances(instanceExecParams.size());
             // if (ignoreDataDistribution) {
             //     params.setParallelInstances(parallelTasksNum);
             // }
@@ -287,10 +300,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             params.setShuffleIdxToInstanceIdx(new LinkedHashMap<>());
             return params;
         });
-    }
-
-    private void setFragmentParam(TPipelineFragmentParams fragmentParam, DistributedPlanWorker worker) {
-
     }
 
     private Map<DistributedPlanWorker, FragmentToInstances> groupByWorker(
@@ -308,29 +317,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         }
         return workerToFragmentAndInstances;
     }
-
-    // private TPipelineFragmentParams fragmentsToThrift(FragmentToInstances fragmentToInstances) {
-    //     TPipelineFragmentParams mergedFragmentParams = new TPipelineFragmentParams();
-    //     AtomicInteger allInstanceIndex = new AtomicInteger();
-    //     for (Entry<PipelineDistributedPlan, Collection<AssignedJob>> kv :
-    //             fragmentToInstances.fragmentToInstances.asMap().entrySet()) {
-    //         PipelineDistributedPlan distributedPlan = kv.getKey();
-    //         List<AssignedJob> instances = (List<AssignedJob>) kv.getValue();
-    //         List<TPipelineInstanceParams> instancesParams =
-    //                 instancesToThrift(distributedPlan, instances, allInstanceIndex);
-    //     }
-    //     return mergedFragmentParams;
-    // }
-
-    // private List<TPipelineInstanceParams> instancesToThrift(
-    //         PipelineDistributedPlan fragmentPlan, List<AssignedJob> instances, AtomicInteger allInstanceIndex) {
-    //     List<TPipelineInstanceParams> instancesParams = Lists.newArrayListWithCapacity(instances.size());
-    //     for (AssignedJob instance : instances) {
-    //         TPipelineInstanceParams instanceParams = instanceToThrift(fragmentPlan, instance, allInstanceIndex);
-    //         instancesParams.add(instanceParams);
-    //     }
-    //     return instancesParams;
-    // }
 
     private TPipelineInstanceParams instanceToThrift(
             PipelineDistributedPlan distributedPlan, AssignedJob instance, int currentInstanceNum) {

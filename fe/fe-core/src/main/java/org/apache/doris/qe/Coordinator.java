@@ -168,7 +168,7 @@ import java.util.stream.Collectors;
 public class Coordinator implements CoordInterface {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
 
-    private static final String localIP = FrontendOptions.getLocalHostAddress();
+    public static final String localIP = FrontendOptions.getLocalHostAddress();
 
     // Random is used to shuffle instances of partitioned
     private static final Random instanceRandom = new SecureRandom();
