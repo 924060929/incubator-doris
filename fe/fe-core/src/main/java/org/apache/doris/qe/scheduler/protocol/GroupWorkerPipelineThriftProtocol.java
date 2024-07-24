@@ -23,6 +23,7 @@ import org.apache.doris.common.NereidsException;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.TimeUtils;
+import org.apache.doris.datasource.FileQueryScanNode;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
@@ -41,6 +42,7 @@ import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.service.ExecuteEnv;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
 import org.apache.doris.thrift.TDescriptorTable;
+import org.apache.doris.thrift.TFileScanRangeParams;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineInstanceParams;
@@ -212,13 +214,15 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         int currentInstanceIndex = 0;
         for (PipelineDistributedPlan currentFragmentPlan : distributedPlans) {
             TPlanFragment currentFragmentThrift = currentFragmentPlan.getFragmentJob().getFragment().toThrift();
+            Map<Integer, TFileScanRangeParams> fileScanRangeParams
+                    = computeFileScanRangeParamsMap(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
             for (AssignedJob instanceJob : currentFragmentPlan.getInstanceJobs()) {
                 // Suggestion: Do not modify currentFragmentParam out of the `fragmentToThriftIfAbsent` method,
                 //             except add instanceParam into local_params
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
-                        currentFragmentThrift, workerProcessInstanceNum, execContext);
+                        currentFragmentThrift, fileScanRangeParams, workerProcessInstanceNum, execContext);
                 TPipelineInstanceParams instanceParam
                         = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
                 currentFragmentParam.local_params.add(instanceParam);
@@ -247,8 +251,8 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
     private TPipelineFragmentParams fragmentToThriftIfAbsent(
             PipelineDistributedPlan fragmentPlan, AssignedJob assignedJob,
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentParams,
-            TPlanFragment fragmentThrift, Multiset<DistributedPlanWorker> workerProcessInstanceNum,
-            ExecContext execContext) {
+            TPlanFragment fragmentThrift, Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
+            Multiset<DistributedPlanWorker> workerProcessInstanceNum, ExecContext execContext) {
         return workerToFragmentParams.computeIfAbsent(assignedJob.getAssignedWorker(), worker -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();
             ConnectContext connectContext = execContext.connectContext;
@@ -290,7 +294,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             params.setLocalParams(Lists.newArrayList());
             params.setWorkloadGroups(execContext.workloadGroups);
 
-            // params.setFileScanParams(fileScanRangeParamsMap);
+            params.setFileScanParams(fileScanRangeParamsMap);
             // params.setNumBuckets(fragment.getBucketNum());
             // params.setPerNodeSharedScans(perNodeSharedScans);
             // if (ignoreDataDistribution) {
@@ -300,6 +304,19 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             params.setShuffleIdxToInstanceIdx(new LinkedHashMap<>());
             return params;
         });
+    }
+
+    private Map<Integer, TFileScanRangeParams> computeFileScanRangeParamsMap(PipelineDistributedPlan distributedPlan) {
+        // scan node id -> TFileScanRangeParams
+        Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap = Maps.newLinkedHashMap();
+        for (ScanNode scanNode : distributedPlan.getFragmentJob().getScanNodes()) {
+            if (scanNode instanceof FileQueryScanNode) {
+                TFileScanRangeParams fileScanRangeParams = ((FileQueryScanNode) scanNode).getFileScanRangeParams();
+                fileScanRangeParamsMap.put(scanNode.getId().asInt(), fileScanRangeParams);
+            }
+        }
+
+        return fileScanRangeParamsMap;
     }
 
     private Map<DistributedPlanWorker, FragmentToInstances> groupByWorker(
