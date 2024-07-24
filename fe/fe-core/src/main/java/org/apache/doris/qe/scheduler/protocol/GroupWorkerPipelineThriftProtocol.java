@@ -76,13 +76,13 @@ import java.util.Map.Entry;
 public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
 
-    private ExecContext execContext;
+    private final ExecContext execContext;
     private final BackendServiceProxy backendClientProxy = BackendServiceProxy.getInstance();
 
     // private Map<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentParams;
 
     public GroupWorkerPipelineThriftProtocol(NereidsPlanner planner) {
-        toThrift(planner);
+        this.execContext = toThrift(planner);
     }
 
     @Override
@@ -113,7 +113,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         // backendClientProxy.cancelPlanFragmentAsync();
     }
 
-    private void toThrift(NereidsPlanner planner) {
+    private ExecContext toThrift(NereidsPlanner planner) {
         ConnectContext connectContext = planner.getCascadesContext().getConnectContext();
         TQueryOptions queryOptions = initQueryOptions(connectContext);
         TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
@@ -126,14 +126,16 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                                 ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
                                 : coordinatorAddress;
 
-        this.execContext = new ExecContext(
+        ExecContext execContext = new ExecContext(
                 connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup,
                 coordinatorAddress, directConnectFrontendAddress
         );
-        List<PipelineDistributedPlan> distributedPlans = planner.getDistributedPlans().valueList();
 
+        List<PipelineDistributedPlan> distributedPlans = planner.getDistributedPlans().valueList();
         ListMultimap<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentsParam
                 = plansToThrift(distributedPlans, execContext);
+        execContext.workerToFragmentsParam = workerToFragmentsParam;
+        return execContext;
     }
 
     private List<TPipelineWorkloadGroup> computeWorkloadGroups(ConnectContext connectContext) {
@@ -161,7 +163,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         queryOptions.setWaitFullBlockScheduleTimes(context.getSessionVariable().getWaitFullBlockScheduleTimes());
         queryOptions.setMysqlRowBinaryFormat(context.getCommand() == MysqlCommand.COM_STMT_EXECUTE);
         
-        setFromUserProperty(context, queryOptions);
+        setOptionsFromUserProperty(context, queryOptions);
         return queryOptions;
     }
 
@@ -179,7 +181,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         return queryGlobals;
     }
 
-    private void setFromUserProperty(ConnectContext connectContext, TQueryOptions queryOptions) {
+    private void setOptionsFromUserProperty(ConnectContext connectContext, TQueryOptions queryOptions) {
         String qualifiedUser = connectContext.getQualifiedUser();
         // set cpu resource limit
         int cpuLimit = Env.getCurrentEnv().getAuth().getCpuResourceLimit(qualifiedUser);
@@ -272,18 +274,16 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             params.setNumSenders(instanceNumInThisFragment);
             params.setTotalInstances(instanceNumInThisFragment);
 
-            long memLimit = execContext.queryOptions.getMemLimit();
-            if (connectContext.getSessionVariable().isDisableJoinReorder()
-                    && fragment.hasColocatePlanNode()) {
-                int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNumInThisFragment);
-                memLimit = execContext.queryOptions.getMemLimit() / rate;
-            }
-            params.query_options.setMemLimit(memLimit);
-
             params.setCoord(execContext.coordinatorAddress);
             params.setCurrentConnectFe(execContext.directConnectFrontendAddress);
             params.setQueryGlobals(execContext.queryGlobals);
-            params.setQueryOptions(execContext.queryOptions);
+            params.setQueryOptions(new TQueryOptions(execContext.queryOptions));
+            long memLimit = execContext.queryOptions.getMemLimit();
+            if (!connectContext.getSessionVariable().isDisableColocatePlan() && fragment.hasColocatePlanNode()) {
+                int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNumInThisFragment);
+                memLimit = execContext.queryOptions.getMemLimit() / rate;
+            }
+            params.getQueryOptions().setMemLimit(memLimit);
 
             params.setSendQueryStatisticsWithEveryBatch(fragment.isTransferQueryStatisticsWithEveryBatch());
             params.setFragment(fragmentThrift);

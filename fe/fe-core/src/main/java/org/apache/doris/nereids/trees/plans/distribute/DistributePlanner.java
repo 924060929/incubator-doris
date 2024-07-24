@@ -21,9 +21,11 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBuilder;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
+import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
 import java.util.List;
@@ -58,8 +60,17 @@ public class DistributePlanner {
             UnassignedJob fragmentJob = idToUnassignedJobs.get(fragmentId);
             List<AssignedJob> instanceJobs = idToAssignedJobs.get(fragmentId);
 
-            List<PipelineDistributedPlan> childrenPlans = idToDistributedPlans.getByChildrenFragments(fragment);
-            idToDistributedPlans.put(fragmentId, new PipelineDistributedPlan(fragmentJob, instanceJobs, childrenPlans));
+            ListMultimap<ExchangeNode, DistributedPlan> exchangeNodeToChildren = ArrayListMultimap.create();
+            for (PlanFragment childFragment : fragment.getChildren()) {
+                exchangeNodeToChildren.put(
+                        childFragment.getDestNode(),
+                        idToDistributedPlans.get(childFragment.getFragmentId())
+                );
+            }
+
+            idToDistributedPlans.put(fragmentId,
+                    new PipelineDistributedPlan(fragmentJob, instanceJobs, exchangeNodeToChildren)
+            );
         }
         return (FragmentIdMapping) idToDistributedPlans;
     }

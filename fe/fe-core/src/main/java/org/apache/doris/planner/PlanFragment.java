@@ -385,6 +385,10 @@ public class PlanFragment extends TreeNode<PlanFragment> {
         return fragmentId;
     }
 
+    public ExchangeNode getDestNode() {
+        return destNode;
+    }
+
     public PlanFragment getDestFragment() {
         if (destNode == null) {
             return null;

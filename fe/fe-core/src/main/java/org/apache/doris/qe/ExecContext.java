@@ -18,12 +18,16 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.thrift.TDescriptorTable;
 import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineWorkloadGroup;
 import org.apache.doris.thrift.TQueryGlobals;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TUniqueId;
+
+import com.google.common.collect.ListMultimap;
 
 import java.util.List;
 
@@ -38,6 +42,8 @@ public class ExecContext {
     public final List<TPipelineWorkloadGroup> workloadGroups;
     public final TNetworkAddress coordinatorAddress;
     public final TNetworkAddress directConnectFrontendAddress;
+
+    public ListMultimap<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentsParam;
 
     // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
     // else use exec_plan_fragments directly.
