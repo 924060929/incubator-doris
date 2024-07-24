@@ -171,7 +171,7 @@ import java.util.stream.Collectors;
 public class Coordinator implements CoordInterface {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
 
-    private static final String localIP = FrontendOptions.getLocalHostAddress();
+    public static final String localIP = FrontendOptions.getLocalHostAddress();
 
     // Random is used to shuffle instances of partitioned
     private static final Random instanceRandom = new SecureRandom();
@@ -223,9 +223,9 @@ public class Coordinator implements CoordInterface {
 
     private Map<Long, PipelineExecContexts> beToPipelineExecCtxs = Maps.newHashMap();
 
-    private final Map<Pair<Integer, Long>, PipelineExecContext> pipelineExecContexts = new HashMap<>();
+    protected final Map<Pair<Integer, Long>, PipelineExecContext> pipelineExecContexts = new HashMap<>();
     private final List<PipelineExecContext> needCheckPipelineExecContexts = Lists.newArrayList();
-    private List<ResultReceiver> receivers = Lists.newArrayList();
+    protected List<ResultReceiver> receivers = Lists.newArrayList();
     protected final List<ScanNode> scanNodes;
     private int scanRangeNum = 0;
     // number of instances of this query, equals to
@@ -253,11 +253,11 @@ public class Coordinator implements CoordInterface {
 
     // Input parameter
     private long jobId = -1; // job which this task belongs to
-    private TUniqueId queryId;
+    protected TUniqueId queryId;
 
     // a timestamp represent the absolute timeout
     // eg, System.currentTimeMillis() + executeTimeoutS * 1000
-    private long timeoutDeadline;
+    protected long timeoutDeadline;
 
     private boolean enableShareHashTableForBroadcastJoin = false;
 
@@ -289,7 +289,7 @@ public class Coordinator implements CoordInterface {
 
     // A countdown latch to mark the completion of each fragment. use for pipelineX
     // fragmentid -> backendid
-    private MarkedCountDownLatch<Integer, Long> fragmentsDoneLatch = null;
+    protected MarkedCountDownLatch<Integer, Long> fragmentsDoneLatch = null;
 
     public void setGroupCommitBe(Backend backend) {
         this.groupCommitBackend = backend;
@@ -703,7 +703,7 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    private void execInternal() throws Exception {
+    protected void execInternal() throws Exception {
         if (LOG.isDebugEnabled() && !scanNodes.isEmpty()) {
             LOG.debug("debug: in Coordinator::exec. query id: {}, planNode: {}",
                     DebugUtil.printId(queryId), scanNodes.get(0).treeToThrift());
@@ -785,7 +785,7 @@ public class Coordinator implements CoordInterface {
         sendPipelineCtx();
     }
 
-    private void sendPipelineCtx() throws TException, RpcException, UserException {
+    protected void sendPipelineCtx() throws TException, RpcException, UserException {
         lock();
         try {
             Multiset<TNetworkAddress> hostCounter = HashMultiset.create();
@@ -831,7 +831,7 @@ public class Coordinator implements CoordInterface {
                     Long backendId = this.addressToBackendID.get(entry.getKey());
                     backendFragments.add(Pair.of(fragment.getFragmentId(), backendId));
                     PipelineExecContext pipelineExecContext = new PipelineExecContext(fragment.getFragmentId(),
-                            entry.getValue(), backendId, executionProfile);
+                            entry.getValue(), idToBackend.get(backendId), executionProfile, jobId);
                     // Each tParam will set the total number of Fragments that need to be executed on the same BE,
                     // and the BE will determine whether all Fragments have been executed based on this information.
                     // Notice. load fragment has a small probability that FragmentNumOnHost is 0, for unknown reasons.
@@ -851,7 +851,7 @@ public class Coordinator implements CoordInterface {
 
                     PipelineExecContexts ctxs = beToPipelineExecCtxs.get(pipelineExecContext.backend.getId());
                     if (ctxs == null) {
-                        ctxs = new PipelineExecContexts(pipelineExecContext.backend.getId(),
+                        ctxs = new PipelineExecContexts(queryId, pipelineExecContext.backend,
                                 pipelineExecContext.brpcAddress, twoPhaseExecution,
                                 entry.getValue().getFragmentNumOnHost());
                         beToPipelineExecCtxs.putIfAbsent(pipelineExecContext.backend.getId(), ctxs);
@@ -946,7 +946,7 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    private Map<TNetworkAddress, List<Long>>  waitPipelineRpc(List<Pair<Long, Triple<PipelineExecContexts,
+    protected Map<TNetworkAddress, List<Long>>  waitPipelineRpc(List<Pair<Long, Triple<PipelineExecContexts,
             BackendServiceProxy, Future<InternalService.PExecPlanFragmentResult>>>> futures, long leftTimeMs,
             String operation) throws RpcException, UserException {
         if (leftTimeMs <= 0) {
@@ -1326,7 +1326,7 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    private void cancelInternal(Status cancelReason) {
+    protected void cancelInternal(Status cancelReason) {
         for (ResultReceiver receiver : receivers) {
             receiver.cancel(cancelReason);
         }
@@ -2811,7 +2811,7 @@ public class Coordinator implements CoordInterface {
     protected final BucketShuffleJoinController bucketShuffleJoinController
             = new BucketShuffleJoinController(fragmentIdToScanNodeIds);
 
-    public class PipelineExecContext {
+    public static class PipelineExecContext {
         TPipelineFragmentParams rpcParams;
         PlanFragmentId fragmentId;
         boolean initiated;
@@ -2822,23 +2822,24 @@ public class Coordinator implements CoordInterface {
         Backend backend;
         long lastMissingHeartbeatTime = -1;
         long beProcessEpoch = 0;
+        private long jobId;
 
         public PipelineExecContext(PlanFragmentId fragmentId,
-                TPipelineFragmentParams rpcParams, Long backendId,
-                ExecutionProfile executionProfile) {
+                TPipelineFragmentParams rpcParams, Backend backend,
+                ExecutionProfile executionProfile, long jobId) {
             this.fragmentId = fragmentId;
             this.rpcParams = rpcParams;
 
             this.initiated = false;
             this.done = false;
 
-            this.backend = idToBackend.get(backendId);
+            this.backend = backend;
             this.address = new TNetworkAddress(backend.getHost(), backend.getBePort());
             this.brpcAddress = new TNetworkAddress(backend.getHost(), backend.getBrpcPort());
             this.beProcessEpoch = backend.getProcessEpoch();
 
             this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
-            executionProfile.addFragmentBackend(fragmentId, backendId);
+            executionProfile.addFragmentBackend(fragmentId, backend.getId());
         }
 
         /**
@@ -2890,8 +2891,10 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    public class PipelineExecContexts {
+    public static class PipelineExecContexts {
+        TUniqueId queryId;
         long beId;
+        Backend backend;
         TNetworkAddress brpcAddr;
         List<PipelineExecContext> ctxs = Lists.newArrayList();
         boolean twoPhaseExecution = false;
@@ -2900,9 +2903,12 @@ public class Coordinator implements CoordInterface {
         boolean hasCancelled = false;
         boolean cancelInProcess = false;
 
-        public PipelineExecContexts(long beId, TNetworkAddress brpcAddr, boolean twoPhaseExecution,
+        public PipelineExecContexts(TUniqueId queryId,
+                Backend backend, TNetworkAddress brpcAddr, boolean twoPhaseExecution,
                 int instanceNumber) {
-            this.beId = beId;
+            this.queryId = queryId;
+            this.backend = backend;
+            this.beId = backend.getId();
             this.brpcAddr = brpcAddr;
             this.twoPhaseExecution = twoPhaseExecution;
             this.instanceNumber = instanceNumber;
@@ -2914,6 +2920,10 @@ public class Coordinator implements CoordInterface {
 
         public int getInstanceNumber() {
             return instanceNumber;
+        }
+
+        public List<PipelineExecContext> getCtxs() {
+            return ctxs;
         }
 
         /**
@@ -3016,7 +3026,7 @@ public class Coordinator implements CoordInterface {
         private synchronized void cancelQuery(Status cancelReason) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("cancelRemoteFragments backend: {}, query={}, reason: {}",
-                         idToBackend.get(beId), DebugUtil.printId(queryId), cancelReason.toString());
+                        backend, DebugUtil.printId(queryId), cancelReason.toString());
             }
 
             if (this.hasCancelled || this.cancelInProcess) {
@@ -3037,7 +3047,7 @@ public class Coordinator implements CoordInterface {
                                     hasCancelled = true;
                                 } else {
                                     LOG.warn("Failed to cancel query {} backend: {}, reason: {}",
-                                            DebugUtil.printId(queryId), idToBackend.get(beId), status.toString());
+                                            DebugUtil.printId(queryId), backend, status.toString());
                                 }
                             }
                         }
@@ -3045,7 +3055,7 @@ public class Coordinator implements CoordInterface {
                         public void onFailure(Throwable t) {
                             cancelInProcess = false;
                             LOG.warn("Failed to cancel query {} backend: {}, reason: {}",
-                                    DebugUtil.printId(queryId), idToBackend.get(beId),  cancelReason.toString(), t);
+                                    DebugUtil.printId(queryId), backend,  cancelReason.toString(), t);
                         }
                     }, backendRpcCallbackExecutor);
                     cancelInProcess = true;
@@ -3366,7 +3376,7 @@ public class Coordinator implements CoordInterface {
         return fragments;
     }
 
-    private void updateProfileIfPresent(Consumer<SummaryProfile> profileAction) {
+    protected void updateProfileIfPresent(Consumer<SummaryProfile> profileAction) {
         Optional.ofNullable(context).map(ConnectContext::getExecutor).map(StmtExecutor::getSummaryProfile)
                 .ifPresent(profileAction);
     }
