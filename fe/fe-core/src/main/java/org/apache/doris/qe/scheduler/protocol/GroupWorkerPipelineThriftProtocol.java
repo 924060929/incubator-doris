@@ -26,6 +26,7 @@ import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.datasource.FileQueryScanNode;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
@@ -33,6 +34,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSour
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
+import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
@@ -214,15 +216,16 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         int currentInstanceIndex = 0;
         for (PipelineDistributedPlan currentFragmentPlan : distributedPlans) {
             TPlanFragment currentFragmentThrift = currentFragmentPlan.getFragmentJob().getFragment().toThrift();
-            Map<Integer, TFileScanRangeParams> fileScanRangeParams
-                    = computeFileScanRangeParamsMap(currentFragmentPlan);
+            Map<Integer, TFileScanRangeParams> fileScanRangeParams = computeFileScanRangeParams(currentFragmentPlan);
+            Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
             for (AssignedJob instanceJob : currentFragmentPlan.getInstanceJobs()) {
                 // Suggestion: Do not modify currentFragmentParam out of the `fragmentToThriftIfAbsent` method,
                 //             except add instanceParam into local_params
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
-                        currentFragmentThrift, fileScanRangeParams, workerProcessInstanceNum, execContext);
+                        currentFragmentThrift, fileScanRangeParams, exchangeSenderNum,
+                        workerProcessInstanceNum, execContext);
                 TPipelineInstanceParams instanceParam
                         = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
                 currentFragmentParam.local_params.add(instanceParam);
@@ -248,10 +251,21 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         return workerCounter;
     }
 
+    private Map<Integer, Integer> computeExchangeSenderNum(PipelineDistributedPlan distributedPlan) {
+        Map<Integer, Integer> senderNum = Maps.newLinkedHashMap();
+        for (Entry<ExchangeNode, DistributedPlan> kv : distributedPlan.getInputs().entries()) {
+            ExchangeNode exchangeNode = kv.getKey();
+            PipelineDistributedPlan childPlan = (PipelineDistributedPlan) kv.getValue();
+            senderNum.merge(exchangeNode.getId().asInt(), childPlan.getInstanceJobs().size(), Integer::sum);
+        }
+        return senderNum;
+    }
+
     private TPipelineFragmentParams fragmentToThriftIfAbsent(
             PipelineDistributedPlan fragmentPlan, AssignedJob assignedJob,
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentParams,
-            TPlanFragment fragmentThrift, Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
+            Map<Integer, Integer> exchangeSenderNum, TPlanFragment fragmentThrift,
+            Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
             Multiset<DistributedPlanWorker> workerProcessInstanceNum, ExecContext execContext) {
         return workerToFragmentParams.computeIfAbsent(assignedJob.getAssignedWorker(), worker -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();
@@ -271,7 +285,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             params.setFragmentNumOnHost(workerProcessInstanceNum.count(worker));
 
             params.setNeedWaitExecutionTrigger(execContext.twoPhaseExecution);
-            // params.setPerExchNumSenders(perExchNumSenders);
+            params.setPerExchNumSenders(exchangeSenderNum);
             // params.setDestinations(destinations);
 
             int instanceNumInThisFragment = fragmentPlan.getInstanceJobs().size();
@@ -306,7 +320,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         });
     }
 
-    private Map<Integer, TFileScanRangeParams> computeFileScanRangeParamsMap(PipelineDistributedPlan distributedPlan) {
+    private Map<Integer, TFileScanRangeParams> computeFileScanRangeParams(PipelineDistributedPlan distributedPlan) {
         // scan node id -> TFileScanRangeParams
         Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap = Maps.newLinkedHashMap();
         for (ScanNode scanNode : distributedPlan.getFragmentJob().getScanNodes()) {
