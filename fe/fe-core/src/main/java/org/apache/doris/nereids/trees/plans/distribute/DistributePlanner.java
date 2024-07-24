@@ -17,15 +17,22 @@
 
 package org.apache.doris.nereids.trees.plans.distribute;
 
+import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBuilder;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
+import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Lists;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -44,7 +51,8 @@ public class DistributePlanner {
     public FragmentIdMapping<DistributedPlan> plan() {
         FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(idToFragments);
         ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
-        return buildDistributePlans(fragmentJobs, instanceJobs);
+        FragmentIdMapping<DistributedPlan> plans = buildDistributePlans(fragmentJobs, instanceJobs);
+        return linkPlans(plans);
     }
 
     private FragmentIdMapping<DistributedPlan> buildDistributePlans(
@@ -58,9 +66,77 @@ public class DistributePlanner {
             UnassignedJob fragmentJob = idToUnassignedJobs.get(fragmentId);
             List<AssignedJob> instanceJobs = idToAssignedJobs.get(fragmentId);
 
-            List<PipelineDistributedPlan> childrenPlans = idToDistributedPlans.getByChildrenFragments(fragment);
-            idToDistributedPlans.put(fragmentId, new PipelineDistributedPlan(fragmentJob, instanceJobs, childrenPlans));
+            ListMultimap<ExchangeNode, DistributedPlan> exchangeNodeToChildren = ArrayListMultimap.create();
+            for (PlanFragment childFragment : fragment.getChildren()) {
+                exchangeNodeToChildren.put(
+                        childFragment.getDestNode(),
+                        idToDistributedPlans.get(childFragment.getFragmentId())
+                );
+            }
+
+            idToDistributedPlans.put(fragmentId,
+                    new PipelineDistributedPlan(fragmentJob, instanceJobs, exchangeNodeToChildren)
+            );
         }
         return (FragmentIdMapping) idToDistributedPlans;
+    }
+
+    private FragmentIdMapping<DistributedPlan> linkPlans(FragmentIdMapping<DistributedPlan> plans) {
+        for (DistributedPlan plan : plans.values()) {
+            for (DistributedPlan inputPlan : plan.getInputs().values()) {
+                linkPipelinePlan((PipelineDistributedPlan) plan, (PipelineDistributedPlan) inputPlan);
+            }
+        }
+        return plans;
+    }
+
+    private void linkPipelinePlan(PipelineDistributedPlan receiverPlan, PipelineDistributedPlan senderPlan) {
+        boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
+                .anyMatch(LocalShuffleAssignedJob.class::isInstance);
+        boolean isBucketShuffleJoinSide = receiverPlan.getFragmentJob() instanceof UnassignedScanBucketOlapTableJob;
+        if (isBucketShuffleJoinSide) {
+            linkBucketShuffleJoinPlan(receiverPlan, senderPlan, useLocalShuffle);
+        } else {
+            linkNormalPlans(receiverPlan, senderPlan, useLocalShuffle);
+        }
+    }
+
+    private void linkBucketShuffleJoinPlan(
+            PipelineDistributedPlan joinSide, PipelineDistributedPlan shuffleSide, boolean useLocalShuffle) {
+        // joinSide.getFragmentJob().getFragment().getBucketNum()
+    }
+
+    private void linkNormalPlans(
+            PipelineDistributedPlan receiverPlan, PipelineDistributedPlan senderPlan, boolean useLocalShuffle) {
+        if (useLocalShuffle) {
+            ListMultimap<DistributedPlanWorker, AssignedJob> workerToInstances = groupInstancesByWorker(receiverPlan);
+            linkFirstInstanceForSameWorker(senderPlan, workerToInstances);
+        } else {
+            linkAllInstances(receiverPlan, senderPlan);
+        }
+    }
+
+    private ListMultimap<DistributedPlanWorker, AssignedJob> groupInstancesByWorker(PipelineDistributedPlan plan) {
+        ListMultimap<DistributedPlanWorker, AssignedJob> workerToInstances = ArrayListMultimap.create();
+        for (AssignedJob instanceJob : plan.getInstanceJobs()) {
+            workerToInstances.put(instanceJob.getAssignedWorker(), instanceJob);
+        }
+        return workerToInstances;
+    }
+
+    private void linkFirstInstanceForSameWorker(
+            PipelineDistributedPlan senderPlan,
+            ListMultimap<DistributedPlanWorker, AssignedJob> workerToInstances) {
+        Map<DistributedPlanWorker, Collection<AssignedJob>> workerToMultipleInstances = workerToInstances.asMap();
+        List<AssignedJob> destinations = Lists.newArrayList();
+        for (Entry<DistributedPlanWorker, Collection<AssignedJob>> kv : workerToMultipleInstances.entrySet()) {
+            // only link the first instance in same worker
+            destinations.add(kv.getValue().iterator().next());
+        }
+        senderPlan.setDestinations(destinations);
+    }
+
+    private void linkAllInstances(PipelineDistributedPlan receiverPlan, PipelineDistributedPlan senderPlan) {
+        senderPlan.setDestinations(receiverPlan.getInstanceJobs());
     }
 }

@@ -15,30 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.trees.plans.distribute.worker;
+package org.apache.doris.qe;
 
-/**
- * DistributedPlanWorker: a worker who can execute the assigned job(instance) of the DistributedPlan
- */
-public interface DistributedPlanWorker extends Comparable<DistributedPlanWorker> {
-    long id();
-
-    // ipv4/ipv6 address
-    String address();
-
-    String host();
-
-    int port();
-
-    String brpcAddress();
-
-    int brpcPort();
-
-    // whether is this worker alive?
-    boolean available();
-
-    @Override
-    default int compareTo(DistributedPlanWorker worker) {
-        return address().compareTo(worker.address());
+/** ExecuteStateMachine */
+public class ExecuteStateMachine {
+    enum ExecuteState {
+        BUILD_RPC_PARAM, SERIALIZE_RPC, SEND,
     }
 }

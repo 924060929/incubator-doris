@@ -29,6 +29,10 @@ public class BackendWorker implements DistributedPlanWorker {
         this.backend = backend;
     }
 
+    public Backend getBackend() {
+        return backend;
+    }
+
     @Override
     public long id() {
         return backend.getId();
@@ -37,6 +41,16 @@ public class BackendWorker implements DistributedPlanWorker {
     @Override
     public String address() {
         return backend.getAddress();
+    }
+
+    @Override
+    public String brpcAddress() {
+        return backend.getHost() + brpcPort();
+    }
+
+    @Override
+    public int brpcPort() {
+        return backend.getBrpcPort();
     }
 
     @Override
