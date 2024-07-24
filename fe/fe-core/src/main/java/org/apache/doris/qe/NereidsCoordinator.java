@@ -18,7 +18,13 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.analysis.Analyzer;
+import org.apache.doris.common.Config;
+import org.apache.doris.common.MarkedCountDownLatch;
+import org.apache.doris.common.Pair;
+import org.apache.doris.common.UserException;
+import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.datasource.FileQueryScanNode;
+import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
@@ -36,11 +42,23 @@ import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
+import org.apache.doris.qe.scheduler.protocol.GroupWorkerPipelineThriftProtocol;
+import org.apache.doris.rpc.BackendServiceProxy;
+import org.apache.doris.rpc.RpcException;
 import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TPipelineFragmentParams;
+import org.apache.doris.thrift.TPipelineFragmentParamsList;
+import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TScanRangeParams;
+import org.apache.doris.thrift.TStatusCode;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import org.apache.commons.lang3.tuple.Triple;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.thrift.TException;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,11 +66,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** NereidsCoordinator */
 public class NereidsCoordinator extends Coordinator {
+    private static final Logger LOG = LogManager.getLogger(NereidsCoordinator.class);
+
     private NereidsPlanner nereidsPlanner;
     private FragmentIdMapping<DistributedPlan> distributedPlans;
+    private GroupWorkerPipelineThriftProtocol workersClient;
 
     public NereidsCoordinator(ConnectContext context, Analyzer analyzer,
             Planner planner, StatsErrorEstimator statsErrorEstimator, NereidsPlanner nereidsPlanner) {
@@ -61,6 +86,101 @@ public class NereidsCoordinator extends Coordinator {
         this.distributedPlans = Objects.requireNonNull(
                 nereidsPlanner.getDistributedPlans(), "distributedPlans can not be null"
         );
+    }
+
+    @Override
+    protected void execInternal() throws Exception {
+        workersClient = new GroupWorkerPipelineThriftProtocol(nereidsPlanner);
+
+        boolean enableParallelResultSink = false;
+        List<DistributedPlan> distributedPlans = this.distributedPlans.valueList();
+        AssignedJob topInstance = ((PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1)).getInstanceJobs().get(0);
+        DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
+        TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
+
+        receivers.add(new ResultReceiver(queryId, topInstance.instanceId(), topWorker.id(),
+                execBeAddr, this.timeoutDeadline,
+                nereidsPlanner.getCascadesContext().getConnectContext().getSessionVariable().getMaxMsgSizeOfResultReceiver(), enableParallelResultSink));
+
+        sendPipelineCtx();
+        // super.execInternal();
+    }
+
+    @Override
+    protected void sendPipelineCtx() throws TException, RpcException, UserException {
+        // Init the mark done in order to track the finished state of the query
+        fragmentsDoneLatch = new MarkedCountDownLatch<>(distributedPlans.size());
+
+        Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentParams
+                = workersClient.getFragmentParams();
+
+        for (Entry<DistributedPlanWorker, TPipelineFragmentParamsList> kv : workerToFragmentParams.entrySet()) {
+            DistributedPlanWorker worker = kv.getKey();
+            for (TPipelineFragmentParams fragments : kv.getValue().getParamsList()) {
+                fragmentsDoneLatch.addMark(fragments.getFragmentId(), worker.id());
+            }
+        }
+
+
+
+        // if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
+        //     Boolean enableParallelResultSink = queryOptions.isEnableParallelResultSink()
+        //             && topDataSink instanceof ResultSink;
+        // Set<TNetworkAddress> addrs = new HashSet<>();
+        // for (FInstanceExecParam param : topParams.instanceExecParams) {
+        //     if (addrs.contains(param.host)) {
+        //         continue;
+        //     }
+        //     addrs.add(param.host);
+        //     receivers.add(new ResultReceiver(queryId, param.instanceId, addressToBackendID.get(param.host),
+        //             toBrpcHost(param.host), this.timeoutDeadline,
+        //             context.getSessionVariable().getMaxMsgSizeOfResultReceiver(), enableParallelResultSink));
+        // }
+
+        List<PipelineExecContexts> contexts = workersClient.serialize(getExecutionProfile());
+        for (PipelineExecContexts context : contexts) {
+            for (PipelineExecContext ctx : context.getCtxs()) {
+                pipelineExecContexts.put(Pair.of(ctx.fragmentId.asInt(), ctx.backend.getId()), ctx);
+            }
+        }
+
+        workersClient.send();
+
+        // serializeFragments() can be called in parallel.
+        // final AtomicLong compressedSize = new AtomicLong(0);
+        // beToPipelineExecCtxs.values().parallelStream().forEach(ctxs -> {
+        //     try {
+        //         compressedSize.addAndGet(ctxs.serializeFragments());
+        //     } catch (TException e) {
+        //         throw new RuntimeException(e);
+        //     }
+        // });
+        //
+        // updateProfileIfPresent(profile -> profile.updateFragmentCompressedSize(compressedSize.get()));
+        // updateProfileIfPresent(profile -> profile.setFragmentSerializeTime());
+
+        // 4.2 send fragments rpc
+        // List<Triple<PipelineExecContexts, BackendServiceProxy, Future<PExecPlanFragmentResult>>>
+        //         futures = Lists.newArrayList();
+        // BackendServiceProxy proxy = BackendServiceProxy.getInstance();
+        // for (PipelineExecContexts ctxs : beToPipelineExecCtxs.values()) {
+        //     futures.add(ImmutableTriple.of(ctxs, proxy, ctxs.execRemoteFragmentsAsync(proxy)));
+        // }
+        // waitPipelineRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send fragments");
+        //
+        // updateProfileIfPresent(profile -> profile.updateFragmentRpcCount(futures.size()));
+        // updateProfileIfPresent(profile -> profile.setFragmentSendPhase1Time());
+        //
+        // if (true) {
+        //     // 5. send and wait execution start rpc
+        //     futures.clear();
+        //     for (PipelineExecContexts ctxs : beToPipelineExecCtxs.values()) {
+        //         futures.add(ImmutableTriple.of(ctxs, proxy, ctxs.execPlanFragmentStartAsync(proxy)));
+        //     }
+        //     waitPipelineRpc(futures, this.timeoutDeadline - System.currentTimeMillis(), "send execution start");
+        //     updateProfileIfPresent(profile -> profile.updateFragmentRpcCount(futures.size()));
+        //     updateProfileIfPresent(profile -> profile.setFragmentSendPhase2Time());
+        // }
     }
 
     @Override
@@ -188,6 +308,89 @@ public class NereidsCoordinator extends Coordinator {
                 List<TScanRangeParams> tablets = scanNodeIdToReplicas.computeIfAbsent(
                         scanNode.getId().asInt(), id -> new ArrayList<>());
                 tablets.addAll(scanRanges.params);
+            }
+        }
+    }
+
+    protected void waitPipelineRpc(TQueryOptions queryOptions,
+            List<Triple<PipelineExecContexts, BackendServiceProxy, Future<PExecPlanFragmentResult>>> futures,
+            long leftTimeMs, String operation) throws RpcException, UserException {
+        if (leftTimeMs <= 0) {
+            long currentTimeMillis = System.currentTimeMillis();
+            long elapsed = (currentTimeMillis - timeoutDeadline) / 1000 + queryOptions.getExecutionTimeout();
+            String msg = String.format(
+                    "timeout before waiting %s rpc, query timeout:%d, already elapsed:%d, left for this:%d",
+                    operation, queryOptions.getExecutionTimeout(), elapsed, leftTimeMs);
+            LOG.warn("Query {} {}", DebugUtil.printId(queryId), msg);
+            if (!queryOptions.isSetExecutionTimeout() || !queryOptions.isSetQueryTimeout()) {
+                LOG.warn("Query {} does not set timeout info, execution timeout: is_set:{}, value:{}"
+                                + ", query timeout: is_set:{}, value: {}, "
+                                + "coordinator timeout deadline {}, cur time millis: {}",
+                        DebugUtil.printId(queryId),
+                        queryOptions.isSetExecutionTimeout(), queryOptions.getExecutionTimeout(),
+                        queryOptions.isSetQueryTimeout(), queryOptions.getQueryTimeout(),
+                        timeoutDeadline, currentTimeMillis);
+            }
+            throw new UserException(msg);
+        }
+
+        long timeoutMs = Math.min(leftTimeMs, Config.remote_fragment_exec_timeout_ms);
+        for (Triple<PipelineExecContexts, BackendServiceProxy, Future<PExecPlanFragmentResult>> triple : futures) {
+            TStatusCode code;
+            String errMsg = null;
+            Exception exception = null;
+
+            try {
+                PExecPlanFragmentResult result = triple.getRight().get(timeoutMs, TimeUnit.MILLISECONDS);
+                code = TStatusCode.findByValue(result.getStatus().getStatusCode());
+                if (code == null) {
+                    code = TStatusCode.INTERNAL_ERROR;
+                }
+
+                if (code != TStatusCode.OK) {
+                    if (!result.getStatus().getErrorMsgsList().isEmpty()) {
+                        errMsg = result.getStatus().getErrorMsgsList().get(0);
+                    } else {
+                        errMsg = operation + " failed. backend id: " + triple.getLeft().beId;
+                    }
+                }
+            } catch (ExecutionException e) {
+                exception = e;
+                code = TStatusCode.THRIFT_RPC_ERROR;
+                triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
+            } catch (InterruptedException e) {
+                exception = e;
+                code = TStatusCode.INTERNAL_ERROR;
+                triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
+            } catch (TimeoutException e) {
+                exception = e;
+                errMsg = String.format(
+                        "timeout when waiting for %s rpc, query timeout:%d, left timeout for this operation:%d",
+                        operation, queryOptions.getExecutionTimeout(), timeoutMs / 1000);
+                LOG.warn("Query {} {}", DebugUtil.printId(queryId), errMsg);
+                code = TStatusCode.TIMEOUT;
+                triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
+            }
+
+            if (code != TStatusCode.OK) {
+                if (exception != null && errMsg == null) {
+                    errMsg = operation + " failed. " + exception.getMessage();
+                }
+                queryStatus.updateStatus(TStatusCode.INTERNAL_ERROR, errMsg);
+                cancelInternal(queryStatus);
+                switch (code) {
+                    case TIMEOUT:
+                        MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(triple.getLeft().brpcAddr.hostname)
+                                .increase(1L);
+                        throw new RpcException(triple.getLeft().brpcAddr.hostname, errMsg, exception);
+                    case THRIFT_RPC_ERROR:
+                        MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(triple.getLeft().brpcAddr.hostname)
+                                .increase(1L);
+                        SimpleScheduler.addToBlacklist(triple.getLeft().beId, errMsg);
+                        throw new RpcException(triple.getLeft().brpcAddr.hostname, errMsg, exception);
+                    default:
+                        throw new UserException(errMsg, exception);
+                }
             }
         }
     }

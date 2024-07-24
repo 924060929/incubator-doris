@@ -20,7 +20,11 @@ package org.apache.doris.nereids.trees.plans.distribute;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.util.Utils;
+import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.thrift.TExplainLevel;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ListMultimap;
 
 import java.util.List;
 import java.util.Objects;
@@ -28,19 +32,36 @@ import java.util.Objects;
 /** PipelineDistributedPlan */
 public class PipelineDistributedPlan extends DistributedPlan {
     protected final List<AssignedJob> instanceJobs;
+    // current, we only support all instances of the same fragment reuse the same destination
+    private List<AssignedJob> destinations;
 
     public PipelineDistributedPlan(
             UnassignedJob fragmentJob,
             List<AssignedJob> instanceJobs,
-            List<PipelineDistributedPlan> inputs) {
+            ListMultimap<ExchangeNode, DistributedPlan> inputs) {
         super(fragmentJob, inputs);
         this.instanceJobs = Utils.fastToImmutableList(
                 Objects.requireNonNull(instanceJobs, "instanceJobs can not be null")
         );
+        this.destinations = ImmutableList.of();
     }
 
     public List<AssignedJob> getInstanceJobs() {
         return instanceJobs;
+    }
+
+    public List<AssignedJob> getDestinations() {
+        return destinations;
+    }
+
+    public void setDestinations(
+            List<AssignedJob> destinations) {
+        this.destinations = destinations;
+    }
+
+    @Override
+    public int hashCode() {
+        return fragmentJob.getFragment().getFragmentId().asInt();
     }
 
     @Override

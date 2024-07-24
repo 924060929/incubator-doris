@@ -15,30 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.trees.plans.distribute.worker;
+package org.apache.doris.qe.scheduler;
 
-/**
- * DistributedPlanWorker: a worker who can execute the assigned job(instance) of the DistributedPlan
- */
-public interface DistributedPlanWorker extends Comparable<DistributedPlanWorker> {
-    long id();
+import org.apache.doris.common.Status;
+import org.apache.doris.nereids.StatementContext;
+import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 
-    // ipv4/ipv6 address
-    String address();
+import java.util.List;
 
-    String host();
+/** Scheduler */
+public interface Scheduler {
+    void schedule(List<DistributedPlan> distributedPlans, StatementContext statementContext);
 
-    int port();
-
-    String brpcAddress();
-
-    int brpcPort();
-
-    // whether is this worker alive?
-    boolean available();
-
-    @Override
-    default int compareTo(DistributedPlanWorker worker) {
-        return address().compareTo(worker.address());
-    }
+    void cancel(Status cancelReason);
 }
