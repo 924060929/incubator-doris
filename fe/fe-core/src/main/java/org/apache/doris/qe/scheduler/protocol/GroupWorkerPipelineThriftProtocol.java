@@ -118,13 +118,13 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         TQueryOptions queryOptions = initQueryOptions(connectContext);
         TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
         TDescriptorTable descriptorTable = planner.getDescTable().toThrift();
+        List<TPipelineWorkloadGroup> workloadGroup = computeWorkloadGroups(connectContext);
         TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
         String currentConnectedFEIp = connectContext.getCurrentConnectedFEIp();
         TNetworkAddress directConnectFrontendAddress =
                 connectContext.isProxy() && !StringUtils.isBlank(currentConnectedFEIp)
                                 ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
                                 : coordinatorAddress;
-        List<TPipelineWorkloadGroup> workloadGroup = computeWorkloadGroups(connectContext);
 
         this.execContext = new ExecContext(
                 connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup,
