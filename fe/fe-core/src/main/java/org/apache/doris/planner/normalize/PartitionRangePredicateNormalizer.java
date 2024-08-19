@@ -35,14 +35,12 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.OlapScanNode;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
-import org.apache.commons.collections.CollectionUtils;
 
 import java.util.Collection;
 import java.util.List;
@@ -91,10 +89,13 @@ public class PartitionRangePredicateNormalizer {
     private NormalizedPartitionPredicates normalizeSingleRangePartitionColumnPredicates(
             Column partitionColumn, RangePartitionInfo rangePartitionInfo) {
         List<Long> selectedPartitionIds = Utils.fastToImmutableList(olapScanNode.getSelectedPartitionIds());
-        Preconditions.checkArgument(
-                !CollectionUtils.isEmpty(selectedPartitionIds),
-                "selectedPartitionIds is empty: " + olapScanNode
-        );
+        if (selectedPartitionIds.isEmpty()) {
+            selectedPartitionIds = olapScanNode.getOlapTable().getPartitionIds();
+        }
+        // Preconditions.checkArgument(
+        //         !CollectionUtils.isEmpty(selectedPartitionIds),
+        //         "selectedPartitionIds is empty: " + olapScanNode
+        // );
 
         // ConnectContext context = ConnectContext.get();
         // if (context != null && context.getSessionVariable().getQueryCacheHotPartitionNum() > 0) {
@@ -172,7 +173,7 @@ public class PartitionRangePredicateNormalizer {
             if (!olapScanNode.getOlapTable().isPartitionedTable()) {
                 selectedPartitionIds = ImmutableList.of(olapScanNode.getOlapTable().getBaseIndex().getId());
             } else {
-                selectedPartitionIds = olapScanNode.getOlapTable().getPartitionInfo().getAllPartitions().keySet();
+                selectedPartitionIds = olapScanNode.getOlapTable().getPartitionIds();
             }
         }
 
