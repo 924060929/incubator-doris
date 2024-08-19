@@ -33,6 +33,7 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TPlanFragment;
+import org.apache.doris.thrift.TQueryCacheParam;
 import org.apache.doris.thrift.TResultSinkType;
 
 import com.google.common.base.Preconditions;
@@ -158,6 +159,8 @@ public class PlanFragment extends TreeNode<PlanFragment> {
     private TResultSinkType resultSinkType = TResultSinkType.MYSQL_PROTOCAL;
 
     public Optional<NereidsSpecifyInstances<ScanSource>> specifyInstances = Optional.empty();
+
+    public TQueryCacheParam queryCacheParam;
 
     /**
      * C'tor for fragment with specific partition; the output is by default broadcast.

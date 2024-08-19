@@ -61,10 +61,13 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.FeConstants;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.common.util.Util;
 import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.planner.normalize.Normalizer;
+import org.apache.doris.planner.normalize.PartitionRangePredicateNormalizer;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.resource.Tag;
 import org.apache.doris.statistics.StatisticalType;
@@ -74,7 +77,10 @@ import org.apache.doris.statistics.query.StatsDelta;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TColumn;
 import org.apache.doris.thrift.TExplainLevel;
+import org.apache.doris.thrift.TExpr;
 import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TNormalizedOlapScanNode;
+import org.apache.doris.thrift.TNormalizedPlanNode;
 import org.apache.doris.thrift.TOlapScanNode;
 import org.apache.doris.thrift.TOlapTableIndex;
 import org.apache.doris.thrift.TPaloScanRange;
@@ -1555,6 +1561,112 @@ public class OlapScanNode extends ScanNode {
         msg.olap_scan_node.setDistributeColumnIds(new ArrayList<>(distributionColumnIds));
 
         super.toThrift(msg);
+    }
+
+    @Override
+    public void normalize(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
+        TNormalizedOlapScanNode normalizedOlapScanNode = new TNormalizedOlapScanNode();
+        normalizedOlapScanNode.setTableId(olapTable.getId());
+
+        long selectIndexId = selectedIndexId == -1 ? olapTable.getBaseIndexId() : selectedIndexId;
+        normalizedOlapScanNode.setIndexId(selectIndexId);
+        normalizedOlapScanNode.setIsPreaggregation(isPreAggregation);
+        normalizedOlapScanNode.setSortColumn(sortColumn);
+        normalizedOlapScanNode.setRollupName(olapTable.getIndexNameById(selectIndexId));
+
+        normalizeSchema(normalizedOlapScanNode);
+        normalizeSelectColumns(normalizedOlapScanNode, normalizer);
+        normalizeConjuncts(normalizedPlan, normalizer);
+        normalizeProjection(normalizedOlapScanNode, normalizer);
+
+        normalizedPlan.setNodeType(TPlanNodeType.OLAP_SCAN_NODE);
+        normalizedPlan.setOlapScanNode(normalizedOlapScanNode);
+    }
+
+    private void normalizeSelectColumns(TNormalizedOlapScanNode normalizedOlapScanNode, Normalizer normalizer) {
+        List<SlotDescriptor> slots = tupleIds
+                .stream()
+                .flatMap(tupleId -> normalizer.getDescriptorTable().getTupleDesc(tupleId).getSlots().stream())
+                .collect(Collectors.toList());
+        List<Pair<SlotId, String>> selectColumns = slots.stream()
+                .map(slot -> Pair.of(slot.getId(), slot.getColumn().getName()))
+                .collect(Collectors.toList());
+        for (Column partitionColumn : olapTable.getPartitionInfo().getPartitionColumns()) {
+            boolean selectPartitionColumn = false;
+            String partitionColumnName = partitionColumn.getName();
+            for (Pair<SlotId, String> selectColumn : selectColumns) {
+                if (selectColumn.second.equalsIgnoreCase(partitionColumnName)) {
+                    selectPartitionColumn = true;
+                    break;
+                }
+            }
+            if (!selectPartitionColumn) {
+                selectColumns.add(Pair.of(new SlotId(-1), partitionColumnName));
+            }
+        }
+
+        selectColumns.sort(Comparator.comparing(Pair::value));
+
+        for (Pair<SlotId, String> selectColumn : selectColumns) {
+            normalizer.normalizeSlotId(selectColumn.first.asInt());
+        }
+
+        normalizedOlapScanNode.setSelectColumns(
+                selectColumns.stream().map(Pair::value).collect(Collectors.toList())
+        );
+    }
+
+    private void normalizeProjection(TNormalizedOlapScanNode normalizedOlapScanNode, Normalizer normalizer) {
+        List<SlotDescriptor> outputSlots = normalizer
+                .getDescriptorTable()
+                .getTupleDesc(getOutputTupleIds().get(0))
+                .getSlots();
+
+        Map<SlotId, Expr> outputSlotToProject = Maps.newLinkedHashMap();
+        for (int i = 0; i < outputSlots.size(); i++) {
+            if (projectList == null) {
+                SlotRef slotRef = new SlotRef(outputSlots.get(i));
+                outputSlotToProject.put(outputSlots.get(i).getId(), slotRef);
+            } else {
+                Expr projectExpr = projectList.get(i);
+                if (projectExpr instanceof SlotRef) {
+                    int outputId = outputSlots.get(i).getId().asInt();
+                    int refId = ((SlotRef) projectExpr).getSlotId().asInt();
+                    normalizer.setSlotIdToNormalizeId(outputId, normalizer.normalizeSlotId(refId));
+                }
+                outputSlotToProject.put(outputSlots.get(i).getId(), projectExpr);
+            }
+        }
+
+        List<TExpr> sortNormalizeProject = sortNormalizeProjection(outputSlotToProject, normalizer);
+        normalizedOlapScanNode.setProjection(sortNormalizeProject);
+    }
+
+    private void normalizeSchema(TNormalizedOlapScanNode normalizedOlapScanNode) {
+        List<Column> columns = selectedIndexId == -1
+                ? olapTable.getBaseSchema() : olapTable.getSchemaByIndexId(selectedIndexId);
+        List<Column> keyColumns = columns.stream().filter(Column::isKey).collect(Collectors.toList());
+
+        normalizedOlapScanNode.setKeyColumnNames(
+                keyColumns.stream()
+                        .map(Column::getName)
+                        .collect(Collectors.toList())
+        );
+
+        normalizedOlapScanNode.setKeyColumnTypes(
+                keyColumns.stream()
+                        .map(column -> column.getDataType().toThrift())
+                        .collect(Collectors.toList())
+        );
+    }
+
+    @Override
+    protected void normalizeConjuncts(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
+        List<Expr> normalizedPredicates = new PartitionRangePredicateNormalizer(normalizer, this)
+                .normalize();
+
+        List<TExpr> normalizedConjuncts = normalizeExprs(normalizedPredicates, normalizer);
+        normalizedPlan.setConjuncts(normalizedConjuncts);
     }
 
     public void collectColumns(Analyzer analyzer, Set<String> equivalenceColumns, Set<String> unequivalenceColumns) {

@@ -34,13 +34,17 @@ import org.apache.doris.analysis.TupleId;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Id;
 import org.apache.doris.common.NotImplementedException;
 import org.apache.doris.common.TreeNode;
 import org.apache.doris.common.UserException;
+import org.apache.doris.planner.normalize.Normalizer;
 import org.apache.doris.statistics.PlanStats;
 import org.apache.doris.statistics.StatisticalType;
 import org.apache.doris.statistics.StatsDeriveResult;
 import org.apache.doris.thrift.TExplainLevel;
+import org.apache.doris.thrift.TExpr;
+import org.apache.doris.thrift.TNormalizedPlanNode;
 import org.apache.doris.thrift.TPlan;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPushAggOp;
@@ -51,10 +55,15 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.tuple.Triple;
+import org.apache.thrift.TSerializer;
+import org.apache.thrift.protocol.TCompactProtocol.Factory;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -883,6 +892,86 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     // Convert this plan node into msg (excluding children), which requires setting
     // the node type and the node-specific field.
     protected abstract void toThrift(TPlanNode msg);
+
+    public TNormalizedPlanNode normalize(Normalizer normalizer) {
+        TNormalizedPlanNode normalizedPlan = new TNormalizedPlanNode();
+        normalizedPlan.setNodeId(normalizer.normalizePlanId(id.asInt()));
+        normalizedPlan.setNumChildren(children.size());
+        Set<Integer> tupleIds = this.tupleIds
+                .stream()
+                .map(Id::asInt)
+                .collect(Collectors.toSet());
+        normalizedPlan.setTupleIds(
+                tupleIds.stream()
+                    .map(normalizer::normalizeTupleId)
+                    .collect(Collectors.toSet())
+        );
+        normalizedPlan.setNullableTuples(
+                nullableTupleIds
+                    .stream()
+                    .map(Id::asInt)
+                    .filter(tupleIds::contains)
+                    .map(normalizer::normalizeTupleId)
+                    .collect(Collectors.toSet())
+        );
+        normalizedPlan.setLimit(limit);
+
+        normalize(normalizedPlan, normalizer);
+        return normalizedPlan;
+    }
+
+    public void normalize(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
+        throw new IllegalStateException("Unsupported normalization");
+    }
+
+    protected void normalizeConjuncts(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
+        normalizedPlan.setConjuncts(normalizeExprs(getConjuncts(), normalizer));
+    }
+
+    protected List<TExpr> sortNormalizeProjection(Map<SlotId, Expr> project, Normalizer normalizer) {
+        List<Triple<SlotId, Expr, ByteBuffer>> sortBySerializedExpr = project.entrySet()
+                .stream()
+                .map(kv -> {
+                    try {
+                        TSerializer serializer = new TSerializer(new Factory());
+                        TExpr thriftExpr = kv.getValue().normalize(normalizer);
+                        return Triple.of(kv.getKey(), kv.getValue(), ByteBuffer.wrap(serializer.serialize(thriftExpr)));
+                    } catch (Throwable t) {
+                        throw new IllegalStateException();
+                    }
+                })
+                .sorted(Comparator.comparing(Triple::getRight))
+                .collect(Collectors.toList());
+
+        for (Triple<SlotId, Expr, ByteBuffer> triple : sortBySerializedExpr) {
+            int originOutputSlotId = triple.getLeft().asInt();
+            normalizer.normalizeSlotId(originOutputSlotId);
+        }
+
+        List<Expr> sortedProject = sortBySerializedExpr.stream()
+                .map(Triple::getMiddle)
+                .collect(Collectors.toList());
+        return normalizeExprs(sortedProject, normalizer);
+    }
+
+    public static List<TExpr> normalizeExprs(Collection<? extends Expr> exprs, Normalizer normalizer) {
+        return exprs.stream()
+                .map(expr -> normalizeExpr(expr, normalizer))
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    public static TExpr normalizeExpr(Expr expr, Normalizer normalizer) {
+        return expr.normalize(normalizer);
+        // try {
+        //     TSerializer serializer = new TSerializer(new TSimpleJSONProtocol.Factory());
+        //     return ByteBuffer.wrap(serializer.serialize(
+        //             expr.normalize(normalizer)
+        //     ));
+        // } catch (Exception exception) {
+        //     throw new IllegalStateException("Normalize expression failed: " + exception.getMessage(), exception);
+        // }
+    }
 
     protected String debugString() {
         // not using Objects.toStrHelper because
