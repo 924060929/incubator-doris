@@ -150,6 +150,8 @@ public class SessionVariable implements Serializable, Writable {
     public static final String ENABLE_REWRITE_ELEMENT_AT_TO_SLOT = "enable_rewrite_element_at_to_slot";
     public static final String ENABLE_ODBC_TRANSCATION = "enable_odbc_transcation";
     public static final String ENABLE_SQL_CACHE = "enable_sql_cache";
+    public static final String ENABLE_QUERY_CACHE = "enable_query_cache";
+    public static final String QUERY_CACHE_HOT_PARTITION_NUM = "query_cache_hot_partition_num";
 
     public static final String ENABLE_COST_BASED_JOIN_REORDER = "enable_cost_based_join_reorder";
 
@@ -933,6 +935,20 @@ public class SessionVariable implements Serializable, Writable {
 
     @VariableMgr.VarAttr(name = ENABLE_SQL_CACHE)
     public boolean enableSqlCache = false;
+
+    @VariableMgr.VarAttr(name = ENABLE_QUERY_CACHE)
+    public boolean enableQueryCache = false;
+
+    public int getQueryCacheHotPartitionNum() {
+        return queryCacheHotPartitionNum;
+    }
+
+    public void setQueryCacheHotPartitionNum(int queryCacheHotPartitionNum) {
+        this.queryCacheHotPartitionNum = queryCacheHotPartitionNum;
+    }
+
+    @VarAttr(name = QUERY_CACHE_HOT_PARTITION_NUM)
+    private int queryCacheHotPartitionNum = 1;
 
     @VariableMgr.VarAttr(name = FORWARD_TO_MASTER)
     public boolean forwardToMaster = true;
@@ -2783,6 +2799,14 @@ public class SessionVariable implements Serializable, Writable {
 
     public void setEnableSqlCache(boolean enableSqlCache) {
         this.enableSqlCache = enableSqlCache;
+    }
+
+    public boolean getEnableQueryCache() {
+        return enableQueryCache;
+    }
+
+    public void setEnableQueryCache(boolean enableQueryCache) {
+        this.enableQueryCache = enableQueryCache;
     }
 
     public int getPartitionedHashJoinRowsThreshold() {

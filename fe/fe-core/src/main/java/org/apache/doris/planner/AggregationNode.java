@@ -30,11 +30,14 @@ import org.apache.doris.analysis.SortInfo;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.common.NotImplementedException;
 import org.apache.doris.common.UserException;
+import org.apache.doris.planner.normalize.Normalizer;
 import org.apache.doris.statistics.StatisticalType;
 import org.apache.doris.statistics.StatsRecursiveDerive;
 import org.apache.doris.thrift.TAggregationNode;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TExpr;
+import org.apache.doris.thrift.TNormalizedAggregateNode;
+import org.apache.doris.thrift.TNormalizedPlanNode;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPlanNodeType;
 import org.apache.doris.thrift.TSortInfo;
@@ -298,6 +301,29 @@ public class AggregationNode extends PlanNode {
         if (groupingExprs != null) {
             msg.agg_node.setGroupingExprs(Expr.treesToThrift(groupingExprs));
         }
+    }
+
+    @Override
+    public void normalize(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
+        TNormalizedAggregateNode normalizedAggregateNode = new TNormalizedAggregateNode();
+
+        // if (aggInfo.getGroupingExprs().size() > 3) {
+        //     throw new IllegalStateException("Too many grouping expressions, not use query cache");
+        // }
+
+        normalizedAggregateNode.setIntermediateTupleId(
+                normalizer.normalizeTupleId(aggInfo.getIntermediateTupleId().asInt()));
+        normalizedAggregateNode.setOutputTupleId(
+                normalizer.normalizeTupleId(aggInfo.getOutputTupleId().asInt()));
+        normalizedAggregateNode.setGroupingExprs(normalizeExprs(aggInfo.getGroupingExprs(), normalizer));
+        normalizedAggregateNode.setAggregateFunctions(normalizeExprs(aggInfo.getAggregateExprs(), normalizer));
+        normalizedAggregateNode.setIsFinalize(needsFinalize);
+        normalizedAggregateNode.setUseStreamingPreaggregation(useStreamingPreagg);
+
+        normalizeConjuncts(normalizedPlan, normalizer);
+
+        normalizedPlan.setNodeType(TPlanNodeType.AGGREGATION_NODE);
+        normalizedPlan.setAggregationNode(normalizedAggregateNode);
     }
 
     protected String getDisplayLabelDetail() {
