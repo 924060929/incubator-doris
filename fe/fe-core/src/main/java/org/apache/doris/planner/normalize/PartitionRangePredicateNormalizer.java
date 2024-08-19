@@ -92,10 +92,6 @@ public class PartitionRangePredicateNormalizer {
         if (selectedPartitionIds.isEmpty()) {
             selectedPartitionIds = olapScanNode.getOlapTable().getPartitionIds();
         }
-        // Preconditions.checkArgument(
-        //         !CollectionUtils.isEmpty(selectedPartitionIds),
-        //         "selectedPartitionIds is empty: " + olapScanNode
-        // );
 
         // ConnectContext context = ConnectContext.get();
         // if (context != null && context.getSessionVariable().getQueryCacheHotPartitionNum() > 0) {
