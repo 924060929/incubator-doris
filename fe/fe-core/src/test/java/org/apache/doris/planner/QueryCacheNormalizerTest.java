@@ -145,16 +145,18 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
         connectContext.getSessionVariable()
                 .setDisableNereidsRules("PRUNE_EMPTY_PARTITION,TWO_PHASE_AGGREGATE_WITHOUT_DISTINCT");
         try {
-            String digest1 = getDigest("select k1 + 1, k2 + 1, sum(v1) + 1, sum(v2) + 1 as v from db1.non_part group by k1, k2");
-            String digest2 = getDigest("select sum(v2) + 1, k2 + 1, sum(v1) + 1, k1 + 1 as v from db1.non_part group by k2, k1");
+            String digest1 = getDigest(
+                    "select k1 + 1, k2 + 1, sum(v1) + 1, sum(v2) + 1 as v from db1.non_part group by k1, k2"
+            );
+            String digest2 = getDigest(
+                    "select sum(v2) + 1, k2 + 1, sum(v1) + 1, k1 + 1 as v from db1.non_part group by k2, k1"
+            );
             Assertions.assertEquals(digest1, digest2);
         } finally {
             connectContext.getSessionVariable()
                     .setDisableNereidsRules("PRUNE_EMPTY_PARTITION");
         }
     }
-
-
 
     @Test
     public void testPartitionTable() throws Throwable {
