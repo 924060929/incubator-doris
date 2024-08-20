@@ -1576,8 +1576,6 @@ public class OlapScanNode extends ScanNode {
 
         normalizeSchema(normalizedOlapScanNode);
         normalizeSelectColumns(normalizedOlapScanNode, normalizer);
-        normalizeConjuncts(normalizedPlan, normalizer);
-        normalizeProjection(normalizedOlapScanNode, normalizer);
 
         normalizedPlan.setNodeType(TPlanNodeType.OLAP_SCAN_NODE);
         normalizedPlan.setOlapScanNode(normalizedOlapScanNode);
@@ -1614,32 +1612,6 @@ public class OlapScanNode extends ScanNode {
         normalizedOlapScanNode.setSelectColumns(
                 selectColumns.stream().map(Pair::value).collect(Collectors.toList())
         );
-    }
-
-    private void normalizeProjection(TNormalizedOlapScanNode normalizedOlapScanNode, Normalizer normalizer) {
-        List<SlotDescriptor> outputSlots = normalizer
-                .getDescriptorTable()
-                .getTupleDesc(getOutputTupleIds().get(0))
-                .getSlots();
-
-        Map<SlotId, Expr> outputSlotToProject = Maps.newLinkedHashMap();
-        for (int i = 0; i < outputSlots.size(); i++) {
-            if (projectList == null) {
-                SlotRef slotRef = new SlotRef(outputSlots.get(i));
-                outputSlotToProject.put(outputSlots.get(i).getId(), slotRef);
-            } else {
-                Expr projectExpr = projectList.get(i);
-                if (projectExpr instanceof SlotRef) {
-                    int outputId = outputSlots.get(i).getId().asInt();
-                    int refId = ((SlotRef) projectExpr).getSlotId().asInt();
-                    normalizer.setSlotIdToNormalizeId(outputId, normalizer.normalizeSlotId(refId));
-                }
-                outputSlotToProject.put(outputSlots.get(i).getId(), projectExpr);
-            }
-        }
-
-        List<TExpr> sortNormalizeProject = normalizeProjection(outputSlotToProject, normalizer);
-        normalizedOlapScanNode.setProjection(sortNormalizeProject);
     }
 
     private void normalizeSchema(TNormalizedOlapScanNode normalizedOlapScanNode) {

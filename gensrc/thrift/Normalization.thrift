@@ -33,7 +33,6 @@ struct TNormalizedOlapScanNode {
   6: optional string rollup_name
   7: optional string sort_column
   8: optional list<string> select_columns
-  9: optional list<Exprs.TExpr> projection
 }
 
 struct TNormalizedAggregateNode {

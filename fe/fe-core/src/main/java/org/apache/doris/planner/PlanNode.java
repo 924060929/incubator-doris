@@ -37,6 +37,7 @@ import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Id;
 import org.apache.doris.common.NotImplementedException;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.TreeNode;
 import org.apache.doris.common.UserException;
 import org.apache.doris.planner.normalize.Normalizer;
@@ -57,7 +58,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang3.tuple.Triple;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -916,7 +916,8 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         );
         normalizedPlan.setLimit(limit);
         normalize(normalizedPlan, normalizer);
-        normalizeProjection(normalizedPlan, normalizer);
+        normalizeConjuncts(normalizedPlan, normalizer);
+        normalizeProjects(normalizedPlan, normalizer);
         return normalizedPlan;
     }
 
@@ -924,11 +925,12 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         throw new IllegalStateException("Unsupported normalization");
     }
 
-    protected void normalizeProjection(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
-        List<SlotDescriptor> outputSlots = normalizer
-                .getDescriptorTable()
-                .getTupleDesc(getOutputTupleIds().get(0))
-                .getSlots();
+    protected void normalizeProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
+        List<SlotDescriptor> outputSlots =
+                getOutputTupleIds()
+                .stream()
+                .flatMap(tupleId -> normalizer.getDescriptorTable().getTupleDesc(tupleId).getSlots().stream())
+                .collect(Collectors.toList());
 
         Map<SlotId, Expr> outputSlotToProject = Maps.newLinkedHashMap();
         for (int i = 0; i < outputSlots.size(); i++) {
@@ -946,7 +948,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
             }
         }
 
-        List<TExpr> sortNormalizeProject = normalizeProjection(outputSlotToProject, normalizer);
+        List<TExpr> sortNormalizeProject = normalizeProjects(outputSlotToProject, normalizer);
         normalizedPlanNode.setProjects(sortNormalizeProject);
     }
 
@@ -954,28 +956,23 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         normalizedPlan.setConjuncts(normalizeExprs(getConjuncts(), normalizer));
     }
 
-    protected List<TExpr> normalizeProjection(Map<SlotId, Expr> project, Normalizer normalizer) {
-        List<Triple<SlotId, Expr, TExpr>> sortByTExpr = Lists.newArrayListWithCapacity(project.size());
+    protected List<TExpr> normalizeProjects(Map<SlotId, Expr> project, Normalizer normalizer) {
+        List<Pair<SlotId, TExpr>> sortByTExpr = Lists.newArrayListWithCapacity(project.size());
         for (Entry<SlotId, Expr> kv : project.entrySet()) {
             SlotId slotId = kv.getKey();
             Expr expr = kv.getValue();
             TExpr thriftExpr = expr.normalize(normalizer);
-            sortByTExpr.add(Triple.of(slotId, expr, thriftExpr));
+            sortByTExpr.add(Pair.of(slotId, thriftExpr));
         }
-        sortByTExpr.sort(Comparator.naturalOrder());
+        sortByTExpr.sort(Comparator.comparing(Pair::value));
 
         // we should normalize slot id by fix order, then the upper nodes can reference the same normalized slot id
-        for (Triple<SlotId, Expr, TExpr> triple : sortByTExpr) {
-            int originOutputSlotId = triple.getLeft().asInt();
+        for (Pair<SlotId, TExpr> triple : sortByTExpr) {
+            int originOutputSlotId = triple.first.asInt();
             normalizer.normalizeSlotId(originOutputSlotId);
         }
 
-        List<Expr> sortedProject = Lists.newArrayListWithCapacity(sortByTExpr.size());
-        for (Triple<SlotId, Expr, TExpr> triple : sortByTExpr) {
-            sortedProject.add(triple.getMiddle());
-        }
-
-        return normalizeExprs(sortedProject, normalizer);
+        return sortByTExpr.stream().map(Pair::value).collect(Collectors.toList());
     }
 
     public static List<TExpr> normalizeExprs(Collection<? extends Expr> exprs, Normalizer normalizer) {

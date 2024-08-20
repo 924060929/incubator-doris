@@ -19,6 +19,7 @@ package org.apache.doris.planner;
 
 import org.apache.doris.analysis.DescriptorTable;
 import org.apache.doris.planner.normalize.QueryCacheNormalizer;
+import org.apache.doris.thrift.TNormalizedPlanNode;
 import org.apache.doris.thrift.TQueryCacheParam;
 import org.apache.doris.thrift.TRuntimeFilterMode;
 import org.apache.doris.thrift.TRuntimeFilterType;
@@ -143,9 +144,14 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
     public void testProjectOnAggregate() throws Exception {
         connectContext.getSessionVariable()
                 .setDisableNereidsRules("PRUNE_EMPTY_PARTITION,TWO_PHASE_AGGREGATE_WITHOUT_DISTINCT");
-        String digest1 = getDigest("select k1 + 1, k2 + 1, sum(v1) + 1, sum(v2) + 1 as v from db1.non_part group by k1, k2");
-        String digest2 = getDigest("select sum(v2) + 1, k2 + 1, sum(v1) + 1, k1 + 1 as v from db1.non_part group by k1, k2");
-        Assertions.assertEquals(digest1, digest2);
+        try {
+            String digest1 = getDigest("select k1 + 1, k2 + 1, sum(v1) + 1, sum(v2) + 1 as v from db1.non_part group by k1, k2");
+            String digest2 = getDigest("select sum(v2) + 1, k2 + 1, sum(v1) + 1, k1 + 1 as v from db1.non_part group by k2, k1");
+            Assertions.assertEquals(digest1, digest2);
+        } finally {
+            connectContext.getSessionVariable()
+                    .setDisableNereidsRules("PRUNE_EMPTY_PARTITION");
+        }
     }
 
 
@@ -223,5 +229,17 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
             }
         }
         return queryCacheParams;
+    }
+
+    private List<TNormalizedPlanNode> normalizePlans(String sql) throws Exception {
+        Planner planner = getSqlStmtExecutor(sql).planner();
+        DescriptorTable descTable = planner.getDescTable();
+        List<PlanFragment> fragments = planner.getFragments();
+        List<TNormalizedPlanNode> normalizedPlans = new ArrayList<>();
+        for (PlanFragment fragment : fragments) {
+            QueryCacheNormalizer normalizer = new QueryCacheNormalizer(fragment, descTable);
+            normalizedPlans.addAll(normalizer.normalizePlans(connectContext));
+        }
+        return normalizedPlans;
     }
 }
