@@ -914,10 +914,10 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
                     .map(normalizer::normalizeTupleId)
                     .collect(Collectors.toSet())
         );
-        normalizedPlan.setLimit(limit);
         normalize(normalizedPlan, normalizer);
         normalizeConjuncts(normalizedPlan, normalizer);
         normalizeProjects(normalizedPlan, normalizer);
+        normalizedPlan.setLimit(limit);
         return normalizedPlan;
     }
 
