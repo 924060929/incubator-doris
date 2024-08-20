@@ -1641,6 +1641,23 @@ public class OlapScanNode extends ScanNode {
         normalizedPlan.setConjuncts(normalizedConjuncts);
     }
 
+    @Override
+    protected void normalizeProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
+        List<SlotDescriptor> outputSlots =
+                getOutputTupleIds()
+                        .stream()
+                        .flatMap(tupleId -> normalizer.getDescriptorTable().getTupleDesc(tupleId).getSlots().stream())
+                        .collect(Collectors.toList());
+
+        List<Expr> projectList = this.projectList;
+        if (projectList == null) {
+            projectList = outputSlots.stream().map(SlotRef::new).collect(Collectors.toList());
+        }
+
+        List<TExpr> projectThrift = normalizeProjects(outputSlots, projectList, normalizer);
+        normalizedPlanNode.setProjects(projectThrift);
+    }
+
     public void collectColumns(Analyzer analyzer, Set<String> equivalenceColumns, Set<String> unequivalenceColumns) {
         // 1. Get columns which has predicate on it.
         for (Expr expr : conjuncts) {

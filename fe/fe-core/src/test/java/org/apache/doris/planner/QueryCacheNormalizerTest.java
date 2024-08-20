@@ -142,10 +142,10 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
                 .setDisableNereidsRules("PRUNE_EMPTY_PARTITION,TWO_PHASE_AGGREGATE_WITHOUT_DISTINCT");
         try {
             String digest1 = getDigest(
-                    "select k1 + 1, k2 + 1, sum(v1) + 1, sum(v2) + 1 as v from db1.non_part group by k1, k2"
+                    "select k1 + 1, k2 + 2, sum(v1) + 3, sum(v2) + 4 as v from db1.non_part group by k1, k2"
             );
             String digest2 = getDigest(
-                    "select sum(v2) + 1, k2 + 1, sum(v1) + 1, k1 + 1 as v from db1.non_part group by k2, k1"
+                    "select sum(v2) + 4, k2 + 2, sum(v1) + 3, k1 + 1 as v from db1.non_part group by k2, k1"
             );
             Assertions.assertEquals(digest1, digest2);
         } finally {

@@ -926,30 +926,23 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     }
 
     protected void normalizeProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
-        List<SlotDescriptor> outputSlots =
-                getOutputTupleIds()
-                .stream()
-                .flatMap(tupleId -> normalizer.getDescriptorTable().getTupleDesc(tupleId).getSlots().stream())
-                .collect(Collectors.toList());
+        throw new IllegalStateException("Unsupported normalize project for " + getClass().getSimpleName());
+    }
 
+    public List<TExpr> normalizeProjects(
+            List<SlotDescriptor> outputSlotDescs, List<Expr> projects, Normalizer normalizer) {
         Map<SlotId, Expr> outputSlotToProject = Maps.newLinkedHashMap();
-        for (int i = 0; i < outputSlots.size(); i++) {
-            if (projectList == null) {
-                SlotRef slotRef = new SlotRef(outputSlots.get(i));
-                outputSlotToProject.put(outputSlots.get(i).getId(), slotRef);
-            } else {
-                Expr projectExpr = projectList.get(i);
-                if (projectExpr instanceof SlotRef) {
-                    int outputId = outputSlots.get(i).getId().asInt();
-                    int refId = ((SlotRef) projectExpr).getSlotId().asInt();
-                    normalizer.setSlotIdToNormalizeId(outputId, normalizer.normalizeSlotId(refId));
-                }
-                outputSlotToProject.put(outputSlots.get(i).getId(), projectExpr);
+        for (int i = 0; i < outputSlotDescs.size(); i++) {
+            SlotId slotId = outputSlotDescs.get(i).getId();
+            Expr projectExpr = projects.get(i);
+            if (projectExpr instanceof SlotRef) {
+                int outputSlotId = slotId.asInt();
+                int refId = ((SlotRef) projectExpr).getSlotId().asInt();
+                normalizer.setSlotIdToNormalizeId(outputSlotId, normalizer.normalizeSlotId(refId));
             }
+            outputSlotToProject.put(slotId, projectExpr);
         }
-
-        List<TExpr> sortNormalizeProject = normalizeProjects(outputSlotToProject, normalizer);
-        normalizedPlanNode.setProjects(sortNormalizeProject);
+        return normalizeProjects(outputSlotToProject, normalizer);
     }
 
     protected void normalizeConjuncts(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {

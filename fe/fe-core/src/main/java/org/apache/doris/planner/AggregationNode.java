@@ -47,7 +47,6 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -55,7 +54,6 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -331,29 +329,31 @@ public class AggregationNode extends PlanNode {
 
     @Override
     protected void normalizeProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
-        List<SlotDescriptor> outputSlots =
-                getOutputTupleIds()
-                        .stream()
-                        .flatMap(tupleId -> normalizer.getDescriptorTable().getTupleDesc(tupleId).getSlots().stream())
-                        .collect(Collectors.toList());
-        List<Expr> projectToOutput = ImmutableList.<Expr>builder()
+        normalizeIntermediateProjects(normalizedPlanNode, normalizer);
+        normalizeOutputProjects(normalizedPlanNode, normalizer);
+    }
+
+    private void normalizeIntermediateProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
+        List<Expr> projectToIntermediateTuple = ImmutableList.<Expr>builder()
                 .addAll(aggInfo.getGroupingExprs())
                 .addAll(aggInfo.getAggregateExprs())
                 .build();
 
-        Map<SlotId, Expr> outputSlotToProject = Maps.newLinkedHashMap();
-        for (int i = 0; i < outputSlots.size(); i++) {
-            Expr projectExpr = projectToOutput.get(i);
-            if (projectExpr instanceof SlotRef) {
-                int outputId = outputSlots.get(i).getId().asInt();
-                int refId = ((SlotRef) projectExpr).getSlotId().asInt();
-                normalizer.setSlotIdToNormalizeId(outputId, normalizer.normalizeSlotId(refId));
-            }
-            outputSlotToProject.put(outputSlots.get(i).getId(), projectExpr);
+        List<SlotDescriptor> intermediateSlots = aggInfo.getIntermediateTupleDesc().getSlots();
+        normalizeProjects(intermediateSlots, projectToIntermediateTuple, normalizer);
+    }
+    private void normalizeOutputProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
+        List<Expr> projectToOutputTuple = this.projectList;
+        if (projectToOutputTuple == null) {
+            projectToOutputTuple = this.aggInfo.getIntermediateTupleDesc()
+                    .getSlots()
+                    .stream()
+                    .map(desc -> new SlotRef(desc))
+                    .collect(Collectors.toList());
         }
-
-        List<TExpr> sortNormalizeProject = normalizeProjects(outputSlotToProject, normalizer);
-        normalizedPlanNode.setProjects(sortNormalizeProject);
+        List<SlotDescriptor> outputSlots = aggInfo.getOutputTupleDesc().getSlots();
+        List<TExpr> normalizedProjects = normalizeProjects(outputSlots, projectToOutputTuple, normalizer);
+        normalizedPlanNode.setProjects(normalizedProjects);
     }
 
     protected String getDisplayLabelDetail() {
