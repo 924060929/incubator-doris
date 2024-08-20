@@ -53,15 +53,10 @@ import com.google.common.collect.ImmutableList;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.springframework.util.CollectionUtils;
 
-import java.util.Map;
 import java.util.Optional;
 
 /**LogicalPlanBuilderForCreateView*/
 public class LogicalPlanBuilderForCreateView extends LogicalPlanBuilder {
-    public LogicalPlanBuilderForCreateView(Map<Integer, ParserRuleContext> selectHintMap) {
-        super(selectHintMap);
-    }
-
     @Override
     protected LogicalPlan withGenerate(LogicalPlan plan, LateralViewContext ctx) {
         ConnectContext.get().getStatementContext().addIndexInSqlToString(

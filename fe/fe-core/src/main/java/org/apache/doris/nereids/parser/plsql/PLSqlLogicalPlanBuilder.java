@@ -36,10 +36,6 @@ import java.util.List;
  */
 public class PLSqlLogicalPlanBuilder extends LogicalPlanBuilder {
 
-    public PLSqlLogicalPlanBuilder() {
-        super(null);
-    }
-
     public List<String> visitMultipartIdentifier(MultipartIdentifierContext ctx) {
         return ctx.parts.stream()
                 .map(RuleContext::getText)
