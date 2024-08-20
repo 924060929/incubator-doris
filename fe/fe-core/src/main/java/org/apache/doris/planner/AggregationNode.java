@@ -323,38 +323,54 @@ public class AggregationNode extends PlanNode {
         normalizedAggregateNode.setIsFinalize(needsFinalize);
         normalizedAggregateNode.setUseStreamingPreaggregation(useStreamingPreagg);
 
+        normalizeAggIntermediateProjects(normalizedAggregateNode, normalizer);
+        normalizeAggOutputProjects(normalizedAggregateNode, normalizer);
+
         normalizedPlan.setNodeType(TPlanNodeType.AGGREGATION_NODE);
         normalizedPlan.setAggregationNode(normalizedAggregateNode);
     }
 
     @Override
     protected void normalizeProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
-        normalizeIntermediateProjects(normalizedPlanNode, normalizer);
-        normalizeOutputProjects(normalizedPlanNode, normalizer);
+        List<SlotDescriptor> outputSlots =
+                getOutputTupleIds()
+                        .stream()
+                        .flatMap(tupleId -> normalizer.getDescriptorTable().getTupleDesc(tupleId).getSlots().stream())
+                        .collect(Collectors.toList());
+
+        List<Expr> projectList = this.projectList;
+        if (projectList == null) {
+            projectList = this.aggInfo.getOutputTupleDesc()
+                    .getSlots()
+                    .stream()
+                    .map(SlotRef::new)
+                    .collect(Collectors.toList());
+        }
+
+        List<TExpr> projectThrift = normalizeProjects(outputSlots, projectList, normalizer);
+        normalizedPlanNode.setProjects(projectThrift);
     }
 
-    private void normalizeIntermediateProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
+    private void normalizeAggIntermediateProjects(TNormalizedAggregateNode aggregateNode, Normalizer normalizer) {
         List<Expr> projectToIntermediateTuple = ImmutableList.<Expr>builder()
                 .addAll(aggInfo.getGroupingExprs())
                 .addAll(aggInfo.getAggregateExprs())
                 .build();
 
         List<SlotDescriptor> intermediateSlots = aggInfo.getIntermediateTupleDesc().getSlots();
-        normalizeProjects(intermediateSlots, projectToIntermediateTuple, normalizer);
+        List<TExpr> projects = normalizeProjects(intermediateSlots, projectToIntermediateTuple, normalizer);
+        aggregateNode.setProjectToAggIntermediateTuple(projects);
     }
 
-    private void normalizeOutputProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
-        List<Expr> projectToOutputTuple = this.projectList;
-        if (projectToOutputTuple == null) {
-            projectToOutputTuple = this.aggInfo.getIntermediateTupleDesc()
-                    .getSlots()
-                    .stream()
-                    .map(SlotRef::new)
-                    .collect(Collectors.toList());
-        }
-        List<SlotDescriptor> outputSlots = aggInfo.getOutputTupleDesc().getSlots();
-        List<TExpr> normalizedProjects = normalizeProjects(outputSlots, projectToOutputTuple, normalizer);
-        normalizedPlanNode.setProjects(normalizedProjects);
+    private void normalizeAggOutputProjects(TNormalizedAggregateNode aggregateNode, Normalizer normalizer) {
+        List<Expr> projectToIntermediateTuple = ImmutableList.<Expr>builder()
+                .addAll(aggInfo.getGroupingExprs())
+                .addAll(aggInfo.getAggregateExprs())
+                .build();
+
+        List<SlotDescriptor> intermediateSlots = aggInfo.getOutputTupleDesc().getSlots();
+        List<TExpr> projects = normalizeProjects(intermediateSlots, projectToIntermediateTuple, normalizer);
+        aggregateNode.setProjectToAggOutputTuple(projects);
     }
 
     protected String getDisplayLabelDetail() {

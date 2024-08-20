@@ -960,8 +960,8 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         sortByTExpr.sort(Comparator.comparing(Pair::value));
 
         // we should normalize slot id by fix order, then the upper nodes can reference the same normalized slot id
-        for (Pair<SlotId, TExpr> triple : sortByTExpr) {
-            int originOutputSlotId = triple.first.asInt();
+        for (Pair<SlotId, TExpr> pair : sortByTExpr) {
+            int originOutputSlotId = pair.first.asInt();
             normalizer.normalizeSlotId(originOutputSlotId);
         }
 

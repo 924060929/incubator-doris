@@ -113,7 +113,7 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
     @Test
     public void testNormalize() throws Exception {
         String digest1 = getDigest("select k1 as k, sum(v1) as v from db1.non_part group by 1");
-        String digest2 = getDigest("select sum(v1) as v1, k1 as k1 from db1.non_part group by 2");
+        String digest2 = getDigest("select sum(v1) as v1, k1 as k from db1.non_part group by 2");
         Assertions.assertEquals(digest1, digest2);
 
         String digest3 = getDigest("select k1 as k, sum(v1) as v from db1.non_part where v1 between 1 and 10 group by 1");

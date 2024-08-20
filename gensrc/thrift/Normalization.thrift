@@ -42,6 +42,8 @@ struct TNormalizedAggregateNode {
   4: optional Types.TTupleId output_tuple_id
   5: optional bool is_finalize
   6: optional bool use_streaming_preaggregation
+  7: optional list<Exprs.TExpr> projectToAggIntermediateTuple
+  8: optional list<Exprs.TExpr> projectToAggOutputTuple
 }
 
 struct TNormalizedPlanNode {
