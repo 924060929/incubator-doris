@@ -56,10 +56,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.tuple.Triple;
-import org.apache.thrift.TSerializer;
-import org.apache.thrift.protocol.TCompactProtocol.Factory;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -67,6 +64,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -928,49 +926,37 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         normalizedPlan.setConjuncts(normalizeExprs(getConjuncts(), normalizer));
     }
 
-    protected List<TExpr> sortNormalizeProjection(Map<SlotId, Expr> project, Normalizer normalizer) {
-        List<Triple<SlotId, Expr, ByteBuffer>> sortBySerializedExpr = project.entrySet()
-                .stream()
-                .map(kv -> {
-                    try {
-                        TSerializer serializer = new TSerializer(new Factory());
-                        TExpr thriftExpr = kv.getValue().normalize(normalizer);
-                        return Triple.of(kv.getKey(), kv.getValue(), ByteBuffer.wrap(serializer.serialize(thriftExpr)));
-                    } catch (Throwable t) {
-                        throw new IllegalStateException();
-                    }
-                })
-                .sorted(Comparator.comparing(Triple::getRight))
-                .collect(Collectors.toList());
+    protected List<TExpr> normalizeProjection(Map<SlotId, Expr> project, Normalizer normalizer) {
+        List<Triple<SlotId, Expr, TExpr>> sortByTExpr = Lists.newArrayListWithCapacity(project.size());
+        for (Entry<SlotId, Expr> kv : project.entrySet()) {
+            SlotId slotId = kv.getKey();
+            Expr expr = kv.getValue();
+            TExpr thriftExpr = expr.normalize(normalizer);
+            sortByTExpr.add(Triple.of(slotId, expr, thriftExpr));
+        }
+        sortByTExpr.sort(Comparator.naturalOrder());
 
-        for (Triple<SlotId, Expr, ByteBuffer> triple : sortBySerializedExpr) {
+        // we should normalize slot id by fix order, then the upper nodes can reference the same normalized slot id
+        for (Triple<SlotId, Expr, TExpr> triple : sortByTExpr) {
             int originOutputSlotId = triple.getLeft().asInt();
             normalizer.normalizeSlotId(originOutputSlotId);
         }
 
-        List<Expr> sortedProject = sortBySerializedExpr.stream()
-                .map(Triple::getMiddle)
-                .collect(Collectors.toList());
+        List<Expr> sortedProject = Lists.newArrayListWithCapacity(sortByTExpr.size());
+        for (Triple<SlotId, Expr, TExpr> triple : sortByTExpr) {
+            sortedProject.add(triple.getMiddle());
+        }
+
         return normalizeExprs(sortedProject, normalizer);
     }
 
     public static List<TExpr> normalizeExprs(Collection<? extends Expr> exprs, Normalizer normalizer) {
-        return exprs.stream()
-                .map(expr -> normalizeExpr(expr, normalizer))
-                .sorted()
-                .collect(Collectors.toList());
-    }
-
-    public static TExpr normalizeExpr(Expr expr, Normalizer normalizer) {
-        return expr.normalize(normalizer);
-        // try {
-        //     TSerializer serializer = new TSerializer(new TSimpleJSONProtocol.Factory());
-        //     return ByteBuffer.wrap(serializer.serialize(
-        //             expr.normalize(normalizer)
-        //     ));
-        // } catch (Exception exception) {
-        //     throw new IllegalStateException("Normalize expression failed: " + exception.getMessage(), exception);
-        // }
+        List<TExpr> normalizedWithoutSort = Lists.newArrayListWithCapacity(exprs.size());
+        for (Expr expr : exprs) {
+            normalizedWithoutSort.add(expr.normalize(normalizer));
+        }
+        normalizedWithoutSort.sort(Comparator.naturalOrder());
+        return normalizedWithoutSort;
     }
 
     protected String debugString() {

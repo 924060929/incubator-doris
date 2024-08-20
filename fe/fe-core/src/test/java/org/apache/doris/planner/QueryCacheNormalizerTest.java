@@ -18,8 +18,6 @@
 package org.apache.doris.planner;
 
 import org.apache.doris.analysis.DescriptorTable;
-import org.apache.doris.nereids.datasets.clickbench.ClickBenchUtils;
-import org.apache.doris.nereids.datasets.ssb.SSBUtils;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.planner.normalize.QueryCacheNormalizer;
 import org.apache.doris.thrift.TNormalizedPlanNode;
@@ -45,9 +43,6 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
         createDatabase("db1");
 
         useDatabase("db1");
-
-        ClickBenchUtils.createTables(this);
-        SSBUtils.createTables(this);
 
         // Create tables.
         String nonPart = "create table db1.non_part("

@@ -1638,7 +1638,7 @@ public class OlapScanNode extends ScanNode {
             }
         }
 
-        List<TExpr> sortNormalizeProject = sortNormalizeProjection(outputSlotToProject, normalizer);
+        List<TExpr> sortNormalizeProject = normalizeProjection(outputSlotToProject, normalizer);
         normalizedOlapScanNode.setProjection(sortNormalizeProject);
     }
 
