@@ -32,17 +32,14 @@ import org.apache.doris.catalog.PartitionKey;
 import org.apache.doris.catalog.PartitionType;
 import org.apache.doris.catalog.RangePartitionInfo;
 import org.apache.doris.common.Pair;
-import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.OlapScanNode;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -88,11 +85,6 @@ public class PartitionRangePredicateNormalizer {
 
     private NormalizedPartitionPredicates normalizeSingleRangePartitionColumnPredicates(
             Column partitionColumn, RangePartitionInfo rangePartitionInfo) {
-        List<Long> selectedPartitionIds = Utils.fastToImmutableList(olapScanNode.getSelectedPartitionIds());
-        if (selectedPartitionIds.isEmpty()) {
-            selectedPartitionIds = olapScanNode.getOlapTable().getPartitionIds();
-        }
-
         // ConnectContext context = ConnectContext.get();
         // if (context != null && context.getSessionVariable().getQueryCacheHotPartitionNum() > 0) {
         //     int excludeHostPartitionIndex = Math.max(0,
@@ -101,7 +93,7 @@ public class PartitionRangePredicateNormalizer {
         // }
 
         List<Pair<Long, RangeSet<PartitionKey>>> partitionItemRanges
-                = rangePartitionInfo.getPartitionItems(selectedPartitionIds)
+                = rangePartitionInfo.getPartitionItems(olapScanNode.getSelectedPartitionIds())
                 .entrySet()
                 .stream()
                 .map(entry -> {
@@ -163,21 +155,11 @@ public class PartitionRangePredicateNormalizer {
     }
 
     private NormalizedPartitionPredicates cannotIntersectPartitionRange() {
-        Collection<Long> selectedPartitionIds = olapScanNode.getSelectedPartitionIds();
-
-        if (selectedPartitionIds.isEmpty()) {
-            if (!olapScanNode.getOlapTable().isPartitionedTable()) {
-                selectedPartitionIds = ImmutableList.of(olapScanNode.getOlapTable().getBaseIndex().getId());
-            } else {
-                selectedPartitionIds = olapScanNode.getOlapTable().getPartitionIds();
-            }
-        }
-
         return new NormalizedPartitionPredicates(
                 // conjuncts will be used as the part of the digest
                 olapScanNode.getConjuncts(),
                 // can not compute intersect range
-                ImmutableMap.of(selectedPartitionIds.iterator().next(), "")
+                ImmutableMap.of(olapScanNode.getSelectedPartitionIds().iterator().next(), "")
         );
     }
 
