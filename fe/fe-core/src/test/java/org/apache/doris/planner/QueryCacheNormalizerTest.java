@@ -124,10 +124,6 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
 
         String digest5 = getDigest("select k1 as k, sum(v1) as v from db1.non_part where v1 >= 1 and v1 < 11 group by 1");
         Assertions.assertNotEquals(digest3, digest5);
-
-        // normalize("select k1 as k, sum(v1) as v from db1.non_part group by 1");
-        // normalize("select k1 as k, sum(v1) as v from db1.part1 where dt between '2024-04-20' and '2024-05-10' group by 1");
-        // normalize("select count(k), count(v) from (select k1 as k, sum(v1) as v from db1.non_part group by 1)a");
     }
 
     @Test
