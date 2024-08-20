@@ -18,9 +18,7 @@
 package org.apache.doris.planner;
 
 import org.apache.doris.analysis.DescriptorTable;
-import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.planner.normalize.QueryCacheNormalizer;
-import org.apache.doris.thrift.TNormalizedPlanNode;
 import org.apache.doris.thrift.TQueryCacheParam;
 import org.apache.doris.thrift.TRuntimeFilterMode;
 import org.apache.doris.thrift.TRuntimeFilterType;
@@ -108,7 +106,7 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
         createTables(nonPart, part1, part2, multiLeveParts);
 
         connectContext.getSessionVariable().setEnableNereidsPlanner(true);
-        connectContext.getSessionVariable().setDisableNereidsRules(RuleType.PRUNE_EMPTY_PARTITION.toString());
+        connectContext.getSessionVariable().setDisableNereidsRules("PRUNE_EMPTY_PARTITION");
     }
 
     @Test
@@ -132,7 +130,7 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
     }
 
     @Test
-    public void testProject() throws Exception {
+    public void testProjectOnOlapScan() throws Exception {
         String digest1 = getDigest("select k1 + 1, k2, sum(v1), sum(v2) as v from db1.non_part group by 1, 2");
         String digest2 = getDigest("select sum(v2), k2, sum(v1), k1 + 1 from db1.non_part group by 2, 4");
         Assertions.assertEquals(digest1, digest2);
@@ -140,6 +138,17 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
         String digest3 = getDigest("select k1 + 1, k2, sum(v1 + 1), sum(v2) as v from db1.non_part group by 1, 2");
         Assertions.assertNotEquals(digest1, digest3);
     }
+
+    @Test
+    public void testProjectOnAggregate() throws Exception {
+        connectContext.getSessionVariable()
+                .setDisableNereidsRules("PRUNE_EMPTY_PARTITION,TWO_PHASE_AGGREGATE_WITHOUT_DISTINCT");
+        String digest1 = getDigest("select k1 + 1, k2 + 1, sum(v1) + 1, sum(v2) + 1 as v from db1.non_part group by k1, k2");
+        String digest2 = getDigest("select sum(v2) + 1, k2 + 1, sum(v1) + 1, k1 + 1 as v from db1.non_part group by k1, k2");
+        Assertions.assertEquals(digest1, digest2);
+    }
+
+
 
     @Test
     public void testPartitionTable() throws Throwable {
@@ -201,21 +210,6 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
         return queryCaches.get(0);
     }
 
-    private void assertDigestEquals(String sql1, String sql2) throws Exception {
-        List<TQueryCacheParam> queryCache1 = normalize(sql1);
-        List<TQueryCacheParam> queryCache2 = normalize(sql2);
-
-        Assertions.assertEquals(queryCache1.size(), queryCache2.size());
-
-        for (int i = 0; i < queryCache1.size(); i++) {
-            TQueryCacheParam cacheParam1 = queryCache1.get(i);
-            TQueryCacheParam cacheParam2 = queryCache2.get(i);
-            String digest1 = Hex.encodeHexString(cacheParam1.digest);
-            String digest2 = Hex.encodeHexString(cacheParam2.digest);
-            Assertions.assertEquals(digest1, digest2);
-        }
-    }
-
     private List<TQueryCacheParam> normalize(String sql) throws Exception {
         Planner planner = getSqlStmtExecutor(sql).planner();
         DescriptorTable descTable = planner.getDescTable();
@@ -229,17 +223,5 @@ public class QueryCacheNormalizerTest extends TestWithFeService {
             }
         }
         return queryCacheParams;
-    }
-
-    private List<TNormalizedPlanNode> normalizePlans(String sql) throws Exception {
-        Planner planner = getSqlStmtExecutor(sql).planner();
-        DescriptorTable descTable = planner.getDescTable();
-        List<PlanFragment> fragments = planner.getFragments();
-        List<TNormalizedPlanNode> normalizedPlans = new ArrayList<>();
-        for (PlanFragment fragment : fragments) {
-            QueryCacheNormalizer normalizer = new QueryCacheNormalizer(fragment, descTable);
-            normalizedPlans.addAll(normalizer.normalizePlans(connectContext));
-        }
-        return normalizedPlans;
     }
 }

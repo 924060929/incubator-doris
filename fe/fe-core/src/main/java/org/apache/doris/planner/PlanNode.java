@@ -27,6 +27,7 @@ import org.apache.doris.analysis.Expr;
 import org.apache.doris.analysis.ExprId;
 import org.apache.doris.analysis.ExprSubstitutionMap;
 import org.apache.doris.analysis.FunctionCallExpr;
+import org.apache.doris.analysis.SlotDescriptor;
 import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.TupleDescriptor;
@@ -53,6 +54,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.tuple.Triple;
@@ -913,13 +915,39 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
                     .collect(Collectors.toSet())
         );
         normalizedPlan.setLimit(limit);
-
         normalize(normalizedPlan, normalizer);
+        normalizeProjection(normalizedPlan, normalizer);
         return normalizedPlan;
     }
 
     public void normalize(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
         throw new IllegalStateException("Unsupported normalization");
+    }
+
+    protected void normalizeProjection(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
+        List<SlotDescriptor> outputSlots = normalizer
+                .getDescriptorTable()
+                .getTupleDesc(getOutputTupleIds().get(0))
+                .getSlots();
+
+        Map<SlotId, Expr> outputSlotToProject = Maps.newLinkedHashMap();
+        for (int i = 0; i < outputSlots.size(); i++) {
+            if (projectList == null) {
+                SlotRef slotRef = new SlotRef(outputSlots.get(i));
+                outputSlotToProject.put(outputSlots.get(i).getId(), slotRef);
+            } else {
+                Expr projectExpr = projectList.get(i);
+                if (projectExpr instanceof SlotRef) {
+                    int outputId = outputSlots.get(i).getId().asInt();
+                    int refId = ((SlotRef) projectExpr).getSlotId().asInt();
+                    normalizer.setSlotIdToNormalizeId(outputId, normalizer.normalizeSlotId(refId));
+                }
+                outputSlotToProject.put(outputSlots.get(i).getId(), projectExpr);
+            }
+        }
+
+        List<TExpr> sortNormalizeProject = normalizeProjection(outputSlotToProject, normalizer);
+        normalizedPlanNode.setProjects(sortNormalizeProject);
     }
 
     protected void normalizeConjuncts(TNormalizedPlanNode normalizedPlan, Normalizer normalizer) {
