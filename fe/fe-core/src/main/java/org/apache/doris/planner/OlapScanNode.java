@@ -771,15 +771,20 @@ public class OlapScanNode extends ScanNode {
         int useFixReplica = -1;
         boolean needCheckTags = false;
         boolean skipMissingVersion = false;
-        if (ConnectContext.get() != null) {
-            allowedTags = ConnectContext.get().getResourceTags();
-            needCheckTags = ConnectContext.get().isResourceTagsSet();
-            useFixReplica = ConnectContext.get().getSessionVariable().useFixReplica;
+        ConnectContext context = ConnectContext.get();
+        if (context != null) {
+            allowedTags = context.getResourceTags();
+            needCheckTags = context.isResourceTagsSet();
+            useFixReplica = context.getSessionVariable().useFixReplica;
+            if (useFixReplica == -1
+                    && context.getState().isNereids() && context.getSessionVariable().getEnableQueryCache()) {
+                useFixReplica = 0;
+            }
             // if use_fix_replica is set to true, set skip_missing_version to false
-            skipMissingVersion = useFixReplica == -1 && ConnectContext.get().getSessionVariable().skipMissingVersion;
+            skipMissingVersion = useFixReplica == -1 && context.getSessionVariable().skipMissingVersion;
             if (LOG.isDebugEnabled()) {
                 LOG.debug("query id: {}, partition id:{} visibleVersion: {}",
-                        DebugUtil.printId(ConnectContext.get().queryId()), partition.getId(), visibleVersion);
+                        DebugUtil.printId(context.queryId()), partition.getId(), visibleVersion);
             }
         }
         for (Tablet tablet : tablets) {
@@ -812,7 +817,7 @@ public class OlapScanNode extends ScanNode {
             // for details.
             List<Replica> replicas = tablet.getQueryableReplicas(visibleVersion, skipMissingVersion);
             if (replicas.isEmpty()) {
-                if (ConnectContext.get().getSessionVariable().skipBadTablet) {
+                if (context.getSessionVariable().skipBadTablet) {
                     continue;
                 }
                 LOG.warn("no queryable replica found in tablet {}. visible version {}", tabletId, visibleVersion);
@@ -841,7 +846,7 @@ public class OlapScanNode extends ScanNode {
                 // sort by replica id
                 replicas.sort(Replica.ID_COMPARATOR);
                 Replica replica = replicas.get(useFixReplica >= replicas.size() ? replicas.size() - 1 : useFixReplica);
-                if (ConnectContext.get().getSessionVariable().fallbackOtherReplicaWhenFixedCorrupt) {
+                if (context.getSessionVariable().fallbackOtherReplicaWhenFixedCorrupt) {
                     Backend backend = Env.getCurrentSystemInfo().getBackend(replica.getBackendId());
                     // If the fixed replica is bad, then not clear the replicas using random replica
                     if (backend == null || !backend.isAlive()) {

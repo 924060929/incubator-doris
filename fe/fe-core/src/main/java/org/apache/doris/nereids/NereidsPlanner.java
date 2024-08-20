@@ -65,9 +65,11 @@ import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.RuntimeFilter;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.planner.normalize.QueryCacheNormalizer;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ResultSet;
 import org.apache.doris.qe.SessionVariable;
+import org.apache.doris.thrift.TQueryCacheParam;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
@@ -343,10 +345,11 @@ public class NereidsPlanner extends Planner {
         if (statementContext.getConnectContext().getExecutor() != null) {
             statementContext.getConnectContext().getExecutor().getSummaryProfile().setNereidsTranslateTime();
         }
-        if (cascadesContext.getConnectContext().getSessionVariable().isEnableNereidsTrace()) {
+        SessionVariable sessionVariable = cascadesContext.getConnectContext().getSessionVariable();
+        if (sessionVariable.isEnableNereidsTrace()) {
             CounterEvent.clearCounter();
         }
-        if (cascadesContext.getConnectContext().getSessionVariable().isPlayNereidsDump()) {
+        if (sessionVariable.isPlayNereidsDump()) {
             return;
         }
         PlanFragment root = physicalPlanTranslator.translatePlan(physicalPlan);
@@ -355,8 +358,21 @@ public class NereidsPlanner extends Planner {
         physicalRelations.addAll(planTranslatorContext.getPhysicalRelations());
         descTable = planTranslatorContext.getDescTable();
         fragments = new ArrayList<>(planTranslatorContext.getPlanFragments());
+
+        boolean enableQueryCache = sessionVariable.getEnableQueryCache();
         for (int seq = 0; seq < fragments.size(); seq++) {
-            fragments.get(seq).setFragmentSequenceNum(seq);
+            PlanFragment fragment = fragments.get(seq);
+            fragment.setFragmentSequenceNum(seq);
+            if (enableQueryCache) {
+                try {
+                    QueryCacheNormalizer normalizer = new QueryCacheNormalizer(fragment, descTable);
+                    Optional<TQueryCacheParam> queryCacheParam =
+                            normalizer.normalize(cascadesContext.getConnectContext());
+                    queryCacheParam.ifPresent(tQueryCacheParam -> fragment.queryCacheParam = tQueryCacheParam);
+                } catch (Throwable t) {
+                    // do nothing
+                }
+            }
         }
         // set output exprs
         logicalPlanAdapter.setResultExprs(root.getOutputExprs());

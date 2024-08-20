@@ -1931,6 +1931,9 @@ public class Coordinator implements CoordInterface {
                             if (node.get().shouldUseOneInstance(context)) {
                                 expectedInstanceNum = 1;
                             }
+                            if (fragment.queryCacheParam != null) {
+                                expectedInstanceNum = perNodeScanRanges.size();
+                            }
 
                             perInstanceScanRanges = ListUtil.splitBySize(perNodeScanRanges,
                                     expectedInstanceNum);
@@ -3105,6 +3108,7 @@ public class Coordinator implements CoordInterface {
             Map<TNetworkAddress, TPipelineFragmentParams> res = new HashMap();
             Map<TNetworkAddress, Integer> instanceIdx = new HashMap();
             TPlanFragment fragmentThrift = fragment.toThrift();
+            fragmentThrift.query_cache_param = fragment.queryCacheParam;
             for (int i = 0; i < instanceExecParams.size(); ++i) {
                 final FInstanceExecParam instanceExecParam = instanceExecParams.get(i);
                 Map<Integer, List<TScanRangeParams>> scanRanges = instanceExecParam.perNodeScanRanges;

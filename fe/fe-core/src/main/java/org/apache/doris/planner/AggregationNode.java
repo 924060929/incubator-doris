@@ -342,13 +342,14 @@ public class AggregationNode extends PlanNode {
         List<SlotDescriptor> intermediateSlots = aggInfo.getIntermediateTupleDesc().getSlots();
         normalizeProjects(intermediateSlots, projectToIntermediateTuple, normalizer);
     }
+
     private void normalizeOutputProjects(TNormalizedPlanNode normalizedPlanNode, Normalizer normalizer) {
         List<Expr> projectToOutputTuple = this.projectList;
         if (projectToOutputTuple == null) {
             projectToOutputTuple = this.aggInfo.getIntermediateTupleDesc()
                     .getSlots()
                     .stream()
-                    .map(desc -> new SlotRef(desc))
+                    .map(SlotRef::new)
                     .collect(Collectors.toList());
         }
         List<SlotDescriptor> outputSlots = aggInfo.getOutputTupleDesc().getSlots();
