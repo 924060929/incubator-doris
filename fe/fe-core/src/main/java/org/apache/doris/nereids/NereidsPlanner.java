@@ -86,6 +86,13 @@ import java.util.function.Function;
  */
 public class NereidsPlanner extends Planner {
     public static final Logger LOG = LogManager.getLogger(NereidsPlanner.class);
+
+    protected Plan parsedPlan;
+    protected Plan analyzedPlan;
+    protected Plan rewrittenPlan;
+    protected Plan optimizedPlan;
+    protected PhysicalPlan physicalPlan;
+
     private CascadesContext cascadesContext;
     private final StatementContext statementContext;
     private final List<ScanNode> scanNodeList = Lists.newArrayList();
@@ -96,12 +103,6 @@ public class NereidsPlanner extends Planner {
     // The cost of optimized plan
     private double cost = 0;
     private LogicalPlanAdapter logicalPlanAdapter;
-
-    protected Plan parsedPlan;
-    protected Plan analyzedPlan;
-    protected Plan rewrittenPlan;
-    protected Plan optimizedPlan;
-    protected PhysicalPlan physicalPlan;
 
     public NereidsPlanner(StatementContext statementContext) {
         this.statementContext = statementContext;
