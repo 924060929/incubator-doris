@@ -30,15 +30,18 @@ import org.apache.doris.datasource.iceberg.IcebergExternalTable;
 import org.apache.doris.datasource.jdbc.JdbcExternalTable;
 import org.apache.doris.load.loadv2.LoadStatistic;
 import org.apache.doris.mysql.privilege.PrivPredicate;
+import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.analyzer.UnboundTableSink;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
+import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.plans.Explainable;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
+import org.apache.doris.nereids.trees.plans.algebra.InlineTable;
 import org.apache.doris.nereids.trees.plans.commands.Command;
 import org.apache.doris.nereids.trees.plans.commands.ForwardWithSync;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
@@ -83,7 +86,9 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
 
     public static final Logger LOG = LogManager.getLogger(InsertIntoTableCommand.class);
 
-    private LogicalPlan logicalQuery;
+    private LogicalPlan originLogicalQuery;
+    private Optional<LogicalPlan> logicalQuery;
+    private Optional<CascadesContext> analyzeContext;
     private Optional<String> labelName;
     /**
      * When source it's from job scheduler,it will be set.
@@ -98,14 +103,16 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     public InsertIntoTableCommand(LogicalPlan logicalQuery, Optional<String> labelName,
                                   Optional<InsertCommandContext> insertCtx, Optional<LogicalPlan> cte) {
         super(PlanType.INSERT_INTO_TABLE_COMMAND);
-        this.logicalQuery = Objects.requireNonNull(logicalQuery, "logicalQuery should not be null");
+        this.originLogicalQuery = Objects.requireNonNull(logicalQuery, "logicalQuery should not be null");
         this.labelName = Objects.requireNonNull(labelName, "labelName should not be null");
+        this.logicalQuery = Optional.empty();
+        this.analyzeContext = Optional.empty();
         this.insertCtx = insertCtx;
         this.cte = cte;
     }
 
     public LogicalPlan getLogicalQuery() {
-        return logicalQuery;
+        return logicalQuery.orElse(originLogicalQuery);
     }
 
     public Optional<String> getLabelName() {
@@ -145,7 +152,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
      */
     public AbstractInsertExecutor initPlan(ConnectContext ctx, StmtExecutor stmtExecutor,
                                            boolean needBeginTransaction) throws Exception {
-        TableIf targetTableIf = InsertUtils.getTargetTable(logicalQuery, ctx);
+        TableIf targetTableIf = InsertUtils.getTargetTable(originLogicalQuery, ctx);
         // check auth
         if (!Env.getCurrentEnv().getAccessManager()
                 .checkTblPriv(ConnectContext.get(), targetTableIf.getDatabase().getCatalog().getName(),
@@ -160,12 +167,19 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         // should lock target table until we begin transaction.
         targetTableIf.readLock();
         try {
+            this.analyzeContext = Optional.of(
+                    CascadesContext.initContext(ctx.getStatementContext(), originLogicalQuery, PhysicalProperties.ANY)
+            );
+
             // 1. process inline table (default values, empty values)
-            this.logicalQuery = (LogicalPlan) InsertUtils.normalizePlan(logicalQuery, targetTableIf, insertCtx);
+            this.logicalQuery = Optional.of((LogicalPlan) InsertUtils.normalizePlan(
+                    originLogicalQuery, targetTableIf, analyzeContext, insertCtx
+            ));
             if (cte.isPresent()) {
-                this.logicalQuery = ((LogicalPlan) cte.get().withChildren(logicalQuery));
+                this.logicalQuery = Optional.of((LogicalPlan) cte.get().withChildren(logicalQuery.get()));
             }
-            OlapGroupCommitInsertExecutor.analyzeGroupCommit(ctx, targetTableIf, this.logicalQuery, this.insertCtx);
+            LogicalPlan logicalQuery = this.logicalQuery.get();
+            OlapGroupCommitInsertExecutor.analyzeGroupCommit(ctx, targetTableIf, logicalQuery, this.insertCtx);
             LogicalPlanAdapter logicalPlanAdapter = new LogicalPlanAdapter(logicalQuery, ctx.getStatementContext());
 
             BuildInsertExecutorResult buildResult = planInsertExecutor(
@@ -325,6 +339,9 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     private BuildInsertExecutorResult planInsertExecutor(
             ConnectContext ctx, StmtExecutor stmtExecutor,
             LogicalPlanAdapter logicalPlanAdapter, TableIf targetTableIf) throws Throwable {
+        LogicalPlan logicalPlan = logicalPlanAdapter.getLogicalPlan();
+
+        boolean supportFastInsertIntoValues = supportFastInsertIntoValues(logicalPlan, targetTableIf, ctx);
         // the key logical when use new coordinator:
         // 1. use NereidsPlanner to generate PhysicalPlan
         // 2. use PhysicalPlan to select InsertExecutorFactory, some InsertExecutors want to control
@@ -335,10 +352,9 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         // 3. NereidsPlanner use PhysicalPlan and the provided backend to generate DistributePlan
         // 4. ExecutorFactory use the DistributePlan to generate the NereidsSqlCoordinator and InsertExecutor
 
-        StatementContext statementContext = ctx.getStatementContext();
-
         AtomicReference<ExecutorFactory> executorFactoryRef = new AtomicReference<>();
-        NereidsPlanner planner = new NereidsPlanner(statementContext) {
+        FastInsertIntoValuesPlanner planner = new FastInsertIntoValuesPlanner(
+                ctx.getStatementContext(), supportFastInsertIntoValues) {
             @Override
             protected void doDistribute(boolean canUseNereidsDistributePlanner) {
                 // when enter this method, the step 1 already executed
@@ -369,12 +385,23 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     }
 
     public boolean isExternalTableSink() {
-        return !(logicalQuery instanceof UnboundTableSink);
+        return !(getLogicalQuery() instanceof UnboundTableSink);
     }
 
     @Override
     public Plan getExplainPlan(ConnectContext ctx) {
-        return InsertUtils.getPlanForExplain(ctx, this.logicalQuery);
+        Optional<CascadesContext> analyzeContext = Optional.of(
+                CascadesContext.initContext(ctx.getStatementContext(), originLogicalQuery, PhysicalProperties.ANY)
+        );
+        return InsertUtils.getPlanForExplain(ctx, analyzeContext, getLogicalQuery());
+    }
+
+    @Override
+    public Optional<NereidsPlanner> getExplainPlanner(LogicalPlan logicalPlan, StatementContext ctx) {
+        ConnectContext connectContext = ctx.getConnectContext();
+        TableIf targetTableIf = InsertUtils.getTargetTable(originLogicalQuery, connectContext);
+        boolean supportFastInsertIntoValues = supportFastInsertIntoValues(logicalPlan, targetTableIf, connectContext);
+        return Optional.of(new FastInsertIntoValuesPlanner(ctx, supportFastInsertIntoValues));
     }
 
     @Override
@@ -393,6 +420,12 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     @Override
     public StmtType stmtType() {
         return StmtType.INSERT;
+    }
+
+    public boolean supportFastInsertIntoValues(LogicalPlan logicalPlan, TableIf targetTableIf, ConnectContext ctx) {
+        return logicalPlan instanceof UnboundTableSink && logicalPlan.child(0) instanceof InlineTable
+                && targetTableIf instanceof OlapTable
+                && ctx != null && ctx.getSessionVariable().isEnableFastAnalyzeInsertIntoValues();
     }
 
     /**

@@ -1472,7 +1472,9 @@ rowConstructor
     ;
 
 rowConstructorItem
-    : namedExpression | DEFAULT
+    : constant // duplicate constant rule for improve the parse of `insert into tbl values`
+    | DEFAULT
+    | namedExpression
     ;
 
 predicate
@@ -1674,7 +1676,7 @@ constant
     | LEFT_BRACE (items+=constant COLON items+=constant)?
        (COMMA items+=constant COLON items+=constant)* RIGHT_BRACE                              #mapLiteral
     | LEFT_BRACE items+=constant (COMMA items+=constant)* RIGHT_BRACE                          #structLiteral
-    | PLACEHOLDER						                               #placeholder
+    | PLACEHOLDER                                                                              #placeholder
     ;
 
 comparisonOperator
