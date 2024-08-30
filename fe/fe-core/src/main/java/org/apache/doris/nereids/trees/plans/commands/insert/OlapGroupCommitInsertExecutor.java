@@ -95,7 +95,8 @@ public class OlapGroupCommitInsertExecutor extends OlapInsertExecutor {
                     () -> tableSink.child() instanceof OneRowRelation
                             || tableSink.child() instanceof LogicalUnion
                             || tableSink.child() instanceof LogicalInlineTable,
-                    () -> "not one row relation or union or inline table, class: " + tableSink.child().getClass().getName()));
+                    () -> "not one row relation or union or inline table, class: "
+                            + tableSink.child().getClass().getName()));
             ctx.setGroupCommit(conditions.stream().allMatch(p -> p.first.getAsBoolean()));
             if (!ctx.isGroupCommit() && LOG.isDebugEnabled()) {
                 for (Pair<BooleanSupplier, Supplier<String>> pair : conditions) {

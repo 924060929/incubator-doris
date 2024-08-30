@@ -92,15 +92,16 @@ public class NereidsPlanner extends Planner {
     private final List<PhysicalRelation> physicalRelations = Lists.newArrayList();
     private DescriptorTable descTable;
 
+    private FragmentIdMapping<DistributedPlan> distributedPlans;
+    // The cost of optimized plan
+    private double cost = 0;
+    private LogicalPlanAdapter logicalPlanAdapter;
+
     protected Plan parsedPlan;
     protected Plan analyzedPlan;
     protected Plan rewrittenPlan;
     protected Plan optimizedPlan;
     protected PhysicalPlan physicalPlan;
-    private FragmentIdMapping<DistributedPlan> distributedPlans;
-    // The cost of optimized plan
-    private double cost = 0;
-    private LogicalPlanAdapter logicalPlanAdapter;
 
     public NereidsPlanner(StatementContext statementContext) {
         this.statementContext = statementContext;
