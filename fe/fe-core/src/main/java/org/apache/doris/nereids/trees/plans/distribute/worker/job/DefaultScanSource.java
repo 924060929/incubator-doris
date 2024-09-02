@@ -18,13 +18,10 @@
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
 import org.apache.doris.planner.ScanNode;
-import org.apache.doris.thrift.TPipelineInstanceParams;
-import org.apache.doris.thrift.TScanRangeParams;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Maps;
 
 import java.util.List;
 import java.util.Map;

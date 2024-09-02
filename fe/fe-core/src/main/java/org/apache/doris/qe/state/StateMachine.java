@@ -100,39 +100,38 @@ public class StateMachine<C, E> {
     }
 
     public static void main(String[] args) {
-        Deadline deadline = Deadline.ofFutureMillis(5000000);
+        // Deadline deadline = Deadline.ofFutureMillis(5000000);
 
-        QueryContext context = new QueryContext();
+        // QueryContext context = new QueryContext();
 
-        StateMachine<QueryContext, QueryEvent> stateMachine = new StateMachine<QueryContext, QueryEvent>(context) {
-            @Override
-            public void beforeChange(QueryContext context, QueryEvent event) {
-                if (context.state != QueryState.CANCELED) {
-                    deadline.check(remain -> {
-                        if (remain <= 0) {
-                            triggerEvent(QueryEvent.CANCEL);
-                        }
-                    });
-                }
-            }
-
-            @Override
-            public void eventSwitch(QueryContext context, QueryEvent event) {
-                switch (context.state) {
-                    case INIT:
-                        if (event == QueryEvent.START) {
-
-                        }
-                    case BUILT_RPC_PARAM:
-                    case SERIALIZED_RPC_PARAM:
-                    case SENT_RPC:
-                    case SUCCEED:
-                    case CANCELED:
-                }
-                throw new IllegalStateException("Can not process this state: " + context.state);
-            }
-        };
-
+        // StateMachine<QueryContext, QueryEvent> stateMachine = new StateMachine<QueryContext, QueryEvent>(context) {
+        //     @Override
+        //     public void beforeChange(QueryContext context, QueryEvent event) {
+        //         if (context.state != QueryState.CANCELED) {
+        //             deadline.check(remain -> {
+        //                 if (remain <= 0) {
+        //                     triggerEvent(QueryEvent.CANCEL);
+        //                 }
+        //             });
+        //         }
+        //     }
+        //
+        //     @Override
+        //     public void eventSwitch(QueryContext context, QueryEvent event) {
+        //         switch (context.state) {
+        //             case INIT:
+        //                 if (event == QueryEvent.START) {
+        //
+        //                 }
+        //             case BUILT_RPC_PARAM:
+        //             case SERIALIZED_RPC_PARAM:
+        //             case SENT_RPC:
+        //             case SUCCEED:
+        //             case CANCELED:
+        //         }
+        //         throw new IllegalStateException("Can not process this state: " + context.state);
+        //     }
+        // };
 
         // stateMachine
         //     .whenState(ctx -> ctx.state == QueryState.INIT)
