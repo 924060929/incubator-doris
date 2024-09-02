@@ -97,10 +97,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /** GroupWorkerPipelineThriftProtocol */
@@ -241,66 +239,66 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         //     }
         //     throw new UserException(msg);
         // }
-
-        long timeoutMs = Math.min(leftTimeMs, Config.remote_fragment_exec_timeout_ms);
-        for (Future<PExecPlanFragmentResult> future : futures) {
-            TStatusCode code;
-            String errMsg = null;
-            Exception exception = null;
-
-            try {
-                PExecPlanFragmentResult result = future.get(timeoutMs, TimeUnit.MILLISECONDS);
-                code = TStatusCode.findByValue(result.getStatus().getStatusCode());
-                if (code == null) {
-                    code = TStatusCode.INTERNAL_ERROR;
-                }
-
-                if (code != TStatusCode.OK) {
-                    if (!result.getStatus().getErrorMsgsList().isEmpty()) {
-                        errMsg = result.getStatus().getErrorMsgsList().get(0);
-                    } else {
-                        // errMsg = operation + " failed. backend id: " + triple.getLeft().beId;
-                    }
-                }
-            } catch (ExecutionException e) {
-                exception = e;
-                code = TStatusCode.THRIFT_RPC_ERROR;
-                // triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
-            } catch (InterruptedException e) {
-                exception = e;
-                code = TStatusCode.INTERNAL_ERROR;
-                // triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
-            } catch (TimeoutException e) {
-                exception = e;
-                // errMsg = String.format(
-                //         "timeout when waiting for %s rpc, query timeout:%d, left timeout for this operation:%d",
-                //         operation, queryOptions.getExecutionTimeout(), timeoutMs / 1000);
-                // LOG.warn("Query {} {}", DebugUtil.printId(queryId), errMsg);
-                code = TStatusCode.TIMEOUT;
-                // triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
-            }
-
-            if (code != TStatusCode.OK) {
-                // if (exception != null && errMsg == null) {
-                //     errMsg = operation + " failed. " + exception.getMessage();
-                // }
-                // queryStatus.updateStatus(TStatusCode.INTERNAL_ERROR, errMsg);
-                // cancelInternal(queryStatus);
-                // switch (code) {
-                //     case TIMEOUT:
-                //         MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(triple.getLeft().brpcAddr.hostname)
-                //                 .increase(1L);
-                //         throw new RpcException(triple.getLeft().brpcAddr.hostname, errMsg, exception);
-                //     case THRIFT_RPC_ERROR:
-                //         MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(triple.getLeft().brpcAddr.hostname)
-                //                 .increase(1L);
-                //         SimpleScheduler.addToBlacklist(triple.getLeft().beId, errMsg);
-                //         throw new RpcException(triple.getLeft().brpcAddr.hostname, errMsg, exception);
-                //     default:
-                //         throw new UserException(errMsg, exception);
-                // }
-            }
-        }
+        //
+        // long timeoutMs = Math.min(leftTimeMs, Config.remote_fragment_exec_timeout_ms);
+        // for (Future<PExecPlanFragmentResult> future : futures) {
+        //     TStatusCode code;
+        //     String errMsg = null;
+        //     Exception exception = null;
+        //
+        //     try {
+        //         PExecPlanFragmentResult result = future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        //         code = TStatusCode.findByValue(result.getStatus().getStatusCode());
+        //         if (code == null) {
+        //             code = TStatusCode.INTERNAL_ERROR;
+        //         }
+        //
+        //         if (code != TStatusCode.OK) {
+        //             if (!result.getStatus().getErrorMsgsList().isEmpty()) {
+        //                 errMsg = result.getStatus().getErrorMsgsList().get(0);
+        //             } else {
+        //                 // errMsg = operation + " failed. backend id: " + triple.getLeft().beId;
+        //             }
+        //         }
+        //     } catch (ExecutionException e) {
+        //         exception = e;
+        //         code = TStatusCode.THRIFT_RPC_ERROR;
+        //         // triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
+        //     } catch (InterruptedException e) {
+        //         exception = e;
+        //         code = TStatusCode.INTERNAL_ERROR;
+        //         // triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
+        //     } catch (TimeoutException e) {
+        //         exception = e;
+        //         // errMsg = String.format(
+        //         //         "timeout when waiting for %s rpc, query timeout:%d, left timeout for this operation:%d",
+        //         //         operation, queryOptions.getExecutionTimeout(), timeoutMs / 1000);
+        //         // LOG.warn("Query {} {}", DebugUtil.printId(queryId), errMsg);
+        //         code = TStatusCode.TIMEOUT;
+        //         // triple.getMiddle().removeProxy(triple.getLeft().brpcAddr);
+        //     }
+        //
+        //     if (code != TStatusCode.OK) {
+        //         if (exception != null && errMsg == null) {
+        //             errMsg = operation + " failed. " + exception.getMessage();
+        //         }
+        //         queryStatus.updateStatus(TStatusCode.INTERNAL_ERROR, errMsg);
+        //         cancelInternal(queryStatus);
+        //         switch (code) {
+        //             case TIMEOUT:
+        //                 MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(triple.getLeft().brpcAddr.hostname)
+        //                         .increase(1L);
+        //                 throw new RpcException(triple.getLeft().brpcAddr.hostname, errMsg, exception);
+        //             case THRIFT_RPC_ERROR:
+        //                 MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(triple.getLeft().brpcAddr.hostname)
+        //                         .increase(1L);
+        //                 SimpleScheduler.addToBlacklist(triple.getLeft().beId, errMsg);
+        //                 throw new RpcException(triple.getLeft().brpcAddr.hostname, errMsg, exception);
+        //             default:
+        //                 throw new UserException(errMsg, exception);
+        //         }
+        //     }
+        // }
     }
 
     public Future<InternalService.PExecPlanFragmentResult> execRemoteFragmentsAsync(
@@ -383,7 +381,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         queryOptions.setFeProcessUuid(ExecuteEnv.getInstance().getProcessUUID());
         queryOptions.setWaitFullBlockScheduleTimes(context.getSessionVariable().getWaitFullBlockScheduleTimes());
         queryOptions.setMysqlRowBinaryFormat(context.getCommand() == MysqlCommand.COM_STMT_EXECUTE);
-        
+
         setOptionsFromUserProperty(context, queryOptions);
         return queryOptions;
     }

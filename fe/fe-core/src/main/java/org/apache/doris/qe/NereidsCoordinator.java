@@ -94,13 +94,15 @@ public class NereidsCoordinator extends Coordinator {
 
         boolean enableParallelResultSink = false;
         List<DistributedPlan> distributedPlans = this.distributedPlans.valueList();
-        AssignedJob topInstance = ((PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1)).getInstanceJobs().get(0);
+        AssignedJob topInstance = ((PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1))
+                .getInstanceJobs().get(0);
         DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
         TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
 
         receivers.add(new ResultReceiver(queryId, topInstance.instanceId(), topWorker.id(),
                 execBeAddr, this.timeoutDeadline,
-                nereidsPlanner.getCascadesContext().getConnectContext().getSessionVariable().getMaxMsgSizeOfResultReceiver(), enableParallelResultSink));
+                nereidsPlanner.getCascadesContext().getConnectContext()
+                        .getSessionVariable().getMaxMsgSizeOfResultReceiver(), enableParallelResultSink));
 
         sendPipelineCtx();
         // super.execInternal();
