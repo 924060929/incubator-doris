@@ -19,14 +19,11 @@ package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
 import org.apache.doris.common.util.ListUtil;
 import org.apache.doris.planner.ScanNode;
-import org.apache.doris.thrift.TPipelineInstanceParams;
-import org.apache.doris.thrift.TScanRangeParams;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
