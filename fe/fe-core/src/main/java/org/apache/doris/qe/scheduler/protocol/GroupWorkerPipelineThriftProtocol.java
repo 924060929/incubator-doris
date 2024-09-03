@@ -118,6 +118,10 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         return execContext.workerToFragmentsParam;
     }
 
+    public ExecContext getExecContext() {
+        return execContext;
+    }
+
     @Override
     public List<PipelineExecContexts> serialize(ExecutionProfile executionProfile) {
         execContext.serializedRpcData = execContext.workerToFragmentsParam.entrySet()
@@ -149,7 +153,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         //     workerToFragmentParams.put(worker, mergedFragmentParams);
         // }
 
-
         List<PipelineExecContexts> pipelineExecContextsList = Lists.newArrayList();
         for (Entry<DistributedPlanWorker, TPipelineFragmentParamsList> kv
                 : execContext.workerToFragmentsParam.entrySet()) {
@@ -166,9 +169,12 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             }
             TNetworkAddress brpcAddress = backend.getBrpcAddress();
             PipelineExecContexts pipelineExecContexts = new PipelineExecContexts(
-                    execContext.queryId, backend, brpcAddress, true,
+                    execContext.queryId, backend, brpcAddress, false,
                     fragments.getParamsList().get(0).getFragmentNumOnHost()
             );
+            for (PipelineExecContext context : contexts) {
+                pipelineExecContexts.addContext(context);
+            }
             pipelineExecContextsList.add(pipelineExecContexts);
         }
         return pipelineExecContextsList;
@@ -176,12 +182,10 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
     @Override
     public void send() {
-
         // for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
         //     DistributedPlanWorker worker = kv.getKey();
         //
         // }
-
 
         List<Future<PExecPlanFragmentResult>> futures = Lists.newArrayList();
         try {
@@ -189,7 +193,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                 BackendWorker backendWorker = (BackendWorker) kv.getKey();
                 TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
                 Future<PExecPlanFragmentResult> future = execRemoteFragmentsAsync(
-                        backendClientProxy, kv.getValue(), brpcAddress, true);
+                        backendClientProxy, kv.getValue(), brpcAddress, false);
                 futures.add(future);
             }
         } catch (Throwable t) {
@@ -198,20 +202,20 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
         waitPipelineRpc(futures, 10000, "abc");
 
-        futures = Lists.newArrayList();
-        try {
-            for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
-                BackendWorker backendWorker = (BackendWorker) kv.getKey();
-                TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
-                Future<PExecPlanFragmentResult> future = execPlanFragmentStartAsync(
-                        backendClientProxy, brpcAddress);
-                futures.add(future);
-            }
-
-            waitPipelineRpc(futures, 10000, "abc2");
-        } catch (Throwable t) {
-            throw new IllegalStateException(t.getMessage(), t);
-        }
+        // futures = Lists.newArrayList();
+        // try {
+        //     for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
+        //         BackendWorker backendWorker = (BackendWorker) kv.getKey();
+        //         TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
+        //         Future<PExecPlanFragmentResult> future = execPlanFragmentStartAsync(
+        //                 backendClientProxy, brpcAddress);
+        //         futures.add(future);
+        //     }
+        //
+        //     waitPipelineRpc(futures, 10000, "abc2");
+        // } catch (Throwable t) {
+        //     throw new IllegalStateException(t.getMessage(), t);
+        // }
     }
 
     @Override
@@ -221,6 +225,14 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
     protected void waitPipelineRpc(List<Future<PExecPlanFragmentResult>> futures, long leftTimeMs,
             String operation) {
+
+        for (Future<PExecPlanFragmentResult> future : futures) {
+            try {
+                future.get();
+            } catch (Throwable t) {
+                throw new IllegalStateException(t.getMessage(), t);
+            }
+        }
         // if (leftTimeMs <= 0) {
         //     long currentTimeMillis = System.currentTimeMillis();
         //     long elapsed = (currentTimeMillis - timeoutDeadline) / 1000 + queryOptions.getExecutionTimeout();
@@ -436,8 +448,8 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
             List<TPlanFragmentDestination> destinations = destinationToThrift(currentFragmentPlan);
 
-
-            for (AssignedJob instanceJob : currentFragmentPlan.getInstanceJobs()) {
+            for (int recvrId = 0; recvrId < currentFragmentPlan.getInstanceJobs().size(); recvrId++) {
+                AssignedJob instanceJob = currentFragmentPlan.getInstanceJobs().get(recvrId);
                 // Suggestion: Do not modify currentFragmentParam out of the `fragmentToThriftIfAbsent` method,
                 //             except add instanceParam into local_params
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
@@ -447,7 +459,10 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                 TPipelineInstanceParams instanceParam
                         = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
                 List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
-                // currentFragmentParam.getShuffleIdxToInstanceIdx().put(instanceParam.recvrId, instancesParams.size());
+                currentFragmentParam.getShuffleIdxToInstanceIdx().put(recvrId, instancesParams.size());
+                currentFragmentParam.getPerNodeSharedScans().putAll(instanceParam.getPerNodeSharedScans());
+                currentFragmentParam.setNumBuckets(0);
+
                 instancesParams.add(instanceParam);
             }
 
@@ -568,7 +583,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
             params.setFileScanParams(fileScanRangeParamsMap);
             // params.setNumBuckets(fragment.getBucketNum());
-            // params.setPerNodeSharedScans(perNodeSharedScans);
+            params.setPerNodeSharedScans(new LinkedHashMap<>());
             // if (ignoreDataDistribution) {
             //     params.setParallelInstances(parallelTasksNum);
             // }
@@ -596,7 +611,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         TPipelineInstanceParams instanceParam = new TPipelineInstanceParams();
         instanceParam.setFragmentInstanceId(instance.instanceId());
         setScanSourceParam(instance.getScanSource(), instanceParam);
-        // instanceParam.setPerNodeSharedScans(perNodeSharedScans);
         instanceParam.setSenderId(instance.indexInUnassignedJob());
         instanceParam.setBackendNum(currentInstanceNum);
         instanceParam.setRuntimeFilterParams(new TRuntimeFilterParams());
@@ -615,10 +629,15 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
     private void setDefaultScanSourceParam(DefaultScanSource defaultScanSource, TPipelineInstanceParams params) {
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
+        Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
-            scanNodeIdToScanRanges.put(kv.getKey().getId().asInt(), kv.getValue().params);
+            int scanNodeId = kv.getKey().getId().asInt();
+            scanNodeIdToScanRanges.put(scanNodeId, kv.getValue().params);
+            // ???
+            perNodeSharedScans.put(scanNodeId, false);
         }
         params.setPerNodeScanRanges(scanNodeIdToScanRanges);
+        params.setPerNodeSharedScans(perNodeSharedScans);
     }
 
     private void setBucketScanSourceParam(BucketScanSource bucketScanSource, TPipelineInstanceParams params) {
