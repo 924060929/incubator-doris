@@ -41,6 +41,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.Planner;
+import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
 import org.apache.doris.qe.scheduler.protocol.GroupWorkerPipelineThriftProtocol;
@@ -91,13 +92,20 @@ public class NereidsCoordinator extends Coordinator {
     @Override
     protected void execInternal() throws Exception {
         workersClient = new GroupWorkerPipelineThriftProtocol(nereidsPlanner);
+        ExecContext execContext = workersClient.getExecContext();
 
-        boolean enableParallelResultSink = false;
         List<DistributedPlan> distributedPlans = this.distributedPlans.valueList();
-        AssignedJob topInstance = ((PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1))
-                .getInstanceJobs().get(0);
+        PipelineDistributedPlan topFragment = (PipelineDistributedPlan) distributedPlans.get(
+                distributedPlans.size() - 1);
+
+        Boolean enableParallelResultSink = execContext.queryOptions.isEnableParallelResultSink()
+                && topFragment.getFragmentJob().getFragment().getSink() instanceof ResultSink;
+
+        AssignedJob topInstance = topFragment.getInstanceJobs().get(0);
+
         DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
         TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
+        this.timeoutDeadline = System.currentTimeMillis() + execContext.queryOptions.getExecutionTimeout() * 1000L;
 
         receivers.add(new ResultReceiver(queryId, topInstance.instanceId(), topWorker.id(),
                 execBeAddr, this.timeoutDeadline,
@@ -122,8 +130,6 @@ public class NereidsCoordinator extends Coordinator {
                 fragmentsDoneLatch.addMark(fragments.getFragmentId(), worker.id());
             }
         }
-
-
 
         // if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
         //     Boolean enableParallelResultSink = queryOptions.isEnableParallelResultSink()
