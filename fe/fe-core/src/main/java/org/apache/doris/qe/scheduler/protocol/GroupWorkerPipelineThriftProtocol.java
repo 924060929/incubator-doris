@@ -327,7 +327,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         }
     }
 
-
     public Future<InternalService.PExecPlanFragmentResult> execPlanFragmentStartAsync(
             BackendServiceProxy proxy, TNetworkAddress brpcAddr) throws TException {
         TUniqueId queryId = execContext.queryId;
@@ -342,7 +341,6 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
             return futureWithException(e);
         }
     }
-
 
     private ExecContext toThrift(NereidsPlanner planner) {
         ConnectContext connectContext = planner.getCascadesContext().getConnectContext();
