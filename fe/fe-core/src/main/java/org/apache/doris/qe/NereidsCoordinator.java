@@ -100,17 +100,15 @@ public class NereidsCoordinator extends Coordinator {
 
         Boolean enableParallelResultSink = execContext.queryOptions.isEnableParallelResultSink()
                 && topFragment.getFragmentJob().getFragment().getSink() instanceof ResultSink;
-
-        AssignedJob topInstance = topFragment.getInstanceJobs().get(0);
-
-        DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
-        TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
         this.timeoutDeadline = System.currentTimeMillis() + execContext.queryOptions.getExecutionTimeout() * 1000L;
-
-        receivers.add(new ResultReceiver(queryId, topInstance.instanceId(), topWorker.id(),
-                execBeAddr, this.timeoutDeadline,
-                nereidsPlanner.getCascadesContext().getConnectContext()
-                        .getSessionVariable().getMaxMsgSizeOfResultReceiver(), enableParallelResultSink));
+        for (AssignedJob topInstance : topFragment.getInstanceJobs()) {
+            DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
+            TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
+            receivers.add(new ResultReceiver(queryId, topInstance.instanceId(), topWorker.id(),
+                    execBeAddr, this.timeoutDeadline,
+                    nereidsPlanner.getCascadesContext().getConnectContext()
+                            .getSessionVariable().getMaxMsgSizeOfResultReceiver(), enableParallelResultSink));
+        }
 
         sendPipelineCtx();
         // super.execInternal();

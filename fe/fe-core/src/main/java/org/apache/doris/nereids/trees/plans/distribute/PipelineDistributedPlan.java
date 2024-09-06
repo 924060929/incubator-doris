@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute;
 
+import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.util.Utils;
@@ -28,6 +29,7 @@ import com.google.common.collect.ListMultimap;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /** PipelineDistributedPlan */
 public class PipelineDistributedPlan extends DistributedPlan {
@@ -79,10 +81,14 @@ public class PipelineDistributedPlan extends DistributedPlan {
                 fragmentJob.getFragment().getExplainString(TExplainLevel.VERBOSE).trim(), "  "
         );
 
+        String destinationStr = destinations.stream().
+                map(destination -> "    " + DebugUtil.printId(destination.instanceId()))
+                .collect(Collectors.joining(",\n"));
         return "PipelineDistributedPlan(\n"
                 + "  id: " + displayFragmentId + ",\n"
                 + "  parallel: " + instanceJobs.size() + ",\n"
                 + "  fragmentJob: " + fragmentJob + ",\n"
+                + "  destinations: [" + (destinationStr.isEmpty() ? "" : "\n" + destinationStr + "\n  ") + "],\n"
                 + "  fragment: {\n"
                 + "  " + explainString + "\n"
                 + "  },\n"
