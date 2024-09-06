@@ -173,6 +173,14 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
     @Override
     public void send() {
         sendAndWaitPhaseOneRpc();
+
+        // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
+        // else use exec_plan_fragments directly.
+        // we choose #fragments > 1 because in some cases
+        // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
+        // For example: select * from numbers("number"="10") will generate ExchangeNode and
+        // TableValuedFunctionScanNode, we should ensure TableValuedFunctionScanNode does not
+        // send data until ExchangeNode is ready to receive.
         if (execContext.twoPhaseExecution) {
             sendAndWaitPhaseTwoRpc();
         }
