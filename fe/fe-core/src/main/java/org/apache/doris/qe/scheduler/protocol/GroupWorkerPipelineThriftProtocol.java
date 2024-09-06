@@ -83,6 +83,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.UnsafeByteOperations;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -93,6 +94,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -125,33 +127,20 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
     @Override
     public List<PipelineExecContexts> serialize(ExecutionProfile executionProfile) {
         execContext.serializedRpcData = execContext.workerToFragmentsParam.entrySet()
-                .stream()
+                .parallelStream()
                 .map(kv -> {
                     ByteString serializedString = null;
                     try {
-                        serializedString = ByteString.copyFrom(
-                                new TSerializer(new Factory()).serialize(kv.getValue()));
+                        // zero copy
+                        serializedString = UnsafeByteOperations.unsafeWrap(
+                                new TSerializer(new Factory()).serialize(kv.getValue())
+                        );
                     } catch (Throwable t) {
                         throw new IllegalStateException(t.getMessage(), t);
                     }
                     return Pair.of(kv.getKey(), serializedString);
                 })
                 .collect(Collectors.toMap(Pair::key, Pair::value));
-
-        // group by worker, so that we can use one RPC to send all fragment instances of a worker.
-        // Map<DistributedPlanWorker, FragmentToInstances> workerToFragmentAndInstances
-        //         = groupByWorker((List) distributedPlans);
-        //
-        // workerToFragmentParams = Maps.newLinkedHashMapWithExpectedSize(workerToFragmentAndInstances.size());
-        // for (Entry<DistributedPlanWorker, FragmentToInstances> kv : workerToFragmentAndInstances.entrySet()) {
-        //     DistributedPlanWorker worker = kv.getKey();
-        //     FragmentToInstances fragmentToInstances = kv.getValue();
-        //
-        //     // generate thrift parameters for this worker,
-        //     // merge all fragments parameters into one TPipelineFragmentParams
-        //     TPipelineFragmentParams mergedFragmentParams = fragmentsToThrift(fragmentToInstances);
-        //     workerToFragmentParams.put(worker, mergedFragmentParams);
-        // }
 
         List<PipelineExecContexts> pipelineExecContextsList = Lists.newArrayList();
         for (Entry<DistributedPlanWorker, TPipelineFragmentParamsList> kv
@@ -165,6 +154,7 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                 PipelineExecContext pipelineExecContext = new PipelineExecContext(
                         new PlanFragmentId(fragmentParams.getFragmentId()),
                         fragmentParams, backend, executionProfile, 0);
+                // pipelineExecContext.unsetFields();
                 contexts.add(pipelineExecContext);
             }
             TNetworkAddress brpcAddress = backend.getBrpcAddress();
@@ -182,40 +172,10 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
 
     @Override
     public void send() {
-        // for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
-        //     DistributedPlanWorker worker = kv.getKey();
-        //
-        // }
-
-        List<Future<PExecPlanFragmentResult>> futures = Lists.newArrayList();
-        try {
-            for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
-                BackendWorker backendWorker = (BackendWorker) kv.getKey();
-                TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
-                Future<PExecPlanFragmentResult> future = execRemoteFragmentsAsync(
-                        backendClientProxy, kv.getValue(), brpcAddress, false);
-                futures.add(future);
-            }
-        } catch (Throwable t) {
-            throw new IllegalStateException(t.getMessage(), t);
+        sendAndWaitPhaseOneRpc();
+        if (execContext.twoPhaseExecution) {
+            sendAndWaitPhaseTwoRpc();
         }
-
-        waitPipelineRpc(futures, 10000, "abc");
-
-        // futures = Lists.newArrayList();
-        // try {
-        //     for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
-        //         BackendWorker backendWorker = (BackendWorker) kv.getKey();
-        //         TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
-        //         Future<PExecPlanFragmentResult> future = execPlanFragmentStartAsync(
-        //                 backendClientProxy, brpcAddress);
-        //         futures.add(future);
-        //     }
-        //
-        //     waitPipelineRpc(futures, 10000, "abc2");
-        // } catch (Throwable t) {
-        //     throw new IllegalStateException(t.getMessage(), t);
-        // }
     }
 
     @Override
@@ -223,8 +183,41 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
         // backendClientProxy.cancelPlanFragmentAsync();
     }
 
-    protected void waitPipelineRpc(List<Future<PExecPlanFragmentResult>> futures, long leftTimeMs,
-            String operation) {
+    private void sendAndWaitPhaseOneRpc() {
+        boolean twoPhaseExecution = execContext.twoPhaseExecution;
+        List<Future<PExecPlanFragmentResult>> futures = Lists.newArrayList();
+        try {
+            for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
+                BackendWorker backendWorker = (BackendWorker) kv.getKey();
+                TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
+                Future<PExecPlanFragmentResult> future = execRemoteFragmentsAsync(
+                        backendClientProxy, kv.getValue(), brpcAddress, twoPhaseExecution);
+                futures.add(future);
+            }
+        } catch (Throwable t) {
+            throw new IllegalStateException(t.getMessage(), t);
+        }
+        waitPipelineRpc(futures, 10000, "abc");
+    }
+
+    private void sendAndWaitPhaseTwoRpc() {
+        List<Future<PExecPlanFragmentResult>> futures = Lists.newArrayList();
+        try {
+            for (Entry<DistributedPlanWorker, ByteString> kv : execContext.serializedRpcData.entrySet()) {
+                BackendWorker backendWorker = (BackendWorker) kv.getKey();
+                TNetworkAddress brpcAddress = backendWorker.getBackend().getBrpcAddress();
+                Future<PExecPlanFragmentResult> future = execPlanFragmentStartAsync(
+                        backendClientProxy, brpcAddress);
+                futures.add(future);
+            }
+            waitPipelineRpc(futures, 10000, "abc2");
+        } catch (Throwable t) {
+            throw new IllegalStateException(t.getMessage(), t);
+        }
+    }
+
+    protected void waitPipelineRpc(
+            List<Future<PExecPlanFragmentResult>> futures, long leftTimeMs, String operation) {
 
         for (Future<PExecPlanFragmentResult> future : futures) {
             try {
@@ -471,6 +464,11 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                         kv.getKey(), w -> new TPipelineFragmentParamsList());
                 fragments.addToParamsList(kv.getValue());
             }
+        }
+
+        // we should init fragment from target to source in backend
+        for (DistributedPlanWorker worker : fragmentsGroupByWorker.keySet()) {
+            Collections.reverse(fragmentsGroupByWorker.get(worker).getParamsList());
         }
 
         // remove redundant params to reduce rpc message size
