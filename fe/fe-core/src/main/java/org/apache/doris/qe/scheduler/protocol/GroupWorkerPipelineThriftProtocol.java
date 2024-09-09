@@ -83,12 +83,10 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.protobuf.ByteString;
-import com.google.protobuf.UnsafeByteOperations;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.thrift.TException;
-import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TCompactProtocol.Factory;
 import org.jetbrains.annotations.NotNull;
 
@@ -131,10 +129,8 @@ public class GroupWorkerPipelineThriftProtocol implements WorkerProtocol {
                 .map(kv -> {
                     ByteString serializedString = null;
                     try {
-                        // zero copy
-                        serializedString = UnsafeByteOperations.unsafeWrap(
-                                new TSerializer(new Factory()).serialize(kv.getValue())
-                        );
+                        // no extend and copy when serializing
+                        serializedString = new TFastSerializer(1024, new Factory()).serialize(kv.getValue());
                     } catch (Throwable t) {
                         throw new IllegalStateException(t.getMessage(), t);
                     }
