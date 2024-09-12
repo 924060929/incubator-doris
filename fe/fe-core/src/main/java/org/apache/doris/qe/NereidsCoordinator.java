@@ -18,14 +18,18 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.analysis.Analyzer;
+import org.apache.doris.common.Status;
+import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.planner.Planner;
-import org.apache.doris.qe.runtime.SqlExecutionPipelineTask;
-import org.apache.doris.qe.runtime.SqlExecutionPipelineTaskBuilder;
+import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.runtime.SqlPipelineTask;
+import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
 import org.apache.doris.qe.runtime.ThriftExecutionBuilder;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
+import org.apache.doris.thrift.TUniqueId;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -36,12 +40,17 @@ import java.util.Map;
 public class NereidsCoordinator extends Coordinator {
     private static final Logger LOG = LogManager.getLogger(NereidsCoordinator.class);
 
+    private final CoordinatorContext coordinatorContext;
     private final ExecContext execContext;
-    private volatile SqlExecutionPipelineTask executionTask;
+    private volatile SqlPipelineTask executionTask;
 
     public NereidsCoordinator(ConnectContext context, Analyzer analyzer,
             Planner planner, StatsErrorEstimator statsErrorEstimator, NereidsPlanner nereidsPlanner) {
         super(context, analyzer, planner, statsErrorEstimator);
+        this.coordinatorContext = new CoordinatorContext(
+                this::isEof,
+                this::cancelInternal
+        );
         this.execContext = ThriftExecutionBuilder.buildExecContext(nereidsPlanner);
     }
 
@@ -49,9 +58,47 @@ public class NereidsCoordinator extends Coordinator {
     protected void execInternal() throws Exception {
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftExecutionBuilder.plansToThrift(execContext);
-        executionTask = SqlExecutionPipelineTaskBuilder.build(execContext, workerToFragments);
+        executionTask = SqlPipelineTaskBuilder.build(execContext, coordinatorContext, workerToFragments);
         executionTask.execute();
+    }
 
-        this.receivers = executionTask.getReceivers();
+    @Override
+    public RowBatch getNext() throws Exception {
+        return executionTask.getResultReceivers().getNext();
+    }
+
+    public boolean isEof() {
+        if (executionTask == null) {
+            return false;
+        }
+        return executionTask.getResultReceivers().isEof();
+    }
+
+    @Override
+    public void cancel(Status cancelReason) {
+        for (ScanNode scanNode : scanNodes) {
+            scanNode.stop();
+        }
+        if (cancelReason.ok()) {
+            throw new RuntimeException("Should use correct cancel reason, but it is " + cancelReason);
+        }
+        TUniqueId queryId = execContext.queryId;
+        Status queryStatus = coordinatorContext.updateStatusIfOk(cancelReason);
+        if (!queryStatus.ok()) {
+            // Print an error stack here to know why send cancel again.
+            LOG.warn("Query {} already in abnormal status {}, but received cancel again,"
+                            + "so that send cancel to BE again",
+                    DebugUtil.printId(queryId), queryStatus.toString(),
+                    new Exception("cancel failed"));
+        }
+        LOG.warn("Cancel execution of query {}, this is a outside invoke, cancelReason {}",
+                DebugUtil.printId(queryId), cancelReason);
+        cancelInternal(cancelReason);
+    }
+
+    protected void cancelInternal(Status cancelReason) {
+        if (executionTask != null) {
+            executionTask.cancelSchedule(cancelReason);
+        }
     }
 }

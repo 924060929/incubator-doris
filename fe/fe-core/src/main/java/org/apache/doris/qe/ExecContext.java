@@ -43,15 +43,6 @@ public class ExecContext {
     public final TNetworkAddress directConnectFrontendAddress;
     public final long timeoutDeadline;
 
-    public Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam;
-
-    // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
-    // else use exec_plan_fragments directly.
-    // we choose #fragments > 1 because in some cases
-    // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
-    // For example: select * from numbers("number"="10") will generate ExchangeNode and
-    // TableValuedFunctionScanNode, we should ensure TableValuedFunctionScanNode does not
-    // send data until ExchangeNode is ready to receive.
     public final boolean twoPhaseExecution;
 
     public ExecContext(
@@ -72,6 +63,14 @@ public class ExecContext {
         this.workloadGroups = workloadGroups;
         this.coordinatorAddress = coordinatorAddress;
         this.directConnectFrontendAddress = directConnectFrontendAddress;
+
+        // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
+        // else use exec_plan_fragments directly.
+        // we choose #fragments > 1 because in some cases
+        // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
+        // For example: select * from numbers("number"="10") will generate ExchangeNode and
+        // TableValuedFunctionScanNode, we should ensure TableValuedFunctionScanNode does not
+        // send data until ExchangeNode is ready to receive.
         this.twoPhaseExecution = planner.getDistributedPlans().size() > 1;
         this.timeoutDeadline = System.currentTimeMillis() + queryOptions.getExecutionTimeout() * 1000L;
     }

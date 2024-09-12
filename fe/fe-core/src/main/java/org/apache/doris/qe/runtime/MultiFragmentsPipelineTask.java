@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, SingleFragmentPipelineTask> {
-    private static final Logger LOG = LogManager.getLogger(SqlExecutionPipelineTask.class);
+    private static final Logger LOG = LogManager.getLogger(SqlPipelineTask.class);
 
     // immutable parameters
     private final TUniqueId queryId;
