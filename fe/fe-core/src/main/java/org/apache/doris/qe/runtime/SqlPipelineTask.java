@@ -7,8 +7,8 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
+import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.ExecContext;
-import org.apache.doris.qe.ResultReceiver;
 import org.apache.doris.qe.SimpleScheduler;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.system.Backend;
@@ -31,29 +31,32 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
- * SqlExecutionPipelineTask.
+ * SqlPipelineTask.
  *
  * This class is used to describe which backend process which fragments
  */
-public class SqlExecutionPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPipelineTask> {
-    private static final Logger LOG = LogManager.getLogger(SqlExecutionPipelineTask.class);
+public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPipelineTask> {
+    private static final Logger LOG = LogManager.getLogger(SqlPipelineTask.class);
 
     // immutable parameters
     private final long timeoutDeadline;
     private final ExecContext execContext;
-    private final List<ResultReceiver> receivers;
+    private final CoordinatorContext coordinatorContext;
+    private final MultiResultReceivers resultReceivers;
 
     // mutable states
     private final Status queryStatus;
 
-    public SqlExecutionPipelineTask(
+    public SqlPipelineTask(
             ExecContext execContext,
+            CoordinatorContext coordinatorContext,
             Map<Long, MultiFragmentsPipelineTask> fragmentTasks,
-            List<ResultReceiver> receivers) {
+            MultiResultReceivers resultReceivers) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
         this.queryStatus = new Status();
         this.execContext = Objects.requireNonNull(execContext, "execContext can not be null");
-        this.receivers = Objects.requireNonNull(receivers, "receivers can not be null");
+        this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
+        this.resultReceivers = Objects.requireNonNull(resultReceivers, "resultReceivers can not be null");
         this.timeoutDeadline = execContext.timeoutDeadline;
     }
 
@@ -69,13 +72,13 @@ public class SqlExecutionPipelineTask extends AbstractRuntimeTask<Long, MultiFra
         return queryStatus;
     }
 
-    public List<ResultReceiver> getReceivers() {
-        return receivers;
+    public MultiResultReceivers getResultReceivers() {
+        return resultReceivers;
     }
 
     @Override
     public String toString() {
-        return "SqlExecutionPipelineTask(\n"
+        return "SqlPipelineTask(\n"
                 + childrenTasks.allTasks()
                     .stream()
                     .map(multiFragmentsPipelineTask -> "  " + multiFragmentsPipelineTask)
@@ -170,7 +173,7 @@ public class SqlExecutionPipelineTask extends AbstractRuntimeTask<Long, MultiFra
                     errMsg = operation + " failed. " + exception.getMessage();
                 }
                 queryStatus.updateStatus(TStatusCode.INTERNAL_ERROR, errMsg);
-                cancelInternal(queryStatus);
+                cancelSchedule(queryStatus);
                 switch (code) {
                     case TIMEOUT:
                         MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(brpcAddr.hostname)
@@ -188,10 +191,8 @@ public class SqlExecutionPipelineTask extends AbstractRuntimeTask<Long, MultiFra
         }
     }
 
-    private void cancelInternal(Status cancelReason) {
-        for (ResultReceiver receiver : receivers) {
-            receiver.cancel(cancelReason);
-        }
+    public void cancelSchedule(Status cancelReason) {
+        resultReceivers.cancel(cancelReason);
 
         for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
             fragmentsTask.cancelExecute(cancelReason);

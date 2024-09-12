@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.qe.scheduler.protocol;
+package org.apache.doris.qe.protocol;
 
 import com.google.common.base.Suppliers;
 import com.google.protobuf.ByteString;
