@@ -34,8 +34,8 @@ public class PipelineScheduler implements Scheduler {
 
     @Override
     public void schedule(List<DistributedPlan> distributedPlans, StatementContext statementContext) {
-        groupBackendProtocol.serialize(null);
-        groupBackendProtocol.send();
+        groupBackendProtocol.buildContexts(null);
+        groupBackendProtocol.send(null);
     }
 
     @Override
