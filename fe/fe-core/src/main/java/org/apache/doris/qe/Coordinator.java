@@ -175,8 +175,8 @@ public class Coordinator implements CoordInterface {
     // Random is used to shuffle instances of partitioned
     private static final Random instanceRandom = new SecureRandom();
 
-    private static ExecutorService backendRpcCallbackExecutor = ThreadPoolManager.newDaemonProfileThreadPool(32, 100,
-            "backend-rpc-callback", true);
+    public static ExecutorService backendRpcCallbackExecutor = ThreadPoolManager.newDaemonProfileThreadPool(
+            32, 100, "backend-rpc-callback", true);
 
     // Overall status of the entire query; set to the first reported fragment error
     // status or to CANCELLED, if Cancel() is called.
@@ -2851,6 +2851,7 @@ public class Coordinator implements CoordInterface {
             this.address = new TNetworkAddress(backend.getHost(), backend.getBePort());
             this.brpcAddress = new TNetworkAddress(backend.getHost(), backend.getBrpcPort());
             this.beProcessEpoch = backend.getProcessEpoch();
+            this.jobId = jobId;
 
             this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
             executionProfile.addFragmentBackend(fragmentId, backend.getId());
@@ -2940,6 +2941,10 @@ public class Coordinator implements CoordInterface {
             return ctxs;
         }
 
+        public Backend getBackend() {
+            return backend;
+        }
+
         /**
          * The BackendExecState in states are all send to the same BE.
          * So only the first BackendExecState need to carry some common fields, such as DescriptorTbl,
@@ -3013,6 +3018,14 @@ public class Coordinator implements CoordInterface {
                     return get();
                 }
             };
+        }
+
+        public void setSerializeFragments(ByteString serializedFragments) {
+            this.serializedFragments = serializedFragments;
+        }
+
+        public ByteString getSerializedFragments() {
+            return serializedFragments;
         }
 
         public long serializeFragments() throws TException {

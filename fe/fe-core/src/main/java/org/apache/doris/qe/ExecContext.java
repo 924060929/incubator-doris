@@ -27,8 +27,6 @@ import org.apache.doris.thrift.TQueryGlobals;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TUniqueId;
 
-import com.google.protobuf.ByteString;
-
 import java.util.List;
 import java.util.Map;
 
@@ -43,9 +41,9 @@ public class ExecContext {
     public final List<TPipelineWorkloadGroup> workloadGroups;
     public final TNetworkAddress coordinatorAddress;
     public final TNetworkAddress directConnectFrontendAddress;
+    public final long timeoutDeadline;
 
     public Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam;
-    public Map<DistributedPlanWorker, ByteString> serializedRpcData;
 
     // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
     // else use exec_plan_fragments directly.
@@ -75,5 +73,6 @@ public class ExecContext {
         this.coordinatorAddress = coordinatorAddress;
         this.directConnectFrontendAddress = directConnectFrontendAddress;
         this.twoPhaseExecution = planner.getDistributedPlans().size() > 1;
+        this.timeoutDeadline = System.currentTimeMillis() + queryOptions.getExecutionTimeout() * 1000L;
     }
 }
