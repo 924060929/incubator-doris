@@ -7,9 +7,10 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.planner.ResultSink;
+import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.ExecContext;
 import org.apache.doris.qe.ResultReceiver;
-import org.apache.doris.qe.scheduler.protocol.TFastSerializer;
+import org.apache.doris.qe.protocol.TFastSerializer;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
@@ -28,31 +29,34 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public class SqlExecutionPipelineTaskBuilder {
-    private static final Logger LOG = LogManager.getLogger(SqlExecutionPipelineTaskBuilder.class);
+public class SqlPipelineTaskBuilder {
+    private static final Logger LOG = LogManager.getLogger(SqlPipelineTaskBuilder.class);
 
     private final ExecContext execContext;
+    private final CoordinatorContext coordinatorContext;
 
-    private SqlExecutionPipelineTaskBuilder(ExecContext execContext) {
+    private SqlPipelineTaskBuilder(ExecContext execContext, CoordinatorContext coordinatorContext) {
         this.execContext = Objects.requireNonNull(execContext, "execContext can not be null");
+        this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
     }
 
-    public static SqlExecutionPipelineTask build(ExecContext execContext,
+    public static SqlPipelineTask build(ExecContext execContext, CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
-        SqlExecutionPipelineTaskBuilder builder = new SqlExecutionPipelineTaskBuilder(execContext);
+        SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(execContext, coordinatorContext);
         return builder.buildTask(execContext, workerToFragmentsParam);
     }
 
-    private SqlExecutionPipelineTask buildTask(
+    private SqlPipelineTask buildTask(
             ExecContext execContext, Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
-        return new SqlExecutionPipelineTask(
+        return new SqlPipelineTask(
                 execContext,
+                coordinatorContext,
                 buildMultiFragmentTasks(execContext, workerToFragmentsParam),
                 buildResultReceivers(execContext, execContext.timeoutDeadline)
         );
     }
 
-    private List<ResultReceiver> buildResultReceivers(ExecContext execContext, long timeoutDeadline) {
+    private MultiResultReceivers buildResultReceivers(ExecContext execContext, long timeoutDeadline) {
         List<DistributedPlan> distributedPlans = execContext.planner.getDistributedPlans().valueList();
         PipelineDistributedPlan topFragment =
                 (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
@@ -80,7 +84,7 @@ public class SqlExecutionPipelineTaskBuilder {
                 )
             );
         }
-        return receivers;
+        return new MultiResultReceivers(execContext.planner, coordinatorContext, execContext.queryId, receivers);
     }
 
     private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
