@@ -17,9 +17,6 @@
 
 package org.apache.doris.qe.runtime;
 
-import org.apache.doris.analysis.StorageBackend.StorageType;
-import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.FsBroker;
 import org.apache.doris.common.Config;
 import org.apache.doris.datasource.FileQueryScanNode;
 import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
@@ -32,7 +29,6 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
-import org.apache.doris.planner.ResultFileSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.CoordinatorContext;
@@ -59,7 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-public class ThriftExecutionBuilder {
+public class ThriftPlansBuilder {
 
     public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
             CoordinatorContext coordinatorContext) {
@@ -214,19 +210,6 @@ public class ThriftExecutionBuilder {
 
             params.setSendQueryStatisticsWithEveryBatch(fragment.isTransferQueryStatisticsWithEveryBatch());
 
-            // NOTE: we should first set broker host port, and then transform fragment to thrift
-            if (fragment.getSink() instanceof ResultFileSink) {
-                ResultFileSink resultFileSink = (ResultFileSink) fragment.getSink();
-                if (resultFileSink.getStorageType() == StorageType.BROKER) {
-                    try {
-                        FsBroker broker = Env.getCurrentEnv().getBrokerMgr()
-                                .getBroker(resultFileSink.getBrokerName(), worker.host());
-                        resultFileSink.setBrokerAddr(broker.host, broker.port);
-                    } catch (Throwable t) {
-                        throw new IllegalStateException("Can not compute broker address: " + t, t);
-                    }
-                }
-            }
             params.setFragment(fragment.toThrift());
             params.setLocalParams(Lists.newArrayList());
             params.setWorkloadGroups(coordinatorContext.workloadGroups);
