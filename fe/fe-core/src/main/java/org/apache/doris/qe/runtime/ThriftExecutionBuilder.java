@@ -1,13 +1,7 @@
 package org.apache.doris.qe.runtime;
 
-import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
-import org.apache.doris.common.NereidsException;
-import org.apache.doris.common.UserException;
-import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.datasource.FileQueryScanNode;
-import org.apache.doris.mysql.MysqlCommand;
-import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
@@ -20,35 +14,24 @@ import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
-import org.apache.doris.qe.Coordinator;
-import org.apache.doris.qe.ExecContext;
-import org.apache.doris.service.ExecuteEnv;
+import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
-import org.apache.doris.thrift.TDescriptorTable;
 import org.apache.doris.thrift.TFileScanRangeParams;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TPipelineInstanceParams;
-import org.apache.doris.thrift.TPipelineWorkloadGroup;
 import org.apache.doris.thrift.TPlanFragment;
 import org.apache.doris.thrift.TPlanFragmentDestination;
-import org.apache.doris.thrift.TQueryGlobals;
 import org.apache.doris.thrift.TQueryOptions;
-import org.apache.doris.thrift.TResourceLimit;
 import org.apache.doris.thrift.TRuntimeFilterParams;
 import org.apache.doris.thrift.TScanRangeParams;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -57,100 +40,15 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 public class ThriftExecutionBuilder {
-    private static final Logger LOG = LogManager.getLogger(ThriftExecutionBuilder.class);
 
-    public static ExecContext buildExecContext(NereidsPlanner planner) {
-        ConnectContext connectContext = planner.getCascadesContext().getConnectContext();
-        TQueryOptions queryOptions = initQueryOptions(connectContext);
-        TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
-        TDescriptorTable descriptorTable = planner.getDescTable().toThrift();
-        List<TPipelineWorkloadGroup> workloadGroup = computeWorkloadGroups(connectContext);
-        TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
-        String currentConnectedFEIp = connectContext.getCurrentConnectedFEIp();
-        TNetworkAddress directConnectFrontendAddress =
-                connectContext.isProxy() && !StringUtils.isBlank(currentConnectedFEIp)
-                        ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
-                        : coordinatorAddress;
-
-        return new ExecContext(
-                connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup,
-                coordinatorAddress, directConnectFrontendAddress
-        );
-    }
-
-    public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(ExecContext execContext) {
-        List<PipelineDistributedPlan> distributedPlans = execContext.planner.getDistributedPlans().valueList();
-        return plansToThrift(distributedPlans, execContext);
-    }
-
-    private static List<TPipelineWorkloadGroup> computeWorkloadGroups(ConnectContext connectContext) {
-        List<TPipelineWorkloadGroup> workloadGroup = ImmutableList.of();
-        if (Config.enable_workload_group) {
-            try {
-                workloadGroup = connectContext.getEnv().getWorkloadGroupMgr().getWorkloadGroup(connectContext);
-            } catch (UserException e) {
-                throw new NereidsException(e.getMessage(), e);
-            }
-        }
-        return workloadGroup;
-    }
-
-    private static TQueryOptions initQueryOptions(ConnectContext context) {
-        TQueryOptions queryOptions = context.getSessionVariable().toThrift();
-        queryOptions.setBeExecVersion(Config.be_exec_version);
-        queryOptions.setQueryTimeout(context.getExecTimeout());
-        queryOptions.setExecutionTimeout(context.getExecTimeout());
-        if (queryOptions.getExecutionTimeout() < 1) {
-            LOG.info("try set timeout less than 1", new RuntimeException(""));
-        }
-        queryOptions.setEnableScanNodeRunSerial(context.getSessionVariable().isEnableScanRunSerial());
-        queryOptions.setFeProcessUuid(ExecuteEnv.getInstance().getProcessUUID());
-        queryOptions.setWaitFullBlockScheduleTimes(context.getSessionVariable().getWaitFullBlockScheduleTimes());
-        queryOptions.setMysqlRowBinaryFormat(context.getCommand() == MysqlCommand.COM_STMT_EXECUTE);
-
-        setOptionsFromUserProperty(context, queryOptions);
-        return queryOptions;
-    }
-
-    private static TQueryGlobals initQueryGlobals(ConnectContext context) {
-        TQueryGlobals queryGlobals = new TQueryGlobals();
-        queryGlobals.setNowString(TimeUtils.getDatetimeFormatWithTimeZone().format(LocalDateTime.now()));
-        queryGlobals.setTimestampMs(System.currentTimeMillis());
-        queryGlobals.setNanoSeconds(LocalDateTime.now().getNano());
-        queryGlobals.setLoadZeroTolerance(false);
-        if (context.getSessionVariable().getTimeZone().equals("CST")) {
-            queryGlobals.setTimeZone(TimeUtils.DEFAULT_TIME_ZONE);
-        } else {
-            queryGlobals.setTimeZone(context.getSessionVariable().getTimeZone());
-        }
-        return queryGlobals;
-    }
-
-    private static void setOptionsFromUserProperty(ConnectContext connectContext, TQueryOptions queryOptions) {
-        String qualifiedUser = connectContext.getQualifiedUser();
-        // set cpu resource limit
-        int cpuLimit = Env.getCurrentEnv().getAuth().getCpuResourceLimit(qualifiedUser);
-        if (cpuLimit > 0) {
-            // overwrite the cpu resource limit from session variable;
-            TResourceLimit resourceLimit = new TResourceLimit();
-            resourceLimit.setCpuLimit(cpuLimit);
-            queryOptions.setResourceLimit(resourceLimit);
-        }
-        // set exec mem limit
-        long maxExecMemByte = connectContext.getSessionVariable().getMaxExecMemByte();
-        long memLimit = maxExecMemByte > 0 ? maxExecMemByte :
-                Env.getCurrentEnv().getAuth().getExecMemLimit(qualifiedUser);
-        if (memLimit > 0) {
-            // overwrite the exec_mem_limit from session variable;
-            queryOptions.setMemLimit(memLimit);
-            queryOptions.setMaxReservation(memLimit);
-            queryOptions.setInitialReservationTotalClaims(memLimit);
-            queryOptions.setBufferPoolLimit(memLimit);
-        }
+    public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
+            CoordinatorContext coordinatorContext) {
+        List<PipelineDistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
+        return plansToThrift(distributedPlans, coordinatorContext);
     }
 
     private static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
-            List<PipelineDistributedPlan> distributedPlans, ExecContext execContext) {
+            List<PipelineDistributedPlan> distributedPlans, CoordinatorContext coordinatorContext) {
         Multiset<DistributedPlanWorker> workerProcessInstanceNum = computeInstanceNumPerWorker(distributedPlans);
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker = Maps.newLinkedHashMap();
         int currentInstanceIndex = 0;
@@ -169,7 +67,7 @@ public class ThriftExecutionBuilder {
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         exchangeSenderNum, currentFragmentThrift, fileScanRangeParams,
-                        workerProcessInstanceNum, destinations, execContext);
+                        workerProcessInstanceNum, destinations, coordinatorContext);
                 TPipelineInstanceParams instanceParam
                         = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
                 List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
@@ -258,17 +156,17 @@ public class ThriftExecutionBuilder {
             Map<Integer, Integer> exchangeSenderNum, TPlanFragment fragmentThrift,
             Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
             Multiset<DistributedPlanWorker> workerProcessInstanceNum,
-            List<TPlanFragmentDestination> destinations, ExecContext execContext) {
+            List<TPlanFragmentDestination> destinations, CoordinatorContext coordinatorContext) {
         return workerToFragmentParams.computeIfAbsent(assignedJob.getAssignedWorker(), worker -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();
-            ConnectContext connectContext = execContext.connectContext;
+            ConnectContext connectContext = coordinatorContext.connectContext;
 
             TPipelineFragmentParams params = new TPipelineFragmentParams();
             params.setIsNereids(true);
             params.setBackendId(worker.id());
             params.setProtocolVersion(PaloInternalServiceVersion.V1);
-            params.setDescTbl(execContext.descriptorTable);
-            params.setQueryId(execContext.queryId);
+            params.setDescTbl(coordinatorContext.descriptorTable);
+            params.setQueryId(coordinatorContext.queryId);
             params.setFragmentId(fragment.getFragmentId().asInt());
 
             // Each tParam will set the total number of Fragments that need to be executed on the same BE,
@@ -276,7 +174,7 @@ public class ThriftExecutionBuilder {
             // Notice. load fragment has a small probability that FragmentNumOnHost is 0, for unknown reasons.
             params.setFragmentNumOnHost(workerProcessInstanceNum.count(worker));
 
-            params.setNeedWaitExecutionTrigger(execContext.twoPhaseExecution);
+            params.setNeedWaitExecutionTrigger(coordinatorContext.twoPhaseExecution);
             params.setPerExchNumSenders(exchangeSenderNum);
             params.setDestinations(destinations);
 
@@ -284,21 +182,21 @@ public class ThriftExecutionBuilder {
             params.setNumSenders(instanceNumInThisFragment);
             params.setTotalInstances(instanceNumInThisFragment);
 
-            params.setCoord(execContext.coordinatorAddress);
-            params.setCurrentConnectFe(execContext.directConnectFrontendAddress);
-            params.setQueryGlobals(execContext.queryGlobals);
-            params.setQueryOptions(new TQueryOptions(execContext.queryOptions));
-            long memLimit = execContext.queryOptions.getMemLimit();
+            params.setCoord(coordinatorContext.coordinatorAddress);
+            params.setCurrentConnectFe(coordinatorContext.directConnectFrontendAddress);
+            params.setQueryGlobals(coordinatorContext.queryGlobals);
+            params.setQueryOptions(new TQueryOptions(coordinatorContext.queryOptions));
+            long memLimit = coordinatorContext.queryOptions.getMemLimit();
             if (!connectContext.getSessionVariable().isDisableColocatePlan() && fragment.hasColocatePlanNode()) {
                 int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNumInThisFragment);
-                memLimit = execContext.queryOptions.getMemLimit() / rate;
+                memLimit = coordinatorContext.queryOptions.getMemLimit() / rate;
             }
             params.getQueryOptions().setMemLimit(memLimit);
 
             params.setSendQueryStatisticsWithEveryBatch(fragment.isTransferQueryStatisticsWithEveryBatch());
             params.setFragment(fragmentThrift);
             params.setLocalParams(Lists.newArrayList());
-            params.setWorkloadGroups(execContext.workloadGroups);
+            params.setWorkloadGroups(coordinatorContext.workloadGroups);
 
             params.setFileScanParams(fileScanRangeParamsMap);
             // params.setNumBuckets(fragment.getBucketNum());

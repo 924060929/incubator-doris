@@ -42,7 +42,6 @@ public class NereidsCoordinator extends Coordinator {
     private static final Logger LOG = LogManager.getLogger(NereidsCoordinator.class);
 
     private final CoordinatorContext coordinatorContext;
-    private final ExecContext execContext;
     private final MultiResultReceivers resultReceivers;
     private volatile SqlPipelineTask executionTask;
 
@@ -50,16 +49,15 @@ public class NereidsCoordinator extends Coordinator {
             Planner planner, StatsErrorEstimator statsErrorEstimator, NereidsPlanner nereidsPlanner) {
         super(context, analyzer, planner, statsErrorEstimator);
 
-        this.execContext = ThriftExecutionBuilder.buildExecContext(nereidsPlanner);
-        this.coordinatorContext = new CoordinatorContext(this);
-        this.resultReceivers = MultiResultReceivers.build(execContext, coordinatorContext);
+        this.coordinatorContext = CoordinatorContext.build(nereidsPlanner, this);
+        this.resultReceivers = MultiResultReceivers.build(coordinatorContext);
     }
 
     @Override
     protected void execInternal() throws Exception {
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
-                = ThriftExecutionBuilder.plansToThrift(execContext);
-        executionTask = SqlPipelineTaskBuilder.build(execContext, coordinatorContext, workerToFragments);
+                = ThriftExecutionBuilder.plansToThrift(coordinatorContext);
+        executionTask = SqlPipelineTaskBuilder.build(coordinatorContext, workerToFragments);
         executionTask.execute();
     }
 
@@ -80,7 +78,7 @@ public class NereidsCoordinator extends Coordinator {
         if (cancelReason.ok()) {
             throw new RuntimeException("Should use correct cancel reason, but it is " + cancelReason);
         }
-        TUniqueId queryId = execContext.queryId;
+        TUniqueId queryId = coordinatorContext.queryId;
         Status queryStatus = coordinatorContext.updateStatusIfOk(cancelReason);
         if (!queryStatus.ok()) {
             // Print an error stack here to know why send cancel again.

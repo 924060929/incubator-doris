@@ -1,15 +1,79 @@
 package org.apache.doris.qe;
 
+import org.apache.doris.catalog.Env;
+import org.apache.doris.common.Config;
+import org.apache.doris.common.NereidsException;
 import org.apache.doris.common.Status;
+import org.apache.doris.common.UserException;
+import org.apache.doris.common.util.TimeUtils;
+import org.apache.doris.mysql.MysqlCommand;
+import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.service.ExecuteEnv;
+import org.apache.doris.thrift.TDescriptorTable;
+import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TPipelineWorkloadGroup;
+import org.apache.doris.thrift.TQueryGlobals;
+import org.apache.doris.thrift.TQueryOptions;
+import org.apache.doris.thrift.TResourceLimit;
+import org.apache.doris.thrift.TUniqueId;
 
+import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 
 public class CoordinatorContext {
-    private NereidsCoordinator coordinator;
+    private static final Logger LOG = LogManager.getLogger(CoordinatorContext.class);
+
+    public final NereidsCoordinator coordinator;
+    public final ConnectContext connectContext;
+    public final NereidsPlanner planner;
+    public final TUniqueId queryId;
+    public final TQueryGlobals queryGlobals;
+    public final TQueryOptions queryOptions;
+    public final TDescriptorTable descriptorTable;
+    public final List<TPipelineWorkloadGroup> workloadGroups;
+    public final TNetworkAddress coordinatorAddress;
+    public final TNetworkAddress directConnectFrontendAddress;
+    public final long timeoutDeadline;
+    public final boolean twoPhaseExecution;
+
 
     private volatile Status status;
 
-    public CoordinatorContext(NereidsCoordinator coordinator) {
+    private CoordinatorContext(NereidsCoordinator coordinator,
+            ConnectContext connectContext,
+            NereidsPlanner planner,
+            TQueryGlobals queryGlobals,
+            TQueryOptions queryOptions,
+            TDescriptorTable descriptorTable,
+            List<TPipelineWorkloadGroup> workloadGroups,
+            TNetworkAddress coordinatorAddress,
+            TNetworkAddress directConnectFrontendAddress) {
+        this.connectContext = connectContext;
+        this.planner = planner;
+        this.queryId = connectContext.queryId();
+        this.queryGlobals = queryGlobals;
+        this.queryOptions = queryOptions;
+        this.descriptorTable = descriptorTable;
+        this.workloadGroups = workloadGroups;
+        this.coordinatorAddress = coordinatorAddress;
+        this.directConnectFrontendAddress = directConnectFrontendAddress;
+
+        // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
+        // else use exec_plan_fragments directly.
+        // we choose #fragments > 1 because in some cases
+        // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
+        // For example: select * from numbers("number"="10") will generate ExchangeNode and
+        // TableValuedFunctionScanNode, we should ensure TableValuedFunctionScanNode does not
+        // send data until ExchangeNode is ready to receive.
+        this.twoPhaseExecution = planner.getDistributedPlans().size() > 1;
+        this.timeoutDeadline = System.currentTimeMillis() + queryOptions.getExecutionTimeout() * 1000L;
+
         this.coordinator = Objects.requireNonNull(coordinator, "coordinator can not be null");
         this.status = new Status();
     }
@@ -41,5 +105,90 @@ public class CoordinatorContext {
         status = new Status(newStatus.getErrorCode(), newStatus.getErrorMsg());
         coordinator.cancelInternal(readCloneStatus());
         return originStatus;
+    }
+
+    public static CoordinatorContext build(NereidsPlanner planner, NereidsCoordinator coordinator) {
+        ConnectContext connectContext = planner.getCascadesContext().getConnectContext();
+        TQueryOptions queryOptions = initQueryOptions(connectContext);
+        TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
+        TDescriptorTable descriptorTable = planner.getDescTable().toThrift();
+        List<TPipelineWorkloadGroup> workloadGroup = computeWorkloadGroups(connectContext);
+        TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
+        String currentConnectedFEIp = connectContext.getCurrentConnectedFEIp();
+        TNetworkAddress directConnectFrontendAddress =
+                connectContext.isProxy() && !StringUtils.isBlank(currentConnectedFEIp)
+                        ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
+                        : coordinatorAddress;
+
+        return new CoordinatorContext(
+                coordinator, connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup,
+                coordinatorAddress, directConnectFrontendAddress
+        );
+    }
+
+    private static List<TPipelineWorkloadGroup> computeWorkloadGroups(ConnectContext connectContext) {
+        List<TPipelineWorkloadGroup> workloadGroup = ImmutableList.of();
+        if (Config.enable_workload_group) {
+            try {
+                workloadGroup = connectContext.getEnv().getWorkloadGroupMgr().getWorkloadGroup(connectContext);
+            } catch (UserException e) {
+                throw new NereidsException(e.getMessage(), e);
+            }
+        }
+        return workloadGroup;
+    }
+
+    private static TQueryOptions initQueryOptions(ConnectContext context) {
+        TQueryOptions queryOptions = context.getSessionVariable().toThrift();
+        queryOptions.setBeExecVersion(Config.be_exec_version);
+        queryOptions.setQueryTimeout(context.getExecTimeout());
+        queryOptions.setExecutionTimeout(context.getExecTimeout());
+        if (queryOptions.getExecutionTimeout() < 1) {
+            LOG.info("try set timeout less than 1", new RuntimeException(""));
+        }
+        queryOptions.setEnableScanNodeRunSerial(context.getSessionVariable().isEnableScanRunSerial());
+        queryOptions.setFeProcessUuid(ExecuteEnv.getInstance().getProcessUUID());
+        queryOptions.setWaitFullBlockScheduleTimes(context.getSessionVariable().getWaitFullBlockScheduleTimes());
+        queryOptions.setMysqlRowBinaryFormat(context.getCommand() == MysqlCommand.COM_STMT_EXECUTE);
+
+        setOptionsFromUserProperty(context, queryOptions);
+        return queryOptions;
+    }
+
+    private static TQueryGlobals initQueryGlobals(ConnectContext context) {
+        TQueryGlobals queryGlobals = new TQueryGlobals();
+        queryGlobals.setNowString(TimeUtils.getDatetimeFormatWithTimeZone().format(LocalDateTime.now()));
+        queryGlobals.setTimestampMs(System.currentTimeMillis());
+        queryGlobals.setNanoSeconds(LocalDateTime.now().getNano());
+        queryGlobals.setLoadZeroTolerance(false);
+        if (context.getSessionVariable().getTimeZone().equals("CST")) {
+            queryGlobals.setTimeZone(TimeUtils.DEFAULT_TIME_ZONE);
+        } else {
+            queryGlobals.setTimeZone(context.getSessionVariable().getTimeZone());
+        }
+        return queryGlobals;
+    }
+
+    private static void setOptionsFromUserProperty(ConnectContext connectContext, TQueryOptions queryOptions) {
+        String qualifiedUser = connectContext.getQualifiedUser();
+        // set cpu resource limit
+        int cpuLimit = Env.getCurrentEnv().getAuth().getCpuResourceLimit(qualifiedUser);
+        if (cpuLimit > 0) {
+            // overwrite the cpu resource limit from session variable;
+            TResourceLimit resourceLimit = new TResourceLimit();
+            resourceLimit.setCpuLimit(cpuLimit);
+            queryOptions.setResourceLimit(resourceLimit);
+        }
+        // set exec mem limit
+        long maxExecMemByte = connectContext.getSessionVariable().getMaxExecMemByte();
+        long memLimit = maxExecMemByte > 0 ? maxExecMemByte :
+                Env.getCurrentEnv().getAuth().getExecMemLimit(qualifiedUser);
+        if (memLimit > 0) {
+            // overwrite the exec_mem_limit from session variable;
+            queryOptions.setMemLimit(memLimit);
+            queryOptions.setMaxReservation(memLimit);
+            queryOptions.setInitialReservationTotalClaims(memLimit);
+            queryOptions.setBufferPoolLimit(memLimit);
+        }
     }
 }

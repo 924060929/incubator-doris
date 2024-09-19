@@ -11,7 +11,6 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.CoordinatorContext;
-import org.apache.doris.qe.ExecContext;
 import org.apache.doris.qe.ResultReceiver;
 import org.apache.doris.qe.RowBatch;
 import org.apache.doris.rpc.RpcException;
@@ -65,13 +64,12 @@ public class MultiResultReceivers {
                 .getLimit();
     }
 
-    public static MultiResultReceivers build(
-            ExecContext execContext, CoordinatorContext coordinatorContext) {
-        List<DistributedPlan> distributedPlans = execContext.planner.getDistributedPlans().valueList();
+    public static MultiResultReceivers build(CoordinatorContext coordinatorContext) {
+        List<DistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
         PipelineDistributedPlan topFragment =
                 (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
 
-        Boolean enableParallelResultSink = execContext.queryOptions.isEnableParallelResultSink()
+        Boolean enableParallelResultSink = coordinatorContext.queryOptions.isEnableParallelResultSink()
                 && topFragment.getFragmentJob().getFragment().getSink() instanceof ResultSink;
 
         List<AssignedJob> topInstances = topFragment.getInstanceJobs();
@@ -81,12 +79,12 @@ public class MultiResultReceivers {
             TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
             receivers.add(
                     new ResultReceiver(
-                            execContext.queryId,
+                            coordinatorContext.queryId,
                             topInstance.instanceId(),
                             topWorker.id(),
                             execBeAddr,
-                            execContext.timeoutDeadline,
-                            execContext.planner.getCascadesContext()
+                            coordinatorContext.timeoutDeadline,
+                            coordinatorContext.planner.getCascadesContext()
                                     .getConnectContext()
                                     .getSessionVariable()
                                     .getMaxMsgSizeOfResultReceiver(),
@@ -94,7 +92,7 @@ public class MultiResultReceivers {
                     )
             );
         }
-        return new MultiResultReceivers(execContext.planner, coordinatorContext, execContext.queryId, receivers);
+        return new MultiResultReceivers(coordinatorContext.planner, coordinatorContext, coordinatorContext.queryId, receivers);
     }
 
     public boolean isEof() {
