@@ -26,14 +26,18 @@ import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
 import org.apache.doris.qe.runtime.MultiResultReceivers;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
 import org.apache.doris.qe.runtime.ThriftExecutionBuilder;
+import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -100,6 +104,21 @@ public class NereidsCoordinator extends Coordinator {
         LOG.warn("Cancel execution of query {}, this is a outside invoke, cancelReason {}",
                 DebugUtil.printId(queryId), cancelReason);
         cancelInternal(cancelReason);
+    }
+
+    // this method is used to provide profile metrics: `Instances Num Per BE`
+    @Override
+    public Map<String, Integer> getBeToInstancesNum() {
+        if (executionTask == null) {
+            return ImmutableMap.of();
+        }
+        Map<String, Integer> result = Maps.newLinkedHashMap();
+        for (MultiFragmentsPipelineTask beTasks : executionTask.getChildrenTasks().values()) {
+            TNetworkAddress brpcAddress = beTasks.getBackend().getBrpcAddress();
+            String brpcAddrString = brpcAddress.hostname.concat(":").concat("" + brpcAddress.port);
+            result.put(brpcAddrString, beTasks.getChildrenTasks().size());
+        }
+        return result;
     }
 
     protected void cancelInternal(Status cancelReason) {
