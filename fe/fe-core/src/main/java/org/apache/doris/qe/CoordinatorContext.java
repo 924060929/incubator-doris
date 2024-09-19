@@ -45,6 +45,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 public class CoordinatorContext {
@@ -115,6 +116,14 @@ public class CoordinatorContext {
 
     public void cancelSchedule(Status cancelReason) {
         coordinator.cancelInternal(cancelReason);
+    }
+
+    public synchronized void withLock(Runnable callback) {
+        callback.run();
+    }
+
+    public synchronized <T> T withLock(Callable<T> callback) throws Exception {
+        return callback.call();
     }
 
     public synchronized Status readCloneStatus() {
