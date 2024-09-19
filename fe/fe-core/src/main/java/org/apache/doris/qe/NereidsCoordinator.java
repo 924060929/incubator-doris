@@ -98,6 +98,11 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     @Override
+    public boolean isQueryCancelled() {
+        return coordinatorContext.readCloneStatus().isCancelled();
+    }
+
+    @Override
     public void cancel(Status cancelReason) {
         for (ScanNode scanNode : scanNodes) {
             scanNode.stop();
