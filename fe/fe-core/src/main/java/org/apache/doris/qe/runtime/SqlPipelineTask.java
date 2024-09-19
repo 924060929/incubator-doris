@@ -74,17 +74,22 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     }
 
     @Override
-    public void execute() throws UserException, RpcException {
-        sendAndWaitPhaseOneRpc();
-        if (coordinatorContext.twoPhaseExecution) {
-            sendAndWaitPhaseTwoRpc();
-        }
+    public void execute() throws Exception {
+        coordinatorContext.withLock(() -> {
+            sendAndWaitPhaseOneRpc();
+            if (coordinatorContext.twoPhaseExecution) {
+                sendAndWaitPhaseTwoRpc();
+            }
+            return null;
+        });
     }
 
     public void cancelSchedule(Status cancelReason) {
-        for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
-            fragmentsTask.cancelExecute(cancelReason);
-        }
+        coordinatorContext.withLock(() -> {
+            for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
+                fragmentsTask.cancelExecute(cancelReason);
+            }
+        });
     }
 
     @Override
