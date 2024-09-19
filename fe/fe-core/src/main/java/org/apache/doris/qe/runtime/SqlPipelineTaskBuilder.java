@@ -4,7 +4,6 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.qe.CoordinatorContext;
-import org.apache.doris.qe.ExecContext;
 import org.apache.doris.qe.protocol.TFastSerializer;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TPipelineFragmentParams;
@@ -24,31 +23,28 @@ import java.util.stream.Collectors;
 public class SqlPipelineTaskBuilder {
     private static final Logger LOG = LogManager.getLogger(SqlPipelineTaskBuilder.class);
 
-    private final ExecContext execContext;
     private final CoordinatorContext coordinatorContext;
 
-    private SqlPipelineTaskBuilder(ExecContext execContext, CoordinatorContext coordinatorContext) {
-        this.execContext = Objects.requireNonNull(execContext, "execContext can not be null");
+    private SqlPipelineTaskBuilder(CoordinatorContext coordinatorContext) {
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
     }
 
-    public static SqlPipelineTask build(ExecContext execContext, CoordinatorContext coordinatorContext,
+    public static SqlPipelineTask build(CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
-        SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(execContext, coordinatorContext);
-        return builder.buildTask(execContext, coordinatorContext, workerToFragmentsParam);
+        SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(coordinatorContext);
+        return builder.buildTask(coordinatorContext, workerToFragmentsParam);
     }
 
-    private SqlPipelineTask buildTask(ExecContext execContext, CoordinatorContext coordinatorContext,
+    private SqlPipelineTask buildTask(CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
         return new SqlPipelineTask(
-                execContext,
                 coordinatorContext,
-                buildMultiFragmentTasks(execContext, workerToFragmentsParam)
+                buildMultiFragmentTasks(coordinatorContext, workerToFragmentsParam)
         );
     }
 
     private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
-            ExecContext execContext, Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
+            CoordinatorContext coordinatorContext, Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
 
         Map<DistributedPlanWorker, ByteString> workerToSerializeFragments = serializeFragments(workerToFragmentsParam);
 
@@ -63,7 +59,7 @@ public class SqlPipelineTaskBuilder {
             fragmentTasks.put(
                     worker.id(),
                     new MultiFragmentsPipelineTask(
-                            execContext.queryId,
+                            coordinatorContext.queryId,
                             backend,
                             fragmentParamsList,
                             serializeFragments,
