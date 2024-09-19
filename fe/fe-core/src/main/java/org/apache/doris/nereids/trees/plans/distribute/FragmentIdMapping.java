@@ -73,4 +73,9 @@ public class FragmentIdMapping<T> extends TreeMap<PlanFragmentId, T> {
     public <S extends T> List<S> valueList() {
         return (List<S>) Utils.fastToImmutableList(values());
     }
+
+    public T last() {
+        List<T> valueList = valueList();
+        return valueList.get(valueList.size() - 1);
+    }
 }
