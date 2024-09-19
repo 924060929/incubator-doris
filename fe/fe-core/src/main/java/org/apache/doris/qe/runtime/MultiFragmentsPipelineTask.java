@@ -1,3 +1,20 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.common.Status;
@@ -39,7 +56,7 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     // immutable parameters
     private final TUniqueId queryId;
     private final Backend backend;
-    private final BackendServiceProxy backendClientProxy = BackendServiceProxy.getInstance();
+    private final BackendServiceProxy backendClientProxy;
 
     // mutable states
 
@@ -50,11 +67,13 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     private final AtomicBoolean cancelInProcess = new AtomicBoolean();
 
     public MultiFragmentsPipelineTask(
-            TUniqueId queryId, Backend backend, TPipelineFragmentParamsList fragmentsParams,
-            ByteString serializeFragments, Map<Integer, SingleFragmentPipelineTask> fragmentTasks) {
+            TUniqueId queryId, Backend backend, BackendServiceProxy backendClientProxy,
+            TPipelineFragmentParamsList fragmentsParams, ByteString serializeFragments,
+            Map<Integer, SingleFragmentPipelineTask> fragmentTasks) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
         this.queryId = Objects.requireNonNull(queryId, "queryId can not be null");
         this.backend = Objects.requireNonNull(backend, "backend can not be null");
+        this.backendClientProxy = Objects.requireNonNull(backendClientProxy, "backendClientProxy can not be null");
         this.fragmentParamsList = Objects.requireNonNull(fragmentsParams, "fragmentParamsList can not be null");
         this.serializeFragments = Objects.requireNonNull(
                 serializeFragments, "serializeFragments can not be null"
@@ -116,7 +135,7 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
                     }
 
                     public void onFailure(Throwable t) {
-                        cancelInProcess.set(false);;
+                        cancelInProcess.set(false);
                         LOG.warn("Failed to cancel query {} backend: {}, reason: {}",
                                 DebugUtil.printId(queryId), backend,  cancelReason.toString(), t);
                     }
@@ -129,7 +148,6 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
             }
         } catch (Exception e) {
             LOG.warn("catch a exception", e);
-            return;
         }
     }
 

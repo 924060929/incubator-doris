@@ -19,6 +19,7 @@ package org.apache.doris.qe;
 
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.common.Status;
+import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
@@ -51,6 +52,8 @@ public class NereidsCoordinator extends Coordinator {
         super(context, analyzer, planner, statsErrorEstimator);
 
         this.coordinatorContext = CoordinatorContext.build(nereidsPlanner, this);
+        this.coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
+
         this.resultReceivers = MultiResultReceivers.build(coordinatorContext);
     }
 
