@@ -34,7 +34,6 @@ public class MultiResultReceivers {
     // constant fields
     private final NereidsPlanner nereidsPlanner;
     private final TUniqueId queryId;
-    private final int instanceNum;
     private final long limitRows;
 
     // mutable field
@@ -51,10 +50,6 @@ public class MultiResultReceivers {
         this.coordinatorContext = coordinatorContext;
         this.nereidsPlanner = planner;
         this.queryId = queryId;
-        this.instanceNum = planner.getDistributedPlans().valueList().stream()
-                .map(plan -> ((PipelineDistributedPlan) plan).getInstanceJobs().size())
-                .reduce(Integer::sum)
-                .get();
 
         List<DistributedPlan> fragments = nereidsPlanner.getDistributedPlans().valueList();
         this.limitRows = fragments.get(fragments.size() - 1)
@@ -151,7 +146,9 @@ public class MultiResultReceivers {
 
             // if this query is a block query do not cancel.
             boolean hasLimit = limitRows > 0;
-            if (!nereidsPlanner.isBlockQuery() && instanceNum > 1 && hasLimit && numReceivedRows >= limitRows) {
+            if (!nereidsPlanner.isBlockQuery()
+                    && coordinatorContext.instanceNum > 1
+                    && hasLimit && numReceivedRows >= limitRows) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("no block query, return num >= limit rows, need cancel");
                 }

@@ -43,6 +43,7 @@ public class NereidsCoordinator extends Coordinator {
 
     private final CoordinatorContext coordinatorContext;
     private final MultiResultReceivers resultReceivers;
+
     private volatile SqlPipelineTask executionTask;
 
     public NereidsCoordinator(ConnectContext context, Analyzer analyzer,
@@ -55,6 +56,8 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     protected void execInternal() throws Exception {
+        QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
+
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftExecutionBuilder.plansToThrift(coordinatorContext);
         executionTask = SqlPipelineTaskBuilder.build(coordinatorContext, workerToFragments);

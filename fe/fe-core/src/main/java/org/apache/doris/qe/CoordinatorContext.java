@@ -8,6 +8,7 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.service.ExecuteEnv;
 import org.apache.doris.thrift.TDescriptorTable;
 import org.apache.doris.thrift.TNetworkAddress;
@@ -42,6 +43,7 @@ public class CoordinatorContext {
     public final TNetworkAddress directConnectFrontendAddress;
     public final long timeoutDeadline;
     public final boolean twoPhaseExecution;
+    public final int instanceNum;
 
     // these are some mutable states
     private volatile Status status;
@@ -77,6 +79,11 @@ public class CoordinatorContext {
 
         this.coordinator = Objects.requireNonNull(coordinator, "coordinator can not be null");
         this.status = new Status();
+
+        this.instanceNum = planner.getDistributedPlans().valueList()
+                .stream().map(plan -> ((PipelineDistributedPlan) plan).getInstanceJobs().size())
+                .reduce(Integer::sum)
+                .get();
     }
 
     public void cancelSchedule(Status cancelReason) {
