@@ -1,14 +1,32 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.common.Config;
-import org.apache.doris.common.Pair;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
+import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
 import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.SimpleScheduler;
+import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
@@ -19,7 +37,9 @@ import org.apache.doris.thrift.TUniqueId;
 import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.joda.time.DateTime;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -40,13 +60,16 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     // immutable parameters
     private final long timeoutDeadline;
     private final CoordinatorContext coordinatorContext;
+    private final BackendServiceProxy backendServiceProxy;
 
     // mutable states
     public SqlPipelineTask(
             CoordinatorContext coordinatorContext,
+            BackendServiceProxy backendServiceProxy,
             Map<Long, MultiFragmentsPipelineTask> fragmentTasks) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
+        this.backendServiceProxy = Objects.requireNonNull(backendServiceProxy, "backendServiceProxy can not be null");
         this.timeoutDeadline = coordinatorContext.timeoutDeadline;
     }
 
@@ -75,34 +98,42 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     }
 
     private void sendAndWaitPhaseOneRpc() throws UserException, RpcException {
-        List<Pair<MultiFragmentsPipelineTask, Future<PExecPlanFragmentResult>>> futures = Lists.newArrayList();
-        try {
-            for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
-                futures.add(Pair.of(
-                        fragmentsTask, fragmentsTask.sendPhaseOneRpc(coordinatorContext.twoPhaseExecution))
-                );
-            }
-        } catch (Throwable t) {
-            throw new IllegalStateException(t.getMessage(), t);
+        List<RpcInfo> rpcs = Lists.newArrayList();
+        for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
+            rpcs.add(new RpcInfo(
+                    fragmentsTask,
+                    DateTime.now().getMillis(),
+                    fragmentsTask.sendPhaseOneRpc(coordinatorContext.twoPhaseExecution))
+            );
         }
-        waitPipelineRpc(futures, timeoutDeadline - System.currentTimeMillis(), "send fragments");
+        Map<TNetworkAddress, List<Long>> rpcPhase1Latency = waitPipelineRpc(rpcs,
+                timeoutDeadline - System.currentTimeMillis(), "send fragments");
+
+        coordinatorContext.updateProfileIfPresent(profile -> profile.updateFragmentRpcCount(rpcs.size()));
+        coordinatorContext.updateProfileIfPresent(SummaryProfile::setFragmentSendPhase1Time);
+        coordinatorContext.updateProfileIfPresent(profile -> profile.setRpcPhase1Latency(rpcPhase1Latency));
     }
 
-    private void sendAndWaitPhaseTwoRpc() {
-        List<Pair<MultiFragmentsPipelineTask, Future<PExecPlanFragmentResult>>> futures = Lists.newArrayList();
-        try {
-            for (MultiFragmentsPipelineTask fragmentTask : childrenTasks.allTasks()) {
-                futures.add(Pair.of(fragmentTask, fragmentTask.sendPhaseTwoRpc()));
-            }
-            waitPipelineRpc(futures, timeoutDeadline - System.currentTimeMillis(), "send execution start");
-        } catch (Throwable t) {
-            throw new IllegalStateException(t.getMessage(), t);
+    private void sendAndWaitPhaseTwoRpc() throws RpcException, UserException {
+        List<RpcInfo> rpcs = Lists.newArrayList();
+        for (MultiFragmentsPipelineTask fragmentTask : childrenTasks.allTasks()) {
+            rpcs.add(new RpcInfo(
+                    fragmentTask,
+                    DateTime.now().getMillis(),
+                    fragmentTask.sendPhaseTwoRpc())
+            );
         }
+
+        Map<TNetworkAddress, List<Long>> rpcPhase2Latency = waitPipelineRpc(rpcs,
+                timeoutDeadline - System.currentTimeMillis(), "send execution start");
+        coordinatorContext.updateProfileIfPresent(profile -> profile.updateFragmentRpcCount(rpcs.size()));
+        coordinatorContext.updateProfileIfPresent(SummaryProfile::setFragmentSendPhase2Time);
+        coordinatorContext.updateProfileIfPresent(profile -> profile.setRpcPhase2Latency(rpcPhase2Latency));
     }
 
-    private void waitPipelineRpc(
-            List<Pair<MultiFragmentsPipelineTask, Future<PExecPlanFragmentResult>>> taskAndResults,
-            long leftTimeMs, String operation) throws UserException, RpcException {
+    private Map<TNetworkAddress, List<Long>> waitPipelineRpc(
+            List<RpcInfo> rpcs,
+            long leftTimeMs, String operation) throws RpcException, UserException {
         TQueryOptions queryOptions = coordinatorContext.queryOptions;
         TUniqueId queryId = coordinatorContext.queryId;
 
@@ -125,14 +156,27 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             throw new UserException(msg);
         }
 
+        // BE -> (RPC latency from FE to BE, Execution latency on bthread, Duration of doing work, RPC latency from BE
+        // to FE)
+        Map<TNetworkAddress, List<Long>> beToPrepareLatency = new HashMap<>();
         long timeoutMs = Math.min(leftTimeMs, Config.remote_fragment_exec_timeout_ms);
-        for (Pair<MultiFragmentsPipelineTask, Future<PExecPlanFragmentResult>> taskAndResult : taskAndResults) {
+        for (RpcInfo rpc : rpcs) {
             TStatusCode code;
             String errMsg = null;
             Exception exception = null;
 
+            Backend backend = rpc.task.getBackend();
+            long beId = backend.getId();
+            TNetworkAddress brpcAddress = backend.getBrpcAddress();
+
             try {
-                PExecPlanFragmentResult result = taskAndResult.second.get(timeoutMs, TimeUnit.MILLISECONDS);
+                PExecPlanFragmentResult result = rpc.future.get(timeoutMs, TimeUnit.MILLISECONDS);
+                long rpcDone = DateTime.now().getMillis();
+                beToPrepareLatency.put(brpcAddress,
+                        Lists.newArrayList(result.getReceivedTime() - rpc.startTime,
+                                result.getExecutionTime() - result.getReceivedTime(),
+                                result.getExecutionDoneTime() - result.getExecutionTime(),
+                                rpcDone - result.getExecutionDoneTime()));
                 code = TStatusCode.findByValue(result.getStatus().getStatusCode());
                 if (code == null) {
                     code = TStatusCode.INTERNAL_ERROR;
@@ -141,45 +185,62 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
                 if (code != TStatusCode.OK) {
                     if (!result.getStatus().getErrorMsgsList().isEmpty()) {
                         errMsg = result.getStatus().getErrorMsgsList().get(0);
+                    } else {
+                        errMsg = operation + " failed. backend id: " + beId;
                     }
                 }
             } catch (ExecutionException e) {
                 exception = e;
                 code = TStatusCode.THRIFT_RPC_ERROR;
+                backendServiceProxy.removeProxy(brpcAddress);
             } catch (InterruptedException e) {
                 exception = e;
                 code = TStatusCode.INTERNAL_ERROR;
+                backendServiceProxy.removeProxy(brpcAddress);
             } catch (TimeoutException e) {
                 exception = e;
+                errMsg = String.format(
+                        "timeout when waiting for %s rpc, query timeout:%d, left timeout for this operation:%d",
+                        operation, queryOptions.getExecutionTimeout(), timeoutMs / 1000);
+                LOG.warn("Query {} {}", DebugUtil.printId(queryId), errMsg);
                 code = TStatusCode.TIMEOUT;
+                backendServiceProxy.removeProxy(brpcAddress);
             }
 
             if (code != TStatusCode.OK) {
-                MultiFragmentsPipelineTask fragmentTask = taskAndResult.first;
-                Backend backend = fragmentTask.getBackend();
-                TNetworkAddress brpcAddr = backend.getBrpcAddress();
-
-                if (exception != null) {
+                if (exception != null && errMsg == null) {
                     errMsg = operation + " failed. " + exception.getMessage();
                 }
-
-                Status errorStatus = new Status(TStatusCode.INTERNAL_ERROR, errMsg);
-                coordinatorContext.updateStatusIfOk(errorStatus);
-                cancelSchedule(errorStatus);
+                Status cancelStatus = new Status(TStatusCode.INTERNAL_ERROR, errMsg);
+                coordinatorContext.updateStatusIfOk(cancelStatus);
+                coordinatorContext.cancelSchedule(cancelStatus);
                 switch (code) {
                     case TIMEOUT:
-                        MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(brpcAddr.hostname)
+                        MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(brpcAddress.hostname)
                                 .increase(1L);
-                        throw new RpcException(brpcAddr.hostname, errMsg, exception);
+                        throw new RpcException(brpcAddress.hostname, errMsg, exception);
                     case THRIFT_RPC_ERROR:
-                        MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(brpcAddr.hostname)
+                        MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(brpcAddress.hostname)
                                 .increase(1L);
-                        SimpleScheduler.addToBlacklist(backend.getId(), errMsg);
-                        throw new RpcException(brpcAddr.hostname, errMsg, exception);
+                        SimpleScheduler.addToBlacklist(beId, errMsg);
+                        throw new RpcException(brpcAddress.hostname, errMsg, exception);
                     default:
                         throw new UserException(errMsg, exception);
                 }
             }
+        }
+        return beToPrepareLatency;
+    }
+
+    private static class RpcInfo {
+        public final MultiFragmentsPipelineTask task;
+        public final long startTime;
+        public final Future<PExecPlanFragmentResult> future;
+
+        public RpcInfo(MultiFragmentsPipelineTask task, long startTime, Future<PExecPlanFragmentResult> future) {
+            this.task = task;
+            this.startTime = startTime;
+            this.future = future;
         }
     }
 }

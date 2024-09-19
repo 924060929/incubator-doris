@@ -34,17 +34,17 @@ public class TFastSerializer {
     /**
      * This is the byte array that data is actually serialized into
      */
-    private final NoResizeByteOutputStream baos_;
+    private final NoResizeByteOutputStream baos;
 
     /**
      * This transport wraps that byte array
      */
-    private final TIOStreamTransport transport_;
+    private final TIOStreamTransport transport;
 
     /**
      * Internal protocol used for serializing objects.
      */
-    private TProtocol protocol_;
+    private TProtocol protocol;
 
     /**
      * Create a new TSerializer. It will use the TProtocol specified by the
@@ -55,9 +55,9 @@ public class TFastSerializer {
      * @throws TTransportException if there an error initializing the underlying transport.
      */
     public TFastSerializer(int initCapacity, TProtocolFactory protocolFactory) throws TTransportException {
-        baos_ = new NoResizeByteOutputStream(initCapacity);
-        transport_ = new TIOStreamTransport(new TConfiguration(), baos_);
-        protocol_ = protocolFactory.getProtocol(transport_);
+        baos = new NoResizeByteOutputStream(initCapacity);
+        transport = new TIOStreamTransport(new TConfiguration(), baos);
+        protocol = protocolFactory.getProtocol(transport);
     }
 
     /**
@@ -70,9 +70,9 @@ public class TFastSerializer {
      * @throws TException if an error is encountered during serialization.
      */
     public ByteString serialize(TBase base) throws TException {
-        baos_.reset();
-        base.write(protocol_);
-        return baos_.toByteString();
+        baos.reset();
+        base.write(protocol);
+        return baos.toByteString();
     }
 
     /**

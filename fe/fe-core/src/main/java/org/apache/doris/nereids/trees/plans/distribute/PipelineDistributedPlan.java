@@ -81,8 +81,8 @@ public class PipelineDistributedPlan extends DistributedPlan {
                 fragmentJob.getFragment().getExplainString(TExplainLevel.VERBOSE).trim(), "  "
         );
 
-        String destinationStr = destinations.stream().
-                map(destination -> "    " + DebugUtil.printId(destination.instanceId()))
+        String destinationStr = destinations.stream()
+                .map(destination -> "    " + DebugUtil.printId(destination.instanceId()))
                 .collect(Collectors.joining(",\n"));
         return "PipelineDistributedPlan(\n"
                 + "  id: " + displayFragmentId + ",\n"
