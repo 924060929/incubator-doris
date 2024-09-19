@@ -43,7 +43,6 @@ public class CoordinatorContext {
     public final long timeoutDeadline;
     public final boolean twoPhaseExecution;
 
-
     // these are some mutable states
     private volatile Status status;
 
