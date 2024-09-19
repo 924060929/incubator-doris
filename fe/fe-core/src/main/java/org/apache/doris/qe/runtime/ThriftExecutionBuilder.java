@@ -17,6 +17,9 @@
 
 package org.apache.doris.qe.runtime;
 
+import org.apache.doris.analysis.StorageBackend.StorageType;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.FsBroker;
 import org.apache.doris.common.Config;
 import org.apache.doris.datasource.FileQueryScanNode;
 import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
@@ -29,6 +32,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
+import org.apache.doris.planner.ResultFileSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.CoordinatorContext;
@@ -38,7 +42,6 @@ import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TPipelineInstanceParams;
-import org.apache.doris.thrift.TPlanFragment;
 import org.apache.doris.thrift.TPlanFragmentDestination;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TRuntimeFilterParams;
@@ -70,11 +73,9 @@ public class ThriftExecutionBuilder {
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker = Maps.newLinkedHashMap();
         int currentInstanceIndex = 0;
         for (PipelineDistributedPlan currentFragmentPlan : distributedPlans) {
-            TPlanFragment currentFragmentThrift = currentFragmentPlan.getFragmentJob().getFragment().toThrift();
             Map<Integer, TFileScanRangeParams> fileScanRangeParams = computeFileScanRangeParams(currentFragmentPlan);
             Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
-
             List<TPlanFragmentDestination> destinations = destinationToThrift(currentFragmentPlan);
 
             for (int recvrId = 0; recvrId < currentFragmentPlan.getInstanceJobs().size(); recvrId++) {
@@ -83,7 +84,7 @@ public class ThriftExecutionBuilder {
                 //             except add instanceParam into local_params
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
-                        exchangeSenderNum, currentFragmentThrift, fileScanRangeParams,
+                        exchangeSenderNum, fileScanRangeParams,
                         workerProcessInstanceNum, destinations, coordinatorContext);
                 TPipelineInstanceParams instanceParam
                         = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
@@ -170,11 +171,12 @@ public class ThriftExecutionBuilder {
     private static TPipelineFragmentParams fragmentToThriftIfAbsent(
             PipelineDistributedPlan fragmentPlan, AssignedJob assignedJob,
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentParams,
-            Map<Integer, Integer> exchangeSenderNum, TPlanFragment fragmentThrift,
+            Map<Integer, Integer> exchangeSenderNum,
             Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
             Multiset<DistributedPlanWorker> workerProcessInstanceNum,
             List<TPlanFragmentDestination> destinations, CoordinatorContext coordinatorContext) {
-        return workerToFragmentParams.computeIfAbsent(assignedJob.getAssignedWorker(), worker -> {
+        DistributedPlanWorker worker = assignedJob.getAssignedWorker();
+        return workerToFragmentParams.computeIfAbsent(worker, w -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();
             ConnectContext connectContext = coordinatorContext.connectContext;
 
@@ -211,7 +213,21 @@ public class ThriftExecutionBuilder {
             params.getQueryOptions().setMemLimit(memLimit);
 
             params.setSendQueryStatisticsWithEveryBatch(fragment.isTransferQueryStatisticsWithEveryBatch());
-            params.setFragment(fragmentThrift);
+
+            // NOTE: we should first set broker host port, and then transform fragment to thrift
+            if (fragment.getSink() instanceof ResultFileSink) {
+                ResultFileSink resultFileSink = (ResultFileSink) fragment.getSink();
+                if (resultFileSink.getStorageType() == StorageType.BROKER) {
+                    try {
+                        FsBroker broker = Env.getCurrentEnv().getBrokerMgr()
+                                .getBroker(resultFileSink.getBrokerName(), worker.host());
+                        resultFileSink.setBrokerAddr(broker.host, broker.port);
+                    } catch (Throwable t) {
+                        throw new IllegalStateException("Can not compute broker address: " + t, t);
+                    }
+                }
+            }
+            params.setFragment(fragment.toThrift());
             params.setLocalParams(Lists.newArrayList());
             params.setWorkloadGroups(coordinatorContext.workloadGroups);
 
