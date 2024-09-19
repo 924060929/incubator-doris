@@ -25,6 +25,7 @@ import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.runtime.MultiResultReceivers;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
 import org.apache.doris.qe.runtime.ThriftExecutionBuilder;
@@ -42,16 +43,16 @@ public class NereidsCoordinator extends Coordinator {
 
     private final CoordinatorContext coordinatorContext;
     private final ExecContext execContext;
+    private final MultiResultReceivers resultReceivers;
     private volatile SqlPipelineTask executionTask;
 
     public NereidsCoordinator(ConnectContext context, Analyzer analyzer,
             Planner planner, StatsErrorEstimator statsErrorEstimator, NereidsPlanner nereidsPlanner) {
         super(context, analyzer, planner, statsErrorEstimator);
-        this.coordinatorContext = new CoordinatorContext(
-                this::isEof,
-                this::cancelInternal
-        );
+
         this.execContext = ThriftExecutionBuilder.buildExecContext(nereidsPlanner);
+        this.coordinatorContext = new CoordinatorContext(this);
+        this.resultReceivers = MultiResultReceivers.build(execContext, coordinatorContext);
     }
 
     @Override
@@ -64,14 +65,11 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public RowBatch getNext() throws Exception {
-        return executionTask.getResultReceivers().getNext();
+        return resultReceivers.getNext();
     }
 
     public boolean isEof() {
-        if (executionTask == null) {
-            return false;
-        }
-        return executionTask.getResultReceivers().isEof();
+        return resultReceivers.isEof();
     }
 
     @Override
