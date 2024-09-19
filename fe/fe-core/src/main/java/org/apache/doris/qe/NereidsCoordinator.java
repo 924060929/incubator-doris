@@ -77,10 +77,9 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     protected void execInternal() throws Exception {
-        QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
-
         processTopFragment(coordinatorContext.connectContext, coordinatorContext.planner);
         coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
+        QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
 
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
