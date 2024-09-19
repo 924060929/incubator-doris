@@ -8,7 +8,6 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
 import org.apache.doris.qe.CoordinatorContext;
-import org.apache.doris.qe.ExecContext;
 import org.apache.doris.qe.SimpleScheduler;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.system.Backend;
@@ -40,24 +39,21 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
 
     // immutable parameters
     private final long timeoutDeadline;
-    private final ExecContext execContext;
     private final CoordinatorContext coordinatorContext;
 
     // mutable states
     public SqlPipelineTask(
-            ExecContext execContext,
             CoordinatorContext coordinatorContext,
             Map<Long, MultiFragmentsPipelineTask> fragmentTasks) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
-        this.execContext = Objects.requireNonNull(execContext, "execContext can not be null");
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
-        this.timeoutDeadline = execContext.timeoutDeadline;
+        this.timeoutDeadline = coordinatorContext.timeoutDeadline;
     }
 
     @Override
     public void execute() throws UserException, RpcException {
         sendAndWaitPhaseOneRpc();
-        if (execContext.twoPhaseExecution) {
+        if (coordinatorContext.twoPhaseExecution) {
             sendAndWaitPhaseTwoRpc();
         }
     }
@@ -82,7 +78,9 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         List<Pair<MultiFragmentsPipelineTask, Future<PExecPlanFragmentResult>>> futures = Lists.newArrayList();
         try {
             for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
-                futures.add(Pair.of(fragmentsTask, fragmentsTask.sendPhaseOneRpc(execContext.twoPhaseExecution)));
+                futures.add(Pair.of(
+                        fragmentsTask, fragmentsTask.sendPhaseOneRpc(coordinatorContext.twoPhaseExecution))
+                );
             }
         } catch (Throwable t) {
             throw new IllegalStateException(t.getMessage(), t);
@@ -105,8 +103,8 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     private void waitPipelineRpc(
             List<Pair<MultiFragmentsPipelineTask, Future<PExecPlanFragmentResult>>> taskAndResults,
             long leftTimeMs, String operation) throws UserException, RpcException {
-        TQueryOptions queryOptions = execContext.queryOptions;
-        TUniqueId queryId = execContext.queryId;
+        TQueryOptions queryOptions = coordinatorContext.queryOptions;
+        TUniqueId queryId = coordinatorContext.queryId;
 
         if (leftTimeMs <= 0) {
             long currentTimeMillis = System.currentTimeMillis();
