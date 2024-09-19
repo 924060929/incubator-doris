@@ -29,6 +29,7 @@ import java.util.Objects;
 public class CoordinatorContext {
     private static final Logger LOG = LogManager.getLogger(CoordinatorContext.class);
 
+    // these are some constant parameters
     public final NereidsCoordinator coordinator;
     public final ConnectContext connectContext;
     public final NereidsPlanner planner;
@@ -43,6 +44,7 @@ public class CoordinatorContext {
     public final boolean twoPhaseExecution;
 
 
+    // these are some mutable states
     private volatile Status status;
 
     private CoordinatorContext(NereidsCoordinator coordinator,
