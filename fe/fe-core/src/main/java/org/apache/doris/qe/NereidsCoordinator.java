@@ -69,8 +69,6 @@ public class NereidsCoordinator extends Coordinator {
         super(context, analyzer, planner, statsErrorEstimator);
 
         this.coordinatorContext = CoordinatorContext.build(nereidsPlanner, this);
-        this.coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
-
         this.resultReceivers = MultiResultReceivers.build(coordinatorContext);
 
         Preconditions.checkState(!planner.getFragments().isEmpty() && coordinatorContext.instanceNum > 0,
@@ -82,6 +80,8 @@ public class NereidsCoordinator extends Coordinator {
         QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
 
         processTopFragment(coordinatorContext.connectContext, coordinatorContext.planner);
+        coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
+
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
         executionTask = SqlPipelineTaskBuilder.build(coordinatorContext, workerToFragments);
