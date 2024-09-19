@@ -18,19 +18,31 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.analysis.Analyzer;
+import org.apache.doris.analysis.StorageBackend;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.FsBroker;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
+import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
+import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
+import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.Planner;
+import org.apache.doris.planner.ResultFileSink;
+import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.ConnectContext.ConnectType;
 import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
 import org.apache.doris.qe.runtime.MultiResultReceivers;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
-import org.apache.doris.qe.runtime.ThriftExecutionBuilder;
+import org.apache.doris.qe.runtime.ThriftPlansBuilder;
+import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TUniqueId;
@@ -69,8 +81,9 @@ public class NereidsCoordinator extends Coordinator {
     protected void execInternal() throws Exception {
         QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
 
+        processTopFragment(coordinatorContext.connectContext, coordinatorContext.planner);
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
-                = ThriftExecutionBuilder.plansToThrift(coordinatorContext);
+                = ThriftPlansBuilder.plansToThrift(coordinatorContext);
         executionTask = SqlPipelineTaskBuilder.build(coordinatorContext, workerToFragments);
         executionTask.execute();
     }
@@ -124,6 +137,47 @@ public class NereidsCoordinator extends Coordinator {
     protected void cancelInternal(Status cancelReason) {
         if (executionTask != null) {
             executionTask.cancelSchedule(cancelReason);
+        }
+    }
+
+    private void processTopFragment(ConnectContext connectContext, NereidsPlanner nereidsPlanner)
+            throws AnalysisException {
+        PipelineDistributedPlan topPlan = (PipelineDistributedPlan) nereidsPlanner.getDistributedPlans().last();
+        setForArrowFlight(connectContext, topPlan);
+        setForBroker(topPlan);
+    }
+
+    private void setForArrowFlight(ConnectContext connectContext, PipelineDistributedPlan topPlan) {
+        DataSink topDataSink = topPlan.getFragmentJob().getFragment().getSink();
+        if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
+            if (connectContext != null && !connectContext.isReturnResultFromLocal()) {
+                Preconditions.checkState(connectContext.getConnectType().equals(ConnectType.ARROW_FLIGHT_SQL));
+
+                AssignedJob firstInstance = topPlan.getInstanceJobs().get(0);
+                BackendWorker worker = (BackendWorker) firstInstance.getAssignedWorker();
+                Backend backend = worker.getBackend();
+
+                connectContext.setFinstId(firstInstance.instanceId());
+                if (backend.getArrowFlightSqlPort() < 0) {
+                    throw new IllegalStateException("be arrow_flight_sql_port cannot be empty.");
+                }
+                connectContext.setResultFlightServerAddr(backend.getArrowFlightAddress());
+                connectContext.setResultInternalServiceAddr(backend.getBrpcAddress());
+                connectContext.setResultOutputExprs(topPlan.getFragmentJob().getFragment().getOutputExprs());
+            }
+        }
+    }
+
+    private void setForBroker(PipelineDistributedPlan topPlan) throws AnalysisException {
+        DataSink topDataSink = topPlan.getFragmentJob().getFragment().getSink();
+        if (topDataSink instanceof ResultFileSink
+                && ((ResultFileSink) topDataSink).getStorageType() == StorageBackend.StorageType.BROKER) {
+            // set the broker address for OUTFILE sink
+            ResultFileSink topResultFileSink = (ResultFileSink) topDataSink;
+            DistributedPlanWorker worker = topPlan.getInstanceJobs().get(0).getAssignedWorker();
+            FsBroker broker = Env.getCurrentEnv().getBrokerMgr()
+                    .getBroker(topResultFileSink.getBrokerName(), worker.host());
+            topResultFileSink.setBrokerAddr(broker.host, broker.port);
         }
     }
 }
