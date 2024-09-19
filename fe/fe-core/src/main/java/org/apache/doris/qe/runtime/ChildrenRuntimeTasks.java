@@ -19,6 +19,7 @@ package org.apache.doris.qe.runtime;
 
 import org.apache.doris.nereids.util.Utils;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 
 import java.util.List;
@@ -37,5 +38,9 @@ public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask> {
 
     public List<C> allTasks() {
         return Utils.fastToImmutableList(childrenTasks.values());
+    }
+
+    public Map<Id, C> allTaskMap() {
+        return ImmutableMap.copyOf(childrenTasks);
     }
 }
