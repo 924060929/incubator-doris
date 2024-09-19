@@ -33,6 +33,7 @@ import org.apache.doris.qe.runtime.ThriftExecutionBuilder;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TUniqueId;
 
+import com.google.common.base.Preconditions;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -55,6 +56,9 @@ public class NereidsCoordinator extends Coordinator {
         this.coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
 
         this.resultReceivers = MultiResultReceivers.build(coordinatorContext);
+
+        Preconditions.checkState(!planner.getFragments().isEmpty() && coordinatorContext.instanceNum > 0,
+                "Fragment and Instance can not be empty˚");
     }
 
     @Override
