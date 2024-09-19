@@ -17,8 +17,8 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
         this.fragmentId = fragmentId;
     }
 
-    public AtomicBoolean getFinished() {
-        return finished;
+    public boolean isFinished() {
+        return finished.get();
     }
 
     public boolean setFinished() {
@@ -31,9 +31,5 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
 
     public int getFragmentId() {
         return fragmentId;
-    }
-
-    public boolean isFinished() {
-        return finished.get();
     }
 }

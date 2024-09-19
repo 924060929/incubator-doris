@@ -3,25 +3,19 @@ package org.apache.doris.qe;
 import org.apache.doris.common.Status;
 
 import java.util.Objects;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 public class CoordinatorContext {
-    private final Supplier<Boolean> isEof;
-    private final Consumer<Status> cancelCallback;
+    private NereidsCoordinator coordinator;
 
     private volatile Status status;
 
-    public CoordinatorContext(
-            Supplier<Boolean> isEof,
-            Consumer<Status> cancelCallback) {
-        this.isEof = Objects.requireNonNull(isEof, "isEof can not be null");
-        this.cancelCallback = Objects.requireNonNull(cancelCallback, "cancelCallback can not be null");
+    public CoordinatorContext(NereidsCoordinator coordinator) {
+        this.coordinator = Objects.requireNonNull(coordinator, "coordinator can not be null");
         this.status = new Status();
     }
 
     public void cancelSchedule(Status cancelReason) {
-        cancelCallback.accept(cancelReason);
+        coordinator.cancelInternal(cancelReason);
     }
 
     public synchronized Status readCloneStatus() {
@@ -29,24 +23,23 @@ public class CoordinatorContext {
     }
 
     public synchronized Status updateStatusIfOk(Status newStatus) {
-        // The query is done and we are just waiting for remote fragments to clean up.
-        // Ignore their cancelled updates.
-        if (isEof.get() && newStatus.isCancelled()) {
-            return readCloneStatus();
+        // If query is done, we will ignore their cancelled updates, and let the remote fragments to clean up async.
+        Status originStatus = readCloneStatus();
+        if (coordinator.isEof() && newStatus.isCancelled()) {
+            return originStatus;
         }
         // nothing to update
         if (newStatus.ok()) {
-            return readCloneStatus();
+            return originStatus;
         }
 
         // don't override an error status; also, cancellation has already started
         if (!this.status.ok()) {
-            return readCloneStatus();
+            return originStatus;
         }
 
         status = new Status(newStatus.getErrorCode(), newStatus.getErrorMsg());
-        Status status = readCloneStatus();
-        cancelCallback.accept(status);
-        return status;
+        coordinator.cancelInternal(readCloneStatus());
+        return originStatus;
     }
 }

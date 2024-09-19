@@ -42,21 +42,15 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     private final long timeoutDeadline;
     private final ExecContext execContext;
     private final CoordinatorContext coordinatorContext;
-    private final MultiResultReceivers resultReceivers;
 
     // mutable states
-    private final Status queryStatus;
-
     public SqlPipelineTask(
             ExecContext execContext,
             CoordinatorContext coordinatorContext,
-            Map<Long, MultiFragmentsPipelineTask> fragmentTasks,
-            MultiResultReceivers resultReceivers) {
+            Map<Long, MultiFragmentsPipelineTask> fragmentTasks) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
-        this.queryStatus = new Status();
         this.execContext = Objects.requireNonNull(execContext, "execContext can not be null");
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
-        this.resultReceivers = Objects.requireNonNull(resultReceivers, "resultReceivers can not be null");
         this.timeoutDeadline = execContext.timeoutDeadline;
     }
 
@@ -68,12 +62,10 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         }
     }
 
-    public Status getQueryStatus() {
-        return queryStatus;
-    }
-
-    public MultiResultReceivers getResultReceivers() {
-        return resultReceivers;
+    public void cancelSchedule(Status cancelReason) {
+        for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
+            fragmentsTask.cancelExecute(cancelReason);
+        }
     }
 
     @Override
@@ -172,8 +164,10 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
                 if (exception != null) {
                     errMsg = operation + " failed. " + exception.getMessage();
                 }
-                queryStatus.updateStatus(TStatusCode.INTERNAL_ERROR, errMsg);
-                cancelSchedule(queryStatus);
+
+                Status errorStatus = new Status(TStatusCode.INTERNAL_ERROR, errMsg);
+                coordinatorContext.updateStatusIfOk(errorStatus);
+                cancelSchedule(errorStatus);
                 switch (code) {
                     case TIMEOUT:
                         MetricRepo.BE_COUNTER_QUERY_RPC_FAILED.getOrAdd(brpcAddr.hostname)
@@ -188,14 +182,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
                         throw new UserException(errMsg, exception);
                 }
             }
-        }
-    }
-
-    public void cancelSchedule(Status cancelReason) {
-        resultReceivers.cancel(cancelReason);
-
-        for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
-            fragmentsTask.cancelExecute(cancelReason);
         }
     }
 }
