@@ -11,31 +11,14 @@ import org.apache.doris.thrift.TPipelineFragmentParamsList;
 
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.thrift.protocol.TCompactProtocol.Factory;
 
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 public class SqlPipelineTaskBuilder {
-    private static final Logger LOG = LogManager.getLogger(SqlPipelineTaskBuilder.class);
-
-    private final CoordinatorContext coordinatorContext;
-
-    private SqlPipelineTaskBuilder(CoordinatorContext coordinatorContext) {
-        this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
-    }
-
     public static SqlPipelineTask build(CoordinatorContext coordinatorContext,
-            Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
-        SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(coordinatorContext);
-        return builder.buildTask(coordinatorContext, workerToFragmentsParam);
-    }
-
-    private SqlPipelineTask buildTask(CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
         return new SqlPipelineTask(
                 coordinatorContext,
@@ -43,7 +26,7 @@ public class SqlPipelineTaskBuilder {
         );
     }
 
-    private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
+    private static Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
             CoordinatorContext coordinatorContext, Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
 
         Map<DistributedPlanWorker, ByteString> workerToSerializeFragments = serializeFragments(workerToFragmentsParam);
@@ -70,7 +53,7 @@ public class SqlPipelineTaskBuilder {
         return fragmentTasks;
     }
 
-    private Map<Integer, SingleFragmentPipelineTask> buildSingleFragmentPipelineTask(
+    private static Map<Integer, SingleFragmentPipelineTask> buildSingleFragmentPipelineTask(
             Backend backend, TPipelineFragmentParamsList fragmentParamsList) {
         Map<Integer, SingleFragmentPipelineTask> tasks = Maps.newLinkedHashMap();
         for (TPipelineFragmentParams fragmentParams : fragmentParamsList.getParamsList()) {
@@ -80,7 +63,7 @@ public class SqlPipelineTaskBuilder {
         return tasks;
     }
 
-    private Map<DistributedPlanWorker, ByteString> serializeFragments(
+    private static Map<DistributedPlanWorker, ByteString> serializeFragments(
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam){
         return workerToFragmentsParam.entrySet()
                 .parallelStream()
