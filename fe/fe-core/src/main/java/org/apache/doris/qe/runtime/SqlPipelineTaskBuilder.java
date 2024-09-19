@@ -1,10 +1,29 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.common.Pair;
+import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.protocol.TFastSerializer;
+import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
@@ -15,19 +34,36 @@ import org.apache.thrift.protocol.TCompactProtocol.Factory;
 
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class SqlPipelineTaskBuilder {
+    private CoordinatorContext coordinatorContext;
+
+    public SqlPipelineTaskBuilder(CoordinatorContext coordinatorContext) {
+        this.coordinatorContext = coordinatorContext;
+    }
+
     public static SqlPipelineTask build(CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
+        SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(coordinatorContext);
+        return builder.buildTask(coordinatorContext, workerToFragmentsParam);
+    }
+
+    private SqlPipelineTask buildTask(CoordinatorContext coordinatorContext,
+            Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
+
+        BackendServiceProxy backendServiceProxy = BackendServiceProxy.getInstance();
         return new SqlPipelineTask(
                 coordinatorContext,
-                buildMultiFragmentTasks(coordinatorContext, workerToFragmentsParam)
+                backendServiceProxy,
+                buildMultiFragmentTasks(coordinatorContext, backendServiceProxy, workerToFragmentsParam)
         );
     }
 
-    private static Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
-            CoordinatorContext coordinatorContext, Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
+    private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
+            CoordinatorContext coordinatorContext, BackendServiceProxy backendServiceProxy,
+            Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
 
         Map<DistributedPlanWorker, ByteString> workerToSerializeFragments = serializeFragments(workerToFragmentsParam);
 
@@ -44,6 +80,7 @@ public class SqlPipelineTaskBuilder {
                     new MultiFragmentsPipelineTask(
                             coordinatorContext.queryId,
                             backend,
+                            backendServiceProxy,
                             fragmentParamsList,
                             serializeFragments,
                             buildSingleFragmentPipelineTask(backend, fragmentParamsList)
@@ -53,7 +90,7 @@ public class SqlPipelineTaskBuilder {
         return fragmentTasks;
     }
 
-    private static Map<Integer, SingleFragmentPipelineTask> buildSingleFragmentPipelineTask(
+    private Map<Integer, SingleFragmentPipelineTask> buildSingleFragmentPipelineTask(
             Backend backend, TPipelineFragmentParamsList fragmentParamsList) {
         Map<Integer, SingleFragmentPipelineTask> tasks = Maps.newLinkedHashMap();
         for (TPipelineFragmentParams fragmentParams : fragmentParamsList.getParamsList()) {
@@ -63,9 +100,11 @@ public class SqlPipelineTaskBuilder {
         return tasks;
     }
 
-    private static Map<DistributedPlanWorker, ByteString> serializeFragments(
-            Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam){
-        return workerToFragmentsParam.entrySet()
+    private Map<DistributedPlanWorker, ByteString> serializeFragments(
+            Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
+
+        AtomicLong compressedSize = new AtomicLong(0);
+        Map<DistributedPlanWorker, ByteString> serializedFragments = workerToFragmentsParam.entrySet()
                 .parallelStream()
                 .map(kv -> {
                     try {
@@ -77,6 +116,14 @@ public class SqlPipelineTaskBuilder {
                         throw new IllegalStateException(t.getMessage(), t);
                     }
                 })
+                .peek(kv -> compressedSize.addAndGet(kv.second.size()))
                 .collect(Collectors.toMap(Pair::key, Pair::value));
+
+        coordinatorContext.updateProfileIfPresent(
+                profile -> profile.updateFragmentCompressedSize(compressedSize.get())
+        );
+        coordinatorContext.updateProfileIfPresent(SummaryProfile::setFragmentSerializeTime);
+
+        return serializedFragments;
     }
 }
