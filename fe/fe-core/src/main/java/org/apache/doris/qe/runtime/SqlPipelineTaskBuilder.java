@@ -1,29 +1,21 @@
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.common.Pair;
-import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
-import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
-import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
-import org.apache.doris.planner.ResultSink;
 import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.ExecContext;
-import org.apache.doris.qe.ResultReceiver;
 import org.apache.doris.qe.protocol.TFastSerializer;
 import org.apache.doris.system.Backend;
-import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.thrift.protocol.TCompactProtocol.Factory;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -43,48 +35,16 @@ public class SqlPipelineTaskBuilder {
     public static SqlPipelineTask build(ExecContext execContext, CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
         SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(execContext, coordinatorContext);
-        return builder.buildTask(execContext, workerToFragmentsParam);
+        return builder.buildTask(execContext, coordinatorContext, workerToFragmentsParam);
     }
 
-    private SqlPipelineTask buildTask(
-            ExecContext execContext, Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
+    private SqlPipelineTask buildTask(ExecContext execContext, CoordinatorContext coordinatorContext,
+            Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
         return new SqlPipelineTask(
                 execContext,
                 coordinatorContext,
-                buildMultiFragmentTasks(execContext, workerToFragmentsParam),
-                buildResultReceivers(execContext, execContext.timeoutDeadline)
+                buildMultiFragmentTasks(execContext, workerToFragmentsParam)
         );
-    }
-
-    private MultiResultReceivers buildResultReceivers(ExecContext execContext, long timeoutDeadline) {
-        List<DistributedPlan> distributedPlans = execContext.planner.getDistributedPlans().valueList();
-        PipelineDistributedPlan topFragment =
-                (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
-
-        Boolean enableParallelResultSink = execContext.queryOptions.isEnableParallelResultSink()
-                && topFragment.getFragmentJob().getFragment().getSink() instanceof ResultSink;
-
-        List<AssignedJob> topInstances = topFragment.getInstanceJobs();
-        List<ResultReceiver> receivers = Lists.newArrayListWithCapacity(topInstances.size());
-        for (AssignedJob topInstance : topInstances) {
-            DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
-            TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
-            receivers.add(
-                new ResultReceiver(
-                    execContext.queryId,
-                    topInstance.instanceId(),
-                    topWorker.id(),
-                    execBeAddr,
-                    timeoutDeadline,
-                    execContext.planner.getCascadesContext()
-                            .getConnectContext()
-                            .getSessionVariable()
-                            .getMaxMsgSizeOfResultReceiver(),
-                    enableParallelResultSink
-                )
-            );
-        }
-        return new MultiResultReceivers(execContext.planner, coordinatorContext, execContext.queryId, receivers);
     }
 
     private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
