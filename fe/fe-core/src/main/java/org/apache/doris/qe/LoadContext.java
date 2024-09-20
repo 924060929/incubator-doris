@@ -35,6 +35,8 @@ public class LoadContext {
     private final List<String> deltaUrls = Lists.newCopyOnWriteArrayList();
 
     // in pipelinex, the commit info may be duplicate, so we remove the duplicate ones
+    // key: backendsId
+    // values: tabletId
     private final Map<Pair<Long, Long>, TTabletCommitInfo> commitInfoMap = Maps.newLinkedHashMap();
 
     public synchronized Map<String, String> getLoadCounters() {
