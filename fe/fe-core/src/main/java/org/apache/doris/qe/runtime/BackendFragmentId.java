@@ -24,5 +24,5 @@ import lombok.Data;
 @AllArgsConstructor
 public class BackendFragmentId {
     public final long backendId;
-    public final long fragmentId;
+    public final int fragmentId;
 }

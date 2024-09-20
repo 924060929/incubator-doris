@@ -26,12 +26,12 @@ import org.apache.doris.proto.InternalService.PExecPlanFragmentStartRequest;
 import org.apache.doris.proto.Types;
 import org.apache.doris.proto.Types.PUniqueId;
 import org.apache.doris.qe.Coordinator;
+import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.SimpleScheduler;
 import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
-import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TUniqueId;
 
@@ -54,30 +54,32 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     private static final Logger LOG = LogManager.getLogger(SqlPipelineTask.class);
 
     // immutable parameters
-    private final TUniqueId queryId;
+    private CoordinatorContext coordinatorContext;
     private final Backend backend;
     private final BackendServiceProxy backendClientProxy;
+    private final long lastMissingHeartbeatTime;
 
     // mutable states
 
     // we will set fragmentsParams and serializeFragments to null after send rpc, to save memory
-    private TPipelineFragmentParamsList fragmentParamsList;
     private ByteString serializeFragments;
-    private final AtomicBoolean hasCancelled = new AtomicBoolean();
-    private final AtomicBoolean cancelInProcess = new AtomicBoolean();
+    private final AtomicBoolean hasCancelled;
+    private final AtomicBoolean cancelInProcess;
 
     public MultiFragmentsPipelineTask(
-            TUniqueId queryId, Backend backend, BackendServiceProxy backendClientProxy,
-            TPipelineFragmentParamsList fragmentsParams, ByteString serializeFragments,
+            CoordinatorContext coordinatorContext, Backend backend, BackendServiceProxy backendClientProxy,
+            ByteString serializeFragments,
             Map<Integer, SingleFragmentPipelineTask> fragmentTasks) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
-        this.queryId = Objects.requireNonNull(queryId, "queryId can not be null");
+        this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
         this.backend = Objects.requireNonNull(backend, "backend can not be null");
         this.backendClientProxy = Objects.requireNonNull(backendClientProxy, "backendClientProxy can not be null");
-        this.fragmentParamsList = Objects.requireNonNull(fragmentsParams, "fragmentParamsList can not be null");
         this.serializeFragments = Objects.requireNonNull(
                 serializeFragments, "serializeFragments can not be null"
         );
+        this.hasCancelled = new AtomicBoolean();
+        this.cancelInProcess = new AtomicBoolean();
+        this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
     }
 
     public Future<PExecPlanFragmentResult> sendPhaseOneRpc(boolean twoPhaseExecution) {
@@ -102,6 +104,7 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     }
 
     public synchronized void cancelExecute(Status cancelReason) {
+        TUniqueId queryId = coordinatorContext.queryId;
         if (LOG.isDebugEnabled()) {
             LOG.debug("cancelRemoteFragments backend: {}, query={}, reason: {}",
                     backend, DebugUtil.printId(queryId), cancelReason.toString());
@@ -167,13 +170,13 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
             return futureWithException(e);
         } finally {
             // save memory
-            this.fragmentParamsList = null;
             this.serializeFragments = null;
         }
     }
 
     public Future<InternalService.PExecPlanFragmentResult> execPlanFragmentStartAsync(
             BackendServiceProxy proxy, TNetworkAddress brpcAddr) {
+        TUniqueId queryId = coordinatorContext.queryId;
         try {
             PExecPlanFragmentStartRequest.Builder builder = PExecPlanFragmentStartRequest.newBuilder();
             PUniqueId qid = PUniqueId.newBuilder().setHi(queryId.hi).setLo(queryId.lo).build();
@@ -184,6 +187,24 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
             // so that the following logic will cancel the fragment.
             return futureWithException(e);
         }
+    }
+
+    public boolean checkHealthy() {
+        if (!isBackendStateHealthy()) {
+            Status unhealthyStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend " + backend.getId() + " is down");
+            coordinatorContext.updateStatusIfOk(unhealthyStatus);
+            return false;
+        }
+        return true;
+    }
+
+    public boolean isBackendStateHealthy() {
+        int jobId = 0;
+        if (backend.getLastMissingHeartbeatTime() > lastMissingHeartbeatTime && !backend.isAlive()) {
+            LOG.warn("backend {} is down while joining the coordinator. job id: {}", backend.getId(), jobId);
+            return false;
+        }
+        return true;
     }
 
     private Future<PExecPlanFragmentResult> futureWithException(RpcException e) {

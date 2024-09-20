@@ -32,7 +32,6 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.planner.DataSink;
-import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.ResultFileSink;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
@@ -45,15 +44,20 @@ import org.apache.doris.qe.runtime.ThriftPlansBuilder;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
+import org.apache.doris.thrift.TQueryOptions;
+import org.apache.doris.thrift.TQueryType;
+import org.apache.doris.thrift.TReportExecStatusParams;
+import org.apache.doris.thrift.TTabletCommitInfo;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /** NereidsCoordinator */
 public class NereidsCoordinator extends Coordinator {
@@ -65,10 +69,10 @@ public class NereidsCoordinator extends Coordinator {
     private volatile SqlPipelineTask executionTask;
 
     public NereidsCoordinator(ConnectContext context, Analyzer analyzer,
-            Planner planner, StatsErrorEstimator statsErrorEstimator, NereidsPlanner nereidsPlanner) {
+            NereidsPlanner planner, StatsErrorEstimator statsErrorEstimator) {
         super(context, analyzer, planner, statsErrorEstimator);
 
-        this.coordinatorContext = CoordinatorContext.build(nereidsPlanner, this);
+        this.coordinatorContext = CoordinatorContext.build(planner, this);
         this.resultReceivers = MultiResultReceivers.build(coordinatorContext);
 
         Preconditions.checkState(!planner.getFragments().isEmpty() && coordinatorContext.instanceNum > 0,
@@ -77,10 +81,19 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     protected void execInternal() throws Exception {
-        processTopFragment(coordinatorContext.connectContext, coordinatorContext.planner);
+        DataSink topDataSink = processTopSink(coordinatorContext.connectContext, coordinatorContext.planner);
         coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
 
         QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
+
+        if (!(topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
+            // only we set is report success, then the backend would report the fragment status,
+            // then we can not the fragment is finished, and we can return in the NereidsCoordinator::join
+            coordinatorContext.queryOptions.setIsReportSuccess(true);
+            // Env.getCurrentEnv().getLoadManager().initJobProgress(jobId, queryId, instanceIds, relatedBackendIds);
+            // Env.getCurrentEnv().getProgressManager().addTotalScanNums(String.valueOf(jobId), 1);
+            LOG.info("dispatch load job: {} to {}", DebugUtil.printId(queryId), addressToBackendID.keySet());
+        }
 
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
@@ -100,6 +113,11 @@ public class NereidsCoordinator extends Coordinator {
     @Override
     public boolean isQueryCancelled() {
         return coordinatorContext.readCloneStatus().isCancelled();
+    }
+
+    @Override
+    public boolean isTimeout() {
+        return System.currentTimeMillis() > coordinatorContext.timeoutDeadline;
     }
 
     @Override
@@ -124,12 +142,80 @@ public class NereidsCoordinator extends Coordinator {
         cancelInternal(cancelReason);
     }
 
+    @Override
+    public boolean join(int timeoutS) {
+        final long fixedMaxWaitTime = 30;
+
+        long leftTimeoutS = timeoutS;
+        while (leftTimeoutS > 0) {
+            long waitTime = Math.min(leftTimeoutS, fixedMaxWaitTime);
+            boolean awaitRes = false;
+            try {
+                awaitRes = executionTask.await(waitTime, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                // Do nothing
+            }
+            if (awaitRes) {
+                return true;
+            }
+
+            if (!executionTask.checkHealthy()) {
+                return true;
+            }
+
+            leftTimeoutS -= waitTime;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean isDone() {
+        return executionTask.isDone();
+    }
+
+    @Override
+    public void updateFragmentExecStatus(TReportExecStatusParams params) {
+        executionTask.processReportExecStatus(params);
+    }
+
+    @Override
+    public Status getExecStatus() {
+        return coordinatorContext.readCloneStatus();
+    }
+
+    @Override
+    public void setQueryType(TQueryType type) {
+        coordinatorContext.queryOptions.setQueryType(type);
+    }
+
+    @Override
+    public void setLoadZeroTolerance(boolean loadZeroTolerance) {
+        coordinatorContext.queryGlobals.setLoadZeroTolerance(loadZeroTolerance);
+    }
+
+    @Override
+    public TQueryOptions getQueryOptions() {
+        return coordinatorContext.queryOptions;
+    }
+
+    @Override
+    public Map<String, String> getLoadCounters() {
+        return coordinatorContext.loadContext.getLoadCounters();
+    }
+
+    @Override
+    public List<String> getDeltaUrls() {
+        return coordinatorContext.loadContext.getDeltaUrls();
+    }
+
+    @Override
+    public List<TTabletCommitInfo> getCommitInfos() {
+        return coordinatorContext.loadContext.getCommitInfos();
+    }
+
     // this method is used to provide profile metrics: `Instances Num Per BE`
     @Override
     public Map<String, Integer> getBeToInstancesNum() {
-        if (executionTask == null) {
-            return ImmutableMap.of();
-        }
         Map<String, Integer> result = Maps.newLinkedHashMap();
         for (MultiFragmentsPipelineTask beTasks : executionTask.getChildrenTasks().values()) {
             TNetworkAddress brpcAddress = beTasks.getBackend().getBrpcAddress();
@@ -140,20 +226,20 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     protected void cancelInternal(Status cancelReason) {
-        if (executionTask != null) {
-            executionTask.cancelSchedule(cancelReason);
-        }
+        executionTask.cancelSchedule(cancelReason);
     }
 
-    private void processTopFragment(ConnectContext connectContext, NereidsPlanner nereidsPlanner)
+    private DataSink processTopSink(ConnectContext connectContext, NereidsPlanner nereidsPlanner)
             throws AnalysisException {
         PipelineDistributedPlan topPlan = (PipelineDistributedPlan) nereidsPlanner.getDistributedPlans().last();
-        setForArrowFlight(connectContext, topPlan);
-        setForBroker(topPlan);
+        DataSink topDataSink = topPlan.getFragmentJob().getFragment().getSink();
+        setForArrowFlight(connectContext, topPlan, topDataSink);
+        setForBroker(topPlan, topDataSink);
+        return topDataSink;
     }
 
-    private void setForArrowFlight(ConnectContext connectContext, PipelineDistributedPlan topPlan) {
-        DataSink topDataSink = topPlan.getFragmentJob().getFragment().getSink();
+    private void setForArrowFlight(
+            ConnectContext connectContext, PipelineDistributedPlan topPlan, DataSink topDataSink) {
         if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
             if (connectContext != null && !connectContext.isReturnResultFromLocal()) {
                 Preconditions.checkState(connectContext.getConnectType().equals(ConnectType.ARROW_FLIGHT_SQL));
@@ -173,8 +259,7 @@ public class NereidsCoordinator extends Coordinator {
         }
     }
 
-    private void setForBroker(PipelineDistributedPlan topPlan) throws AnalysisException {
-        DataSink topDataSink = topPlan.getFragmentJob().getFragment().getSink();
+    private void setForBroker(PipelineDistributedPlan topPlan, DataSink topDataSink) throws AnalysisException {
         if (topDataSink instanceof ResultFileSink
                 && ((ResultFileSink) topDataSink).getStorageType() == StorageBackend.StorageType.BROKER) {
             // set the broker address for OUTFILE sink

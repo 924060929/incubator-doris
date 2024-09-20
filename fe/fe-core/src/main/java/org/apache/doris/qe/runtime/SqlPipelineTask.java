@@ -18,6 +18,7 @@
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.common.Config;
+import org.apache.doris.common.MarkedCountDownLatch;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.profile.SummaryProfile;
@@ -31,9 +32,12 @@ import org.apache.doris.rpc.RpcException;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TQueryOptions;
+import org.apache.doris.thrift.TQueryType;
+import org.apache.doris.thrift.TReportExecStatusParams;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TUniqueId;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -42,6 +46,7 @@ import org.joda.time.DateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -61,16 +66,43 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     private final long timeoutDeadline;
     private final CoordinatorContext coordinatorContext;
     private final BackendServiceProxy backendServiceProxy;
+    private final Map<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks;
+
+    // this latch is used to wait finish for load, for example, insert into statement
+    // MarkedCountDownLatch:
+    //  key: fragmentId, value: backendId
+    private volatile MarkedCountDownLatch<Integer, Long> latch;
 
     // mutable states
     public SqlPipelineTask(
             CoordinatorContext coordinatorContext,
             BackendServiceProxy backendServiceProxy,
             Map<Long, MultiFragmentsPipelineTask> fragmentTasks) {
+        // insert into stmt need latch to wait finish, but query stmt not need because result receiver can wait finish
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
         this.backendServiceProxy = Objects.requireNonNull(backendServiceProxy, "backendServiceProxy can not be null");
         this.timeoutDeadline = coordinatorContext.timeoutDeadline;
+
+        // flatten to fragment tasks to quickly index by BackendFragmentId, when receive the report message
+        ImmutableMap.Builder<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks = ImmutableMap.builder();
+        for (Entry<Long, MultiFragmentsPipelineTask> backendTask : fragmentTasks.entrySet()) {
+            Long backendId = backendTask.getKey();
+            for (Entry<Integer, SingleFragmentPipelineTask> fragmentIdToTask : backendTask.getValue()
+                    .getChildrenTasks().entrySet()) {
+                Integer fragmentId = fragmentIdToTask.getKey();
+                SingleFragmentPipelineTask fragmentTask = fragmentIdToTask.getValue();
+                backendFragmentTasks.put(new BackendFragmentId(backendId, fragmentId), fragmentTask);
+            }
+        }
+        this.backendFragmentTasks = backendFragmentTasks.build();
+
+        if (coordinatorContext.queryOptions.getQueryType() == TQueryType.LOAD) {
+            latch = new MarkedCountDownLatch<>(this.backendFragmentTasks.size());
+            for (BackendFragmentId backendFragmentId : this.backendFragmentTasks.keySet()) {
+                latch.addMark(backendFragmentId.fragmentId, backendFragmentId.backendId);
+            }
+        }
     }
 
     @Override
@@ -89,7 +121,106 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
                 fragmentsTask.cancelExecute(cancelReason);
             }
+            if (latch != null) {
+                latch.countDownToZero(new Status());
+            }
         });
+    }
+
+    public boolean await(long timeout, TimeUnit unit) throws InterruptedException {
+        if (latch == null) {
+            return true;
+        }
+        return latch.await(timeout, unit);
+    }
+
+    public void processReportExecStatus(TReportExecStatusParams params) {
+        SingleFragmentPipelineTask fragmentTask = backendFragmentTasks.get(
+                new BackendFragmentId(params.getBackendId(), params.getFragmentId()));
+        if (fragmentTask == null || !fragmentTask.processReportExecStatus(params)) {
+            return;
+        }
+        TUniqueId queryId = coordinatorContext.queryId;
+        Status status = new Status(params.status);
+        // for now, abort the query if we see any error except if the error is cancelled
+        // and returned_all_results_ is true.
+        // (UpdateStatus() initiates cancellation, if it hasn't already been initiated)
+        if (!status.ok()) {
+            if (coordinatorContext.isEof() && status.isCancelled()) {
+                LOG.warn("Query {} has returned all results, fragment_id={} instance_id={}, be={}"
+                                + " is reporting failed status {}",
+                        DebugUtil.printId(queryId), params.getFragmentId(),
+                        DebugUtil.printId(params.getFragmentInstanceId()),
+                        params.getBackendId(),
+                        status.toString());
+            } else {
+                LOG.warn("one instance report fail, query_id={} fragment_id={} instance_id={}, be={},"
+                                + " error message: {}",
+                        DebugUtil.printId(queryId), params.getFragmentId(),
+                        DebugUtil.printId(params.getFragmentInstanceId()),
+                        params.getBackendId(), status.toString());
+                coordinatorContext.updateStatusIfOk(status);
+            }
+        }
+        if (params.isSetDeltaUrls()) {
+            coordinatorContext.loadContext.updateDeltas(params.getDeltaUrls());
+        }
+        if (params.isSetLoadCounters()) {
+            coordinatorContext.loadContext.updateLoadCounters(params.getLoadCounters());
+        }
+        // if (params.isSetTrackingUrl()) {
+        //     trackingUrl = params.getTrackingUrl();
+        // }
+        // if (params.isSetTxnId()) {
+        //     txnId = params.getTxnId();
+        // }
+        // if (params.isSetLabel()) {
+        //     label = params.getLabel();
+        // }
+        // if (params.isSetExportFiles()) {
+        //     updateExportFiles(params.getExportFiles());
+        // }
+        if (params.isSetCommitInfos()) {
+            coordinatorContext.loadContext.updateCommitInfos(params.getCommitInfos());
+        }
+        // if (params.isSetErrorTabletInfos()) {
+        //     updateErrorTabletInfos(params.getErrorTabletInfos());
+        // }
+        // if (params.isSetHivePartitionUpdates() && hivePartitionUpdateFunc != null) {
+        //     hivePartitionUpdateFunc.accept(params.getHivePartitionUpdates());
+        // }
+        // if (params.isSetIcebergCommitDatas() && icebergCommitDataFunc != null) {
+        //     icebergCommitDataFunc.accept(params.getIcebergCommitDatas());
+        // }
+
+        if (fragmentTask.isDone()) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Query {} fragment {} is marked done",
+                        DebugUtil.printId(queryId), params.getFragmentId());
+            }
+            latch.markedCountDown(params.getFragmentId(), params.getBackendId());
+        }
+
+        // if (params.isSetLoadedRows() && jobId != -1) {
+        //     Env.getCurrentEnv().getLoadManager().updateJobProgress(
+        //             jobId, params.getBackendId(), params.getQueryId(), params.getFragmentInstanceId(),
+        //             params.getLoadedRows(), params.getLoadedBytes(), params.isDone());
+        //     Env.getCurrentEnv().getProgressManager().updateProgress(String.valueOf(jobId),
+        //             params.getQueryId(), params.getFragmentInstanceId(), params.getFinishedScanRanges());
+        // }
+    }
+
+    /*
+     * Check the state of backends in needCheckBackendExecStates.
+     * return true if all of them are OK. Otherwise, return false.
+     */
+    public boolean checkHealthy() {
+        for (MultiFragmentsPipelineTask backendTask : childrenTasks.allTasks()) {
+            if (!backendTask.checkHealthy()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -235,6 +366,10 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             }
         }
         return beToPrepareLatency;
+    }
+
+    public boolean isDone() {
+        return latch == null || latch.getCount() == 0;
     }
 
     private static class RpcInfo {
