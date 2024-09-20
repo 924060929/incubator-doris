@@ -78,10 +78,9 @@ public class SqlPipelineTaskBuilder {
             fragmentTasks.put(
                     worker.id(),
                     new MultiFragmentsPipelineTask(
-                            coordinatorContext.queryId,
+                            coordinatorContext,
                             backend,
                             backendServiceProxy,
-                            fragmentParamsList,
                             serializeFragments,
                             buildSingleFragmentPipelineTask(backend, fragmentParamsList)
                     )

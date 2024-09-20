@@ -181,10 +181,10 @@ public class Coordinator implements CoordInterface {
 
     // Overall status of the entire query; set to the first reported fragment error
     // status or to CANCELLED, if Cancel() is called.
-    Status queryStatus = new Status();
+    protected Status queryStatus = new Status();
 
     // save of related backends of this query
-    Map<TNetworkAddress, Long> addressToBackendID = Maps.newHashMap();
+    protected Map<TNetworkAddress, Long> addressToBackendID = Maps.newHashMap();
 
     protected ImmutableMap<Long, Backend> idToBackend = ImmutableMap.of();
 
@@ -252,7 +252,7 @@ public class Coordinator implements CoordInterface {
     private final List<TErrorTabletInfo> errorTabletInfos = Lists.newArrayList();
 
     // Input parameter
-    private long jobId = -1; // job which this task belongs to
+    protected long jobId = -1; // job which this task belongs to
     protected TUniqueId queryId;
 
     // a timestamp represent the absolute timeout
@@ -775,8 +775,7 @@ public class Coordinator implements CoordInterface {
             deltaUrls = Lists.newArrayList();
             loadCounters = Maps.newHashMap();
             List<Long> relatedBackendIds = Lists.newArrayList(addressToBackendID.values());
-            Env.getCurrentEnv().getLoadManager().initJobProgress(jobId, queryId, instanceIds,
-                    relatedBackendIds);
+            Env.getCurrentEnv().getLoadManager().initJobProgress(jobId, queryId, instanceIds, relatedBackendIds);
             Env.getCurrentEnv().getProgressManager().addTotalScanNums(String.valueOf(jobId), scanRangeNum);
             LOG.info("dispatch load job: {} to {}", DebugUtil.printId(queryId), addressToBackendID.keySet());
         }
@@ -3379,10 +3378,6 @@ public class Coordinator implements CoordInterface {
             backendAddresses.add(new TNetworkAddress(backend.getHost(), backend.getBePort()));
         }
         return backendAddresses;
-    }
-
-    public Map<PlanFragmentId, FragmentExecParams> getFragmentExecParamsMap() {
-        return fragmentExecParamsMap;
     }
 
     public List<PlanFragment> getFragments() {

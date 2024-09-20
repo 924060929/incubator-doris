@@ -390,7 +390,7 @@ public class StmtExecutor {
         String taskState = "RUNNING";
         if (isFinished) {
             if (coord != null) {
-                taskState = coord.queryStatus.getErrorCode().name();
+                taskState = coord.getExecStatus().getErrorCode().name();
             } else {
                 taskState = context.getState().toString();
             }
@@ -1890,8 +1890,7 @@ public class StmtExecutor {
                         context.getSessionVariable().getMaxMsgSizeOfResultReceiver());
         } else if (planner instanceof NereidsPlanner && ((NereidsPlanner) planner).getDistributedPlans() != null) {
             coord = new NereidsCoordinator(context, analyzer,
-                    planner, context.getStatsErrorEstimator(),
-                    (NereidsPlanner) planner);
+                    (NereidsPlanner) planner, context.getStatsErrorEstimator());
             profile.addExecutionProfile(coord.getExecutionProfile());
             QeProcessorImpl.INSTANCE.registerQuery(context.queryId(),
                     new QueryInfo(context, originStmt.originStmt, coord));
