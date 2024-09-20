@@ -25,7 +25,7 @@ import com.google.common.collect.Maps;
 import java.util.List;
 import java.util.Map;
 
-public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask> {
+public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask<?, ?>> {
     private final Map<Id, C> childrenTasks = Maps.newConcurrentMap();
 
     public ChildrenRuntimeTasks(Map<Id, C> childrenTasks) {

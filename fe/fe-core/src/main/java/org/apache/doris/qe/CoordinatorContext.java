@@ -68,6 +68,7 @@ public class CoordinatorContext {
 
     // these are some mutable states
     private volatile Status status;
+    public final LoadContext loadContext;
 
     private CoordinatorContext(NereidsCoordinator coordinator,
             ConnectContext connectContext,
@@ -105,6 +106,8 @@ public class CoordinatorContext {
                 .stream().map(plan -> ((PipelineDistributedPlan) plan).getInstanceJobs().size())
                 .reduce(Integer::sum)
                 .get();
+
+        this.loadContext = new LoadContext();
     }
 
     public void updateProfileIfPresent(Consumer<SummaryProfile> profileAction) {
@@ -112,6 +115,10 @@ public class CoordinatorContext {
                 .map(ConnectContext::getExecutor)
                 .map(StmtExecutor::getSummaryProfile)
                 .ifPresent(profileAction);
+    }
+
+    public boolean isEof() {
+        return coordinator.isEof();
     }
 
     public void cancelSchedule(Status cancelReason) {

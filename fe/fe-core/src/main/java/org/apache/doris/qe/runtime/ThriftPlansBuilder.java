@@ -28,11 +28,13 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSou
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
+import org.apache.doris.thrift.TDataSinkType;
 import org.apache.doris.thrift.TFileScanRangeParams;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
@@ -47,6 +49,8 @@ import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,6 +60,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 public class ThriftPlansBuilder {
+    private static final Logger LOG = LogManager.getLogger(ThriftPlansBuilder.class);
 
     public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
             CoordinatorContext coordinatorContext) {
@@ -106,6 +111,8 @@ public class ThriftPlansBuilder {
             Collections.reverse(fragmentsGroupByWorker.get(worker).getParamsList());
         }
 
+        setParamsForOlapTableSink(distributedPlans, fragmentsGroupByWorker);
+
         // remove redundant params to reduce rpc message size
         for (Entry<DistributedPlanWorker, TPipelineFragmentParamsList> kv : fragmentsGroupByWorker.entrySet()) {
             boolean isFirstFragmentInCurrentBackend = true;
@@ -122,6 +129,38 @@ public class ThriftPlansBuilder {
             }
         }
         return fragmentsGroupByWorker;
+    }
+
+    private static void setParamsForOlapTableSink(List<PipelineDistributedPlan> distributedPlans,
+            Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker) {
+        int numBackendsWithSink = 0;
+        for (PipelineDistributedPlan distributedPlan : distributedPlans) {
+            PlanFragment fragment = distributedPlan.getFragmentJob().getFragment();
+            if (fragment.getSink() instanceof OlapTableSink) {
+                numBackendsWithSink += (int) distributedPlan.getInstanceJobs()
+                        .stream()
+                        .map(AssignedJob::getAssignedWorker)
+                        .distinct()
+                        .count();
+            }
+        }
+
+        for (Entry<DistributedPlanWorker, TPipelineFragmentParamsList> kv : fragmentsGroupByWorker.entrySet()) {
+            TPipelineFragmentParamsList fragments = kv.getValue();
+            for (TPipelineFragmentParams fragmentParams : fragments.getParamsList()) {
+                if (fragmentParams.getFragment().getOutputSink().getType() == TDataSinkType.OLAP_TABLE_SINK) {
+                    int loadStreamPerNode = 1;
+                    if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null) {
+                        loadStreamPerNode = ConnectContext.get().getSessionVariable().getLoadStreamPerNode();
+                    }
+                    fragmentParams.setLoadStreamPerNode(loadStreamPerNode);
+                    fragmentParams.setTotalLoadStreams(numBackendsWithSink * loadStreamPerNode);
+                    fragmentParams.setNumLocalSink(fragmentParams.getLocalParams().size());
+                    LOG.info("num local sink for backend {} is {}", fragmentParams.getBackendId(),
+                            fragmentParams.getNumLocalSink());
+                }
+            }
+        }
     }
 
     private static Multiset<DistributedPlanWorker> computeInstanceNumPerWorker(

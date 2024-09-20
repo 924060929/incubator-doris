@@ -18,6 +18,7 @@
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.system.Backend;
+import org.apache.doris.thrift.TReportExecStatusParams;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -27,19 +28,27 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
     private final int fragmentId;
 
     // mutate states
-    private final AtomicBoolean finished = new AtomicBoolean();
+    private final AtomicBoolean done = new AtomicBoolean();
 
     public SingleFragmentPipelineTask(Backend backend, int fragmentId) {
         this.backend = backend;
         this.fragmentId = fragmentId;
     }
 
-    public boolean isFinished() {
-        return finished.get();
+    // update profile.
+    // return true if profile is updated. Otherwise, return false.
+    // Has to use synchronized to ensure there are not concurrent update threads. Or the done
+    // state maybe update wrong and will lose data. see https://github.com/apache/doris/pull/29802/files.
+    public boolean processReportExecStatus(TReportExecStatusParams reportExecStatus) {
+        // The fragment or instance is not finished, not need update
+        if (!reportExecStatus.done) {
+            return false;
+        }
+        return this.done.compareAndSet(false, true);
     }
 
-    public boolean setFinished() {
-        return finished.compareAndSet(false, true);
+    public boolean isDone() {
+        return done.get();
     }
 
     public Backend getBackend() {
