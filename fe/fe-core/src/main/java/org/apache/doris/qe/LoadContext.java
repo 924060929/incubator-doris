@@ -74,9 +74,9 @@ public class LoadContext {
             numRowsUnselected += Long.parseLong(value);
         }
 
-        this.loadCounters.put(LoadEtlTask.DPP_NORMAL_ALL, "" + numRowsNormal);
-        this.loadCounters.put(LoadEtlTask.DPP_ABNORMAL_ALL, "" + numRowsAbnormal);
-        this.loadCounters.put(LoadJob.UNSELECTED_ROWS, "" + numRowsUnselected);
+        this.loadCounters.put(LoadEtlTask.DPP_NORMAL_ALL, Long.toString(numRowsNormal));
+        this.loadCounters.put(LoadEtlTask.DPP_ABNORMAL_ALL, Long.toString(numRowsAbnormal));
+        this.loadCounters.put(LoadJob.UNSELECTED_ROWS, Long.toString(numRowsUnselected));
     }
 
     public List<String> getDeltaUrls() {
