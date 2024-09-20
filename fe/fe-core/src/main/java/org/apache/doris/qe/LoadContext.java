@@ -17,6 +17,7 @@
 
 package org.apache.doris.qe;
 
+import org.apache.doris.common.Pair;
 import org.apache.doris.load.loadv2.LoadJob;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.task.LoadEtlTask;
@@ -25,18 +26,16 @@ import org.apache.doris.thrift.TTabletCommitInfo;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 public class LoadContext {
     private final Map<String, String> loadCounters = Maps.newLinkedHashMap();
     private final List<String> deltaUrls = Lists.newCopyOnWriteArrayList();
 
     // in pipelinex, the commit info may be duplicate, so we remove the duplicate ones
-    private final Set<TTabletCommitInfo> commitInfos = Sets.newLinkedHashSet();
+    private final Map<Pair<Long, Long>, TTabletCommitInfo> commitInfoMap = Maps.newLinkedHashMap();
 
     public synchronized Map<String, String> getLoadCounters() {
         return ImmutableMap.copyOf(loadCounters);
@@ -90,10 +89,12 @@ public class LoadContext {
 
     public synchronized void updateCommitInfos(List<TTabletCommitInfo> commitInfos) {
         // distinct commit info in the set
-        this.commitInfos.addAll(commitInfos);
+        for (TTabletCommitInfo commitInfo : commitInfos) {
+            this.commitInfoMap.put(Pair.of(commitInfo.backendId, commitInfo.tabletId), commitInfo);
+        }
     }
 
-    public List<TTabletCommitInfo> getCommitInfos() {
-        return Utils.fastToImmutableList(commitInfos);
+    public synchronized List<TTabletCommitInfo> getCommitInfos() {
+        return Utils.fastToImmutableList(commitInfoMap.values());
     }
 }
