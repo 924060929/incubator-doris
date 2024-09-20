@@ -88,7 +88,7 @@ public class LoadContext {
     }
 
     public synchronized void updateCommitInfos(List<TTabletCommitInfo> commitInfos) {
-        // distinct commit info in the set
+        // distinct commit info in the map
         for (TTabletCommitInfo commitInfo : commitInfos) {
             this.commitInfoMap.put(Pair.of(commitInfo.backendId, commitInfo.tabletId), commitInfo);
         }
