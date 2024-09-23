@@ -17,5 +17,8 @@
 
 package org.apache.doris.qe;
 
+import org.apache.doris.common.Status;
+
 public interface JobProcessor {
+    void cancel(Status cancelReason);
 }

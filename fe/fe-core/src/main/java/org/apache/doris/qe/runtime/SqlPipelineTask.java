@@ -18,7 +18,6 @@
 package org.apache.doris.qe.runtime;
 
 import org.apache.doris.common.Config;
-import org.apache.doris.common.MarkedCountDownLatch;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.profile.SummaryProfile;
@@ -33,7 +32,6 @@ import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TQueryType;
-import org.apache.doris.thrift.TReportExecStatusParams;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TUniqueId;
 
@@ -68,11 +66,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     private final BackendServiceProxy backendServiceProxy;
     private final Map<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks;
 
-    // this latch is used to wait finish for load, for example, insert into statement
-    // MarkedCountDownLatch:
-    //  key: fragmentId, value: backendId
-    private volatile MarkedCountDownLatch<Integer, Long> latch;
-
     // mutable states
     public SqlPipelineTask(
             CoordinatorContext coordinatorContext,
@@ -99,10 +92,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         this.backendFragmentTasks = backendFragmentTasks.build();
 
         if (coordinatorContext.queryOptions.getQueryType() == TQueryType.LOAD) {
-            latch = new MarkedCountDownLatch<>(this.backendFragmentTasks.size());
-            for (BackendFragmentId backendFragmentId : this.backendFragmentTasks.keySet()) {
-                latch.addMark(backendFragmentId.fragmentId, backendFragmentId.backendId);
-            }
         }
     }
 
@@ -115,100 +104,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             }
             return null;
         });
-    }
-
-    public void cancelSchedule(Status cancelReason) {
-        coordinatorContext.withLock(() -> {
-            for (MultiFragmentsPipelineTask fragmentsTask : childrenTasks.allTasks()) {
-                fragmentsTask.cancelExecute(cancelReason);
-            }
-            if (latch != null) {
-                latch.countDownToZero(new Status());
-            }
-        });
-    }
-
-    public boolean await(long timeout, TimeUnit unit) throws InterruptedException {
-        if (latch == null) {
-            return true;
-        }
-        return latch.await(timeout, unit);
-    }
-
-    public void processReportExecStatus(TReportExecStatusParams params) {
-        SingleFragmentPipelineTask fragmentTask = backendFragmentTasks.get(
-                new BackendFragmentId(params.getBackendId(), params.getFragmentId()));
-        if (fragmentTask == null || !fragmentTask.processReportExecStatus(params)) {
-            return;
-        }
-        TUniqueId queryId = coordinatorContext.queryId;
-        Status status = new Status(params.status);
-        // for now, abort the query if we see any error except if the error is cancelled
-        // and returned_all_results_ is true.
-        // (UpdateStatus() initiates cancellation, if it hasn't already been initiated)
-        if (!status.ok()) {
-            if (coordinatorContext.isEof() && status.isCancelled()) {
-                LOG.warn("Query {} has returned all results, fragment_id={} instance_id={}, be={}"
-                                + " is reporting failed status {}",
-                        DebugUtil.printId(queryId), params.getFragmentId(),
-                        DebugUtil.printId(params.getFragmentInstanceId()),
-                        params.getBackendId(),
-                        status.toString());
-            } else {
-                LOG.warn("one instance report fail, query_id={} fragment_id={} instance_id={}, be={},"
-                                + " error message: {}",
-                        DebugUtil.printId(queryId), params.getFragmentId(),
-                        DebugUtil.printId(params.getFragmentInstanceId()),
-                        params.getBackendId(), status.toString());
-                coordinatorContext.updateStatusIfOk(status);
-            }
-        }
-        if (params.isSetDeltaUrls()) {
-            coordinatorContext.asLoadProcessor().loadContext.updateDeltas(params.getDeltaUrls());
-        }
-        if (params.isSetLoadCounters()) {
-            coordinatorContext.asLoadProcessor().loadContext.updateLoadCounters(params.getLoadCounters());
-        }
-        // if (params.isSetTrackingUrl()) {
-        //     trackingUrl = params.getTrackingUrl();
-        // }
-        // if (params.isSetTxnId()) {
-        //     txnId = params.getTxnId();
-        // }
-        // if (params.isSetLabel()) {
-        //     label = params.getLabel();
-        // }
-        // if (params.isSetExportFiles()) {
-        //     updateExportFiles(params.getExportFiles());
-        // }
-        if (params.isSetCommitInfos()) {
-            coordinatorContext.asLoadProcessor().loadContext.updateCommitInfos(params.getCommitInfos());
-        }
-        // if (params.isSetErrorTabletInfos()) {
-        //     updateErrorTabletInfos(params.getErrorTabletInfos());
-        // }
-        // if (params.isSetHivePartitionUpdates() && hivePartitionUpdateFunc != null) {
-        //     hivePartitionUpdateFunc.accept(params.getHivePartitionUpdates());
-        // }
-        // if (params.isSetIcebergCommitDatas() && icebergCommitDataFunc != null) {
-        //     icebergCommitDataFunc.accept(params.getIcebergCommitDatas());
-        // }
-
-        if (fragmentTask.isDone()) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Query {} fragment {} is marked done",
-                        DebugUtil.printId(queryId), params.getFragmentId());
-            }
-            latch.markedCountDown(params.getFragmentId(), params.getBackendId());
-        }
-
-        // if (params.isSetLoadedRows() && jobId != -1) {
-        //     Env.getCurrentEnv().getLoadManager().updateJobProgress(
-        //             jobId, params.getBackendId(), params.getQueryId(), params.getFragmentInstanceId(),
-        //             params.getLoadedRows(), params.getLoadedBytes(), params.isDone());
-        //     Env.getCurrentEnv().getProgressManager().updateProgress(String.valueOf(jobId),
-        //             params.getQueryId(), params.getFragmentInstanceId(), params.getFinishedScanRanges());
-        // }
     }
 
     /*
@@ -367,10 +262,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             }
         }
         return beToPrepareLatency;
-    }
-
-    public boolean isDone() {
-        return latch == null || latch.getCount() == 0;
     }
 
     private static class RpcInfo {
