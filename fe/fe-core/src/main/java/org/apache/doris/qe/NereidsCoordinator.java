@@ -63,7 +63,6 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /** NereidsCoordinator */
 public class NereidsCoordinator extends Coordinator {
@@ -145,35 +144,28 @@ public class NereidsCoordinator extends Coordinator {
         cancelInternal(cancelReason);
     }
 
+    /*
+     * Waiting the coordinator finish executing.
+     * return false if waiting timeout.
+     * return true otherwise.
+     * NOTICE: return true does not mean that coordinator executed success,
+     * the caller should check queryStatus for result.
+     *
+     * We divide the entire waiting process into multiple rounds,
+     * with a maximum of 30 seconds per round. And after each round of waiting,
+     * check the status of the BE. If the BE status is abnormal, the wait is ended
+     * and the result is returned. Otherwise, continue to the next round of waiting.
+     * This method mainly avoids the problem that the Coordinator waits for a long time
+     * after some BE can no long return the result due to some exception, such as BE is down.
+     */
     @Override
     public boolean join(int timeoutS) {
-        long fixedMaxWaitTime = 30;
-
-        long leftTimeoutS = timeoutS;
-        while (leftTimeoutS > 0) {
-            long waitTime = Math.min(leftTimeoutS, fixedMaxWaitTime);
-            boolean awaitRes = false;
-            try {
-                awaitRes = executionTask.await(waitTime, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                // Do nothing
-            }
-            if (awaitRes) {
-                return true;
-            }
-
-            if (!executionTask.checkHealthy()) {
-                return true;
-            }
-
-            leftTimeoutS -= waitTime;
-        }
-        return false;
+        return coordinatorContext.asLoadProcessor().join(timeoutS);
     }
 
     @Override
     public boolean isDone() {
-        return executionTask.isDone();
+        return coordinatorContext.asLoadProcessor().isDone();
     }
 
     @Override
@@ -316,7 +308,7 @@ public class NereidsCoordinator extends Coordinator {
         if ((topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
             coordinatorContext.setJobProcessor(MultiResultReceivers.build(coordinatorContext));
         } else {
-            coordinatorContext.setJobProcessor(new LoadProcessor(coordinatorContext));
+            coordinatorContext.setJobProcessor(new LoadProcessor(coordinatorContext, executionTask));
         }
     }
 }
