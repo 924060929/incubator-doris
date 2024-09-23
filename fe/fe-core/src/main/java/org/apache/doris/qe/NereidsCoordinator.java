@@ -91,11 +91,11 @@ public class NereidsCoordinator extends Coordinator {
 
         QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
 
-        setResultProcessor(topDataSink);
 
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
         executionTask = SqlPipelineTaskBuilder.build(coordinatorContext, workerToFragments);
+        setResultProcessor(topDataSink, executionTask);
         executionTask.execute();
     }
 
@@ -304,7 +304,7 @@ public class NereidsCoordinator extends Coordinator {
         return false;
     }
 
-    private void setResultProcessor(DataSink topDataSink) {
+    private void setResultProcessor(DataSink topDataSink, SqlPipelineTask executionTask) {
         if ((topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
             coordinatorContext.setJobProcessor(QueryProcessor.build(coordinatorContext, executionTask));
         } else {
