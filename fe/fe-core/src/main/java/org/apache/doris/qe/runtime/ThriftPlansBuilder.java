@@ -251,7 +251,7 @@ public class ThriftPlansBuilder {
 
             params.setFragment(fragment.toThrift());
             params.setLocalParams(Lists.newArrayList());
-            params.setWorkloadGroups(coordinatorContext.workloadGroups);
+            params.setWorkloadGroups(coordinatorContext.getWorkloadGroups());
 
             params.setFileScanParams(fileScanRangeParamsMap);
             // params.setNumBuckets(fragment.getBucketNum());
