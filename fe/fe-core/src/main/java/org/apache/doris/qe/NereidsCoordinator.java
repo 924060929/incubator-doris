@@ -22,7 +22,9 @@ import org.apache.doris.analysis.StorageBackend;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FsBroker;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.Status;
+import org.apache.doris.common.UserException;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.NereidsPlanner;
@@ -35,6 +37,7 @@ import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.ResultFileSink;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.planner.SchemaScanNode;
 import org.apache.doris.qe.ConnectContext.ConnectType;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
@@ -80,6 +83,8 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     protected void execInternal() throws Exception {
+        enqueue(coordinatorContext.connectContext);
+
         DataSink topDataSink = processTopSink(coordinatorContext.connectContext, coordinatorContext.planner);
         coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
 
@@ -114,6 +119,9 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public void cancel(Status cancelReason) {
+        if (queueToken != null) {
+            queueToken.cancel();
+        }
         for (ScanNode scanNode : scanNodes) {
             scanNode.stop();
         }
@@ -136,7 +144,7 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public boolean join(int timeoutS) {
-        final long fixedMaxWaitTime = 30;
+        long fixedMaxWaitTime = 30;
 
         long leftTimeoutS = timeoutS;
         while (leftTimeoutS > 0) {
@@ -261,6 +269,43 @@ public class NereidsCoordinator extends Coordinator {
                     .getBroker(topResultFileSink.getBrokerName(), worker.host());
             topResultFileSink.setBrokerAddr(broker.host, broker.port);
         }
+    }
+
+    private void enqueue(ConnectContext context) throws UserException {
+        // LoadTask does not have context, not controlled by queue now
+        if (context != null) {
+            if (Config.enable_workload_group) {
+                this.setTWorkloadGroups(context.getEnv().getWorkloadGroupMgr().getWorkloadGroup(context));
+                if (shouldQueue(context)) {
+                    queryQueue = context.getEnv().getWorkloadGroupMgr().getWorkloadGroupQueryQueue(context);
+                    if (queryQueue == null) {
+                        // This logic is actually useless, because when could not find query queue, it will
+                        // throw exception during workload group manager.
+                        throw new UserException("could not find query queue");
+                    }
+                    queueToken = queryQueue.getToken();
+                    queueToken.get(DebugUtil.printId(queryId),
+                            coordinatorContext.queryOptions.getExecutionTimeout() * 1000);
+                }
+            } else {
+                context.setWorkloadGroupName("");
+            }
+        }
+    }
+
+    private boolean shouldQueue(ConnectContext context) {
+        boolean ret = Config.enable_query_queue && !context.getSessionVariable()
+                .getBypassWorkloadGroup() && !isQueryCancelled();
+        if (!ret) {
+            return false;
+        }
+        // a query with ScanNode need not queue only when all its scan node is SchemaScanNode
+        for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+            if (!(scanNode instanceof SchemaScanNode)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void setResultProcessor(DataSink topDataSink) {
