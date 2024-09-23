@@ -17,10 +17,12 @@
 
 package org.apache.doris.qe;
 
+import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.load.loadv2.LoadJob;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.task.LoadEtlTask;
+import org.apache.doris.thrift.TErrorTabletInfo;
 import org.apache.doris.thrift.TTabletCommitInfo;
 
 import com.google.common.collect.ImmutableMap;
@@ -29,11 +31,17 @@ import com.google.common.collect.Maps;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class LoadContext {
 
+    private volatile String trackingUrl;
+    private volatile long transactionId;
+    private volatile String label;
+    private final List<String> exportFiles = Lists.newCopyOnWriteArrayList();
     private final Map<String, String> loadCounters = Maps.newLinkedHashMap();
     private final List<String> deltaUrls = Lists.newCopyOnWriteArrayList();
+    private final List<TErrorTabletInfo> errorTabletInfos = Lists.newCopyOnWriteArrayList();
 
     // in pipelinex, the commit info may be duplicate, so we remove the duplicate ones
     // key: backendsId
@@ -84,7 +92,7 @@ public class LoadContext {
         return Utils.fastToImmutableList(deltaUrls);
     }
 
-    public void updateDeltas(List<String> deltaUrls) {
+    public void updateDeltaUrls(List<String> deltaUrls) {
         if (!deltaUrls.isEmpty()) {
             this.deltaUrls.addAll(deltaUrls);
         }
@@ -99,5 +107,48 @@ public class LoadContext {
 
     public synchronized List<TTabletCommitInfo> getCommitInfos() {
         return Utils.fastToImmutableList(commitInfoMap.values());
+    }
+
+    public void updateTrackingUrl(String trackingUrl) {
+        this.trackingUrl = trackingUrl;
+    }
+
+    public String getTrackingUrl() {
+        return trackingUrl;
+    }
+
+    public void updateTransactionId(long transactionId) {
+        this.transactionId = transactionId;
+    }
+
+    public long getTransactionId() {
+        return transactionId;
+    }
+
+    public String getLabel() {
+        return label;
+    }
+
+    public void updateLabel(String label) {
+        this.label = label;
+    }
+
+    public void addExportFiles(List<String> files) {
+        this.exportFiles.addAll(files);
+    }
+
+    public List<String> getExportFiles() {
+        return exportFiles;
+    }
+
+    public synchronized void updateErrorTabletInfos(List<TErrorTabletInfo> errorTabletInfos) {
+        if (this.errorTabletInfos.size() <= Config.max_error_tablet_of_broker_load) {
+            this.errorTabletInfos.addAll(errorTabletInfos.stream().limit(Config.max_error_tablet_of_broker_load
+                    - this.errorTabletInfos.size()).collect(Collectors.toList()));
+        }
+    }
+
+    public List<TErrorTabletInfo> getErrorTabletInfos() {
+        return errorTabletInfos;
     }
 }

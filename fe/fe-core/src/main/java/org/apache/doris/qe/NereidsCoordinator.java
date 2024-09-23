@@ -41,7 +41,7 @@ import org.apache.doris.planner.SchemaScanNode;
 import org.apache.doris.qe.ConnectContext.ConnectType;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
-import org.apache.doris.qe.runtime.MultiResultReceivers;
+import org.apache.doris.qe.runtime.QueryProcessor;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
 import org.apache.doris.qe.runtime.ThriftPlansBuilder;
@@ -221,7 +221,7 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     protected void cancelInternal(Status cancelReason) {
-        executionTask.cancelSchedule(cancelReason);
+        coordinatorContext.withLock(() -> coordinatorContext.getJobProcessor().cancel(cancelReason));
     }
 
     private DataSink processTopSink(ConnectContext connectContext, NereidsPlanner nereidsPlanner)
@@ -306,9 +306,9 @@ public class NereidsCoordinator extends Coordinator {
 
     private void setResultProcessor(DataSink topDataSink) {
         if ((topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
-            coordinatorContext.setJobProcessor(MultiResultReceivers.build(coordinatorContext));
+            coordinatorContext.setJobProcessor(QueryProcessor.build(coordinatorContext, executionTask));
         } else {
-            coordinatorContext.setJobProcessor(new LoadProcessor(coordinatorContext, executionTask));
+            coordinatorContext.setJobProcessor(new LoadProcessor(coordinatorContext, -1L, executionTask));
         }
     }
 }

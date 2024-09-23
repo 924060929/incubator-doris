@@ -20,7 +20,6 @@ package org.apache.doris.qe.runtime;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
-import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
@@ -34,7 +33,6 @@ import org.apache.doris.qe.RowBatch;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TStatusCode;
-import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
@@ -46,13 +44,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-public class MultiResultReceivers implements JobProcessor {
-    private static final Logger LOG = LogManager.getLogger(MultiResultReceivers.class);
+public class QueryProcessor implements JobProcessor {
+    private static final Logger LOG = LogManager.getLogger(QueryProcessor.class);
 
     // constant fields
-    private final NereidsPlanner nereidsPlanner;
-    private final TUniqueId queryId;
     private final long limitRows;
+    private final SqlPipelineTask sqlPipelineTask;
 
     // mutable field
     private final CoordinatorContext coordinatorContext;
@@ -60,16 +57,15 @@ public class MultiResultReceivers implements JobProcessor {
     private int receiverOffset;
     private long numReceivedRows;
 
-    public MultiResultReceivers(NereidsPlanner planner, CoordinatorContext coordinatorContext,
-            TUniqueId queryId, List<ResultReceiver> runningReceivers) {
+    public QueryProcessor(CoordinatorContext coordinatorContext,
+            SqlPipelineTask sqlPipelineTask, List<ResultReceiver> runningReceivers) {
+        this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
+        this.sqlPipelineTask = Objects.requireNonNull(sqlPipelineTask, "sqlPipelineTask can not be null");
         this.runningReceivers = new CopyOnWriteArrayList<>(
                 Objects.requireNonNull(runningReceivers, "runningReceivers can not be null")
         );
-        this.coordinatorContext = coordinatorContext;
-        this.nereidsPlanner = planner;
-        this.queryId = queryId;
 
-        List<DistributedPlan> fragments = nereidsPlanner.getDistributedPlans().valueList();
+        List<DistributedPlan> fragments = coordinatorContext.planner.getDistributedPlans().valueList();
         this.limitRows = fragments.get(fragments.size() - 1)
                 .getFragmentJob()
                 .getFragment()
@@ -77,7 +73,7 @@ public class MultiResultReceivers implements JobProcessor {
                 .getLimit();
     }
 
-    public static MultiResultReceivers build(CoordinatorContext coordinatorContext) {
+    public static QueryProcessor build(CoordinatorContext coordinatorContext, SqlPipelineTask sqlPipelineTask) {
         List<DistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
         PipelineDistributedPlan topFragment =
                 (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
@@ -105,9 +101,7 @@ public class MultiResultReceivers implements JobProcessor {
                     )
             );
         }
-        return new MultiResultReceivers(
-                coordinatorContext.planner, coordinatorContext, coordinatorContext.queryId, receivers
-        );
+        return new QueryProcessor(coordinatorContext, sqlPipelineTask, receivers);
     }
 
     public boolean isEof() {
@@ -124,7 +118,7 @@ public class MultiResultReceivers implements JobProcessor {
         RowBatch resultBatch = receiver.getNext(status);
         if (!status.ok()) {
             LOG.warn("Query {} coordinator get next fail, {}, need cancel.",
-                    DebugUtil.printId(queryId), status.getErrorMsg());
+                    DebugUtil.printId(coordinatorContext.queryId), status.getErrorMsg());
         }
 
         Status copyStatus = coordinatorContext.updateStatusIfOk(status);
@@ -166,7 +160,7 @@ public class MultiResultReceivers implements JobProcessor {
 
             // if this query is a block query do not cancel.
             boolean hasLimit = limitRows > 0;
-            if (!nereidsPlanner.isBlockQuery()
+            if (!coordinatorContext.planner.isBlockQuery()
                     && coordinatorContext.instanceNum > 1
                     && hasLimit && numReceivedRows >= limitRows) {
                 if (LOG.isDebugEnabled()) {
@@ -185,6 +179,10 @@ public class MultiResultReceivers implements JobProcessor {
     public void cancel(Status cancelReason) {
         for (ResultReceiver receiver : runningReceivers) {
             receiver.cancel(cancelReason);
+        }
+
+        for (MultiFragmentsPipelineTask fragmentsTask : sqlPipelineTask.getChildrenTasks().values()) {
+            fragmentsTask.cancelExecute(cancelReason);
         }
     }
 }

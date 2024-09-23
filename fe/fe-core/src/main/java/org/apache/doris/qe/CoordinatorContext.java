@@ -34,7 +34,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.runtime.LoadProcessor;
-import org.apache.doris.qe.runtime.MultiResultReceivers;
+import org.apache.doris.qe.runtime.QueryProcessor;
 import org.apache.doris.resource.workloadgroup.QueryQueue;
 import org.apache.doris.resource.workloadgroup.QueueToken;
 import org.apache.doris.service.ExecuteEnv;
@@ -205,12 +205,16 @@ public class CoordinatorContext {
         this.jobProcessor = jobProcessor;
     }
 
+    public JobProcessor getJobProcessor() {
+        return jobProcessor;
+    }
+
     public LoadProcessor asLoadProcessor() {
         return (LoadProcessor) jobProcessor;
     }
 
-    public MultiResultReceivers asQueryProcessor() {
-        return (MultiResultReceivers) jobProcessor;
+    public QueryProcessor asQueryProcessor() {
+        return (QueryProcessor) jobProcessor;
     }
 
     public static CoordinatorContext build(NereidsPlanner planner, NereidsCoordinator coordinator) {
