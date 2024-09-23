@@ -36,6 +36,7 @@ import org.apache.doris.planner.ResultFileSink;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext.ConnectType;
+import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
 import org.apache.doris.qe.runtime.MultiResultReceivers;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
@@ -64,7 +65,6 @@ public class NereidsCoordinator extends Coordinator {
     private static final Logger LOG = LogManager.getLogger(NereidsCoordinator.class);
 
     private final CoordinatorContext coordinatorContext;
-    private final MultiResultReceivers resultReceivers;
 
     private volatile SqlPipelineTask executionTask;
 
@@ -73,7 +73,6 @@ public class NereidsCoordinator extends Coordinator {
         super(context, analyzer, planner, statsErrorEstimator);
 
         this.coordinatorContext = CoordinatorContext.build(planner, this);
-        this.resultReceivers = MultiResultReceivers.build(coordinatorContext);
 
         Preconditions.checkState(!planner.getFragments().isEmpty() && coordinatorContext.instanceNum > 0,
                 "Fragment and Instance can not be empty˚");
@@ -86,14 +85,7 @@ public class NereidsCoordinator extends Coordinator {
 
         QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
 
-        if (!(topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
-            // only we set is report success, then the backend would report the fragment status,
-            // then we can not the fragment is finished, and we can return in the NereidsCoordinator::join
-            coordinatorContext.queryOptions.setIsReportSuccess(true);
-            // Env.getCurrentEnv().getLoadManager().initJobProgress(jobId, queryId, instanceIds, relatedBackendIds);
-            // Env.getCurrentEnv().getProgressManager().addTotalScanNums(String.valueOf(jobId), 1);
-            LOG.info("dispatch load job: {} to {}", DebugUtil.printId(queryId), addressToBackendID.keySet());
-        }
+        setResultProcessor(topDataSink);
 
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
@@ -103,11 +95,11 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public RowBatch getNext() throws Exception {
-        return resultReceivers.getNext();
+        return coordinatorContext.asQueryProcessor().getNext();
     }
 
     public boolean isEof() {
-        return resultReceivers.isEof();
+        return coordinatorContext.asQueryProcessor().isEof();
     }
 
     @Override
@@ -200,17 +192,17 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public Map<String, String> getLoadCounters() {
-        return coordinatorContext.loadContext.getLoadCounters();
+        return coordinatorContext.asLoadProcessor().loadContext.getLoadCounters();
     }
 
     @Override
     public List<String> getDeltaUrls() {
-        return coordinatorContext.loadContext.getDeltaUrls();
+        return coordinatorContext.asLoadProcessor().loadContext.getDeltaUrls();
     }
 
     @Override
     public List<TTabletCommitInfo> getCommitInfos() {
-        return coordinatorContext.loadContext.getCommitInfos();
+        return coordinatorContext.asLoadProcessor().loadContext.getCommitInfos();
     }
 
     // this method is used to provide profile metrics: `Instances Num Per BE`
@@ -268,6 +260,14 @@ public class NereidsCoordinator extends Coordinator {
             FsBroker broker = Env.getCurrentEnv().getBrokerMgr()
                     .getBroker(topResultFileSink.getBrokerName(), worker.host());
             topResultFileSink.setBrokerAddr(broker.host, broker.port);
+        }
+    }
+
+    private void setResultProcessor(DataSink topDataSink) {
+        if ((topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
+            coordinatorContext.setJobProcessor(MultiResultReceivers.build(coordinatorContext));
+        } else {
+            coordinatorContext.setJobProcessor(new LoadProcessor(coordinatorContext));
         }
     }
 }

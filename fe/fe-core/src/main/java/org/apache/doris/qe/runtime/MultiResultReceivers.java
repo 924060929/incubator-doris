@@ -28,6 +28,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.JobProcessor;
 import org.apache.doris.qe.ResultReceiver;
 import org.apache.doris.qe.RowBatch;
 import org.apache.doris.rpc.RpcException;
@@ -45,7 +46,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-public class MultiResultReceivers {
+public class MultiResultReceivers implements JobProcessor {
     private static final Logger LOG = LogManager.getLogger(MultiResultReceivers.class);
 
     // constant fields
