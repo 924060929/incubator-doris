@@ -85,7 +85,8 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         this.timeoutDeadline = coordinatorContext.timeoutDeadline;
 
         // flatten to fragment tasks to quickly index by BackendFragmentId, when receive the report message
-        ImmutableMap.Builder<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks = ImmutableMap.builder();
+        ImmutableMap.Builder<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks
+                = ImmutableMap.builder();
         for (Entry<Long, MultiFragmentsPipelineTask> backendTask : fragmentTasks.entrySet()) {
             Long backendId = backendTask.getKey();
             for (Entry<Integer, SingleFragmentPipelineTask> fragmentIdToTask : backendTask.getValue()
@@ -163,10 +164,10 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             }
         }
         if (params.isSetDeltaUrls()) {
-            coordinatorContext.loadContext.updateDeltas(params.getDeltaUrls());
+            coordinatorContext.asLoadProcessor().loadContext.updateDeltas(params.getDeltaUrls());
         }
         if (params.isSetLoadCounters()) {
-            coordinatorContext.loadContext.updateLoadCounters(params.getLoadCounters());
+            coordinatorContext.asLoadProcessor().loadContext.updateLoadCounters(params.getLoadCounters());
         }
         // if (params.isSetTrackingUrl()) {
         //     trackingUrl = params.getTrackingUrl();
@@ -181,7 +182,7 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         //     updateExportFiles(params.getExportFiles());
         // }
         if (params.isSetCommitInfos()) {
-            coordinatorContext.loadContext.updateCommitInfos(params.getCommitInfos());
+            coordinatorContext.asLoadProcessor().loadContext.updateCommitInfos(params.getCommitInfos());
         }
         // if (params.isSetErrorTabletInfos()) {
         //     updateErrorTabletInfos(params.getErrorTabletInfos());

@@ -26,7 +26,17 @@ import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
+import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSource;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
+import org.apache.doris.planner.ScanNode;
+import org.apache.doris.qe.runtime.LoadProcessor;
+import org.apache.doris.qe.runtime.MultiResultReceivers;
 import org.apache.doris.service.ExecuteEnv;
 import org.apache.doris.thrift.TDescriptorTable;
 import org.apache.doris.thrift.TNetworkAddress;
@@ -36,17 +46,23 @@ import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TResourceLimit;
 import org.apache.doris.thrift.TUniqueId;
 
+import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public class CoordinatorContext {
     private static final Logger LOG = LogManager.getLogger(CoordinatorContext.class);
@@ -65,10 +81,15 @@ public class CoordinatorContext {
     public final long timeoutDeadline;
     public final boolean twoPhaseExecution;
     public final int instanceNum;
+    public final Supplier<Set<TUniqueId>> instanceIds = Suppliers.memoize(this::getInstanceIds);
+    public final Supplier<Map<TNetworkAddress, Long>> backends = Suppliers.memoize(this::getBackends);
+    public final Supplier<Integer> scanRangeNum = Suppliers.memoize(this::getScanRangeNum);
 
     // these are some mutable states
     private volatile Status status;
-    public final LoadContext loadContext;
+
+    // query or load processor
+    private volatile JobProcessor jobProcessor;
 
     private CoordinatorContext(NereidsCoordinator coordinator,
             ConnectContext connectContext,
@@ -106,8 +127,6 @@ public class CoordinatorContext {
                 .stream().map(plan -> ((PipelineDistributedPlan) plan).getInstanceJobs().size())
                 .reduce(Integer::sum)
                 .get();
-
-        this.loadContext = new LoadContext();
     }
 
     public void updateProfileIfPresent(Consumer<SummaryProfile> profileAction) {
@@ -156,6 +175,18 @@ public class CoordinatorContext {
         status = new Status(newStatus.getErrorCode(), newStatus.getErrorMsg());
         coordinator.cancelInternal(readCloneStatus());
         return originStatus;
+    }
+
+    public void setJobProcessor(JobProcessor jobProcessor) {
+        this.jobProcessor = jobProcessor;
+    }
+
+    public LoadProcessor asLoadProcessor() {
+        return (LoadProcessor) jobProcessor;
+    }
+
+    public MultiResultReceivers asQueryProcessor() {
+        return (MultiResultReceivers) jobProcessor;
     }
 
     public static CoordinatorContext build(NereidsPlanner planner, NereidsCoordinator coordinator) {
@@ -241,5 +272,56 @@ public class CoordinatorContext {
             queryOptions.setInitialReservationTotalClaims(memLimit);
             queryOptions.setBufferPoolLimit(memLimit);
         }
+    }
+
+    private Set<TUniqueId> getInstanceIds() {
+        Set<TUniqueId> instanceIds = Sets.newLinkedHashSet();
+        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
+            PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
+            List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
+            for (AssignedJob instanceJob : instanceJobs) {
+                instanceIds.add(instanceJob.instanceId());
+            }
+        }
+        return instanceIds;
+    }
+
+    private Map<TNetworkAddress, Long> getBackends() {
+        Map<TNetworkAddress, Long> backends = Maps.newLinkedHashMap();
+        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
+            PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
+            List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
+            for (AssignedJob instanceJob : instanceJobs) {
+                DistributedPlanWorker worker = instanceJob.getAssignedWorker();
+                backends.put(new TNetworkAddress(worker.address(), worker.port()), worker.id());
+            }
+        }
+        return backends;
+    }
+
+    private int getScanRangeNum() {
+        int scanRangeNum = 0;
+
+        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
+            PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
+            List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
+            for (AssignedJob instanceJob : instanceJobs) {
+                ScanSource scanSource = instanceJob.getScanSource();
+                if (scanSource instanceof DefaultScanSource) {
+                    for (ScanRanges scanRanges : ((DefaultScanSource) scanSource).scanNodeToScanRanges.values()) {
+                        scanRangeNum += scanRanges.params.size();
+                    }
+                } else {
+                    BucketScanSource bucketScanSource = (BucketScanSource) scanSource;
+                    for (Map<ScanNode, ScanRanges> scanNodeToRanges
+                            : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
+                        for (ScanRanges scanRanges : scanNodeToRanges.values()) {
+                            scanRangeNum += scanRanges.params.size();
+                        }
+                    }
+                }
+            }
+        }
+        return scanRangeNum;
     }
 }
