@@ -19,9 +19,7 @@ package org.apache.doris.qe;
 
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
-import org.apache.doris.common.NereidsException;
 import org.apache.doris.common.Status;
-import org.apache.doris.common.UserException;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.mysql.MysqlCommand;
@@ -34,10 +32,11 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSour
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
-import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiResultReceivers;
+import org.apache.doris.resource.workloadgroup.QueryQueue;
+import org.apache.doris.resource.workloadgroup.QueueToken;
 import org.apache.doris.service.ExecuteEnv;
 import org.apache.doris.thrift.TDescriptorTable;
 import org.apache.doris.thrift.TNetworkAddress;
@@ -76,7 +75,6 @@ public class CoordinatorContext {
     public final TQueryGlobals queryGlobals;
     public final TQueryOptions queryOptions;
     public final TDescriptorTable descriptorTable;
-    public final List<TPipelineWorkloadGroup> workloadGroups;
     public final TNetworkAddress coordinatorAddress;
     public final TNetworkAddress directConnectFrontendAddress;
     public final long timeoutDeadline;
@@ -88,6 +86,9 @@ public class CoordinatorContext {
 
     // these are some mutable states
     private volatile Status status;
+    private volatile Optional<QueryQueue> queryQueue;
+    private volatile Optional<QueueToken> queueToken;
+    private volatile List<TPipelineWorkloadGroup> workloadGroups = ImmutableList.of();
 
     // query or load processor
     private volatile JobProcessor jobProcessor;
@@ -98,7 +99,6 @@ public class CoordinatorContext {
             TQueryGlobals queryGlobals,
             TQueryOptions queryOptions,
             TDescriptorTable descriptorTable,
-            List<TPipelineWorkloadGroup> workloadGroups,
             TNetworkAddress coordinatorAddress,
             TNetworkAddress directConnectFrontendAddress) {
         this.connectContext = connectContext;
@@ -107,7 +107,6 @@ public class CoordinatorContext {
         this.queryGlobals = queryGlobals;
         this.queryOptions = queryOptions;
         this.descriptorTable = descriptorTable;
-        this.workloadGroups = workloadGroups;
         this.coordinatorAddress = coordinatorAddress;
         this.directConnectFrontendAddress = directConnectFrontendAddress;
 
@@ -128,6 +127,30 @@ public class CoordinatorContext {
                 .stream().map(plan -> ((PipelineDistributedPlan) plan).getInstanceJobs().size())
                 .reduce(Integer::sum)
                 .get();
+
+        this.queryQueue = Optional.empty();
+        this.queueToken = Optional.empty();
+    }
+
+    public void setQueueInfo(QueryQueue queryQueue, QueueToken queueToken) {
+        this.queryQueue = Optional.ofNullable(queryQueue);
+        this.queueToken = Optional.ofNullable(queueToken);
+    }
+
+    public Optional<QueueToken> getQueueToken() {
+        return this.queueToken;
+    }
+
+    public Optional<QueryQueue> getQueryQueue() {
+        return queryQueue;
+    }
+
+    public void setWorkloadGroups(List<TPipelineWorkloadGroup> workloadGroups) {
+        this.workloadGroups = workloadGroups;
+    }
+
+    public List<TPipelineWorkloadGroup> getWorkloadGroups() {
+        return workloadGroups;
     }
 
     public void updateProfileIfPresent(Consumer<SummaryProfile> profileAction) {
@@ -195,7 +218,6 @@ public class CoordinatorContext {
         TQueryOptions queryOptions = initQueryOptions(connectContext);
         TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
         TDescriptorTable descriptorTable = planner.getDescTable().toThrift();
-        List<TPipelineWorkloadGroup> workloadGroup = computeWorkloadGroups(connectContext);
         TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
         String currentConnectedFEIp = connectContext.getCurrentConnectedFEIp();
         TNetworkAddress directConnectFrontendAddress =
@@ -204,21 +226,9 @@ public class CoordinatorContext {
                         : coordinatorAddress;
 
         return new CoordinatorContext(
-                coordinator, connectContext, planner, queryGlobals, queryOptions, descriptorTable, workloadGroup,
+                coordinator, connectContext, planner, queryGlobals, queryOptions, descriptorTable,
                 coordinatorAddress, directConnectFrontendAddress
         );
-    }
-
-    private static List<TPipelineWorkloadGroup> computeWorkloadGroups(ConnectContext connectContext) {
-        List<TPipelineWorkloadGroup> workloadGroup = ImmutableList.of();
-        if (Config.enable_workload_group) {
-            try {
-                workloadGroup = connectContext.getEnv().getWorkloadGroupMgr().getWorkloadGroup(connectContext);
-            } catch (UserException e) {
-                throw new NereidsException(e.getMessage(), e);
-            }
-        }
-        return workloadGroup;
     }
 
     private static TQueryOptions initQueryOptions(ConnectContext context) {

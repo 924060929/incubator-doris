@@ -45,6 +45,8 @@ import org.apache.doris.qe.runtime.MultiResultReceivers;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
 import org.apache.doris.qe.runtime.ThriftPlansBuilder;
+import org.apache.doris.resource.workloadgroup.QueryQueue;
+import org.apache.doris.resource.workloadgroup.QueueToken;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
@@ -119,15 +121,16 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public void cancel(Status cancelReason) {
-        if (queueToken != null) {
-            queueToken.cancel();
-        }
-        for (ScanNode scanNode : scanNodes) {
+        coordinatorContext.getQueueToken().ifPresent(QueueToken::cancel);
+
+        for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
             scanNode.stop();
         }
+
         if (cancelReason.ok()) {
             throw new RuntimeException("Should use correct cancel reason, but it is " + cancelReason);
         }
+
         TUniqueId queryId = coordinatorContext.queryId;
         Status queryStatus = coordinatorContext.updateStatusIfOk(cancelReason);
         if (!queryStatus.ok()) {
@@ -275,17 +278,18 @@ public class NereidsCoordinator extends Coordinator {
         // LoadTask does not have context, not controlled by queue now
         if (context != null) {
             if (Config.enable_workload_group) {
-                this.setTWorkloadGroups(context.getEnv().getWorkloadGroupMgr().getWorkloadGroup(context));
+                coordinatorContext.setWorkloadGroups(context.getEnv().getWorkloadGroupMgr().getWorkloadGroup(context));
                 if (shouldQueue(context)) {
-                    queryQueue = context.getEnv().getWorkloadGroupMgr().getWorkloadGroupQueryQueue(context);
+                    QueryQueue queryQueue = context.getEnv().getWorkloadGroupMgr().getWorkloadGroupQueryQueue(context);
                     if (queryQueue == null) {
                         // This logic is actually useless, because when could not find query queue, it will
                         // throw exception during workload group manager.
                         throw new UserException("could not find query queue");
                     }
-                    queueToken = queryQueue.getToken();
-                    queueToken.get(DebugUtil.printId(queryId),
-                            coordinatorContext.queryOptions.getExecutionTimeout() * 1000);
+                    QueueToken queueToken = queryQueue.getToken();
+                    int queryTimeout = coordinatorContext.queryOptions.getExecutionTimeout() * 1000;
+                    queueToken.get(DebugUtil.printId(queryId), queryTimeout);
+                    coordinatorContext.setQueueInfo(queryQueue, queueToken);
                 }
             } else {
                 context.setWorkloadGroupName("");
