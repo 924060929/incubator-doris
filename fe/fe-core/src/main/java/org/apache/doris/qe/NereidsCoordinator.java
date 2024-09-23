@@ -170,7 +170,12 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public void updateFragmentExecStatus(TReportExecStatusParams params) {
-        executionTask.processReportExecStatus(params);
+        coordinatorContext.asLoadProcessor().updateFragmentExecStatus(params);
+    }
+
+    @Override
+    public TQueryOptions getQueryOptions() {
+        return coordinatorContext.queryOptions;
     }
 
     @Override
@@ -186,11 +191,6 @@ public class NereidsCoordinator extends Coordinator {
     @Override
     public void setLoadZeroTolerance(boolean loadZeroTolerance) {
         coordinatorContext.queryGlobals.setLoadZeroTolerance(loadZeroTolerance);
-    }
-
-    @Override
-    public TQueryOptions getQueryOptions() {
-        return coordinatorContext.queryOptions;
     }
 
     @Override

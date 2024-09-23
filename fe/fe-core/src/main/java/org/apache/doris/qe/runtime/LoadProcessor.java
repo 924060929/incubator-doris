@@ -6,6 +6,7 @@ import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.qe.JobProcessor;
 import org.apache.doris.qe.LoadContext;
+import org.apache.doris.thrift.TReportExecStatusParams;
 import org.apache.doris.thrift.TUniqueId;
 
 import org.apache.logging.log4j.LogManager;
@@ -44,6 +45,10 @@ public class LoadProcessor implements JobProcessor {
 
     public boolean isDone() {
         return executionTask.isDone();
+    }
+
+    public void updateFragmentExecStatus(TReportExecStatusParams params) {
+        executionTask.processReportExecStatus(params);
     }
 
     public boolean join(int timeoutS) {
