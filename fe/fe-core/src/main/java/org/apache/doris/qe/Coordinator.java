@@ -311,8 +311,8 @@ public class Coordinator implements CoordInterface {
 
     private final ExecutionProfile executionProfile;
 
-    private volatile QueueToken queueToken = null;
-    private QueryQueue queryQueue = null;
+    protected volatile QueueToken queueToken = null;
+    protected QueryQueue queryQueue = null;
 
     public ExecutionProfile getExecutionProfile() {
         return executionProfile;

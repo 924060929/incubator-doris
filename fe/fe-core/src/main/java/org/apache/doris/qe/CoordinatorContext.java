@@ -34,6 +34,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSour
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
+import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiResultReceivers;
@@ -297,6 +298,30 @@ public class CoordinatorContext {
             }
         }
         return backends;
+    }
+
+    private Set<ScanNode> getScanNodes() {
+        Set<ScanNode> scanNodes = Sets.newLinkedHashSet();
+
+        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
+            PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
+            List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
+            for (AssignedJob instanceJob : instanceJobs) {
+                ScanSource scanSource = instanceJob.getScanSource();
+                if (scanSource instanceof DefaultScanSource) {
+                    for (ScanNode scanNode : ((DefaultScanSource) scanSource).scanNodeToScanRanges.keySet()) {
+                        scanNodes.add(scanNode);
+                    }
+                } else {
+                    BucketScanSource bucketScanSource = (BucketScanSource) scanSource;
+                    for (Map<ScanNode, ScanRanges> scanNodeToRanges
+                            : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
+                        scanNodes.addAll(scanNodeToRanges.keySet());
+                    }
+                }
+            }
+        }
+        return scanNodes;
     }
 
     private int getScanRangeNum() {
