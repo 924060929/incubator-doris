@@ -48,6 +48,7 @@ import org.apache.doris.qe.runtime.ThriftPlansBuilder;
 import org.apache.doris.resource.workloadgroup.QueryQueue;
 import org.apache.doris.resource.workloadgroup.QueueToken;
 import org.apache.doris.system.Backend;
+import org.apache.doris.thrift.TErrorTabletInfo;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TQueryOptions;
@@ -205,6 +206,51 @@ public class NereidsCoordinator extends Coordinator {
     @Override
     public List<TTabletCommitInfo> getCommitInfos() {
         return coordinatorContext.asLoadProcessor().loadContext.getCommitInfos();
+    }
+
+    @Override
+    public int getScanRangeNum() {
+        return coordinatorContext.scanRangeNum.get();
+    }
+
+    @Override
+    public ConnectContext getConnectContext() {
+        return coordinatorContext.connectContext;
+    }
+
+    @Override
+    public List<String> getExportFiles() {
+        return coordinatorContext.asLoadProcessor().loadContext.getExportFiles();
+    }
+
+    @Override
+    public QueueToken getQueueToken() {
+        return coordinatorContext.getQueueToken().get();
+    }
+
+    @Override
+    public long getTxnId() {
+        return coordinatorContext.asLoadProcessor().loadContext.getTransactionId();
+    }
+
+    @Override
+    public String getLabel() {
+        return coordinatorContext.asLoadProcessor().loadContext.getLabel();
+    }
+
+    @Override
+    public String getTrackingUrl() {
+        return coordinatorContext.asLoadProcessor().loadContext.getTrackingUrl();
+    }
+
+    @Override
+    public TUniqueId getQueryId() {
+        return coordinatorContext.queryId;
+    }
+
+    @Override
+    public List<TErrorTabletInfo> getErrorTabletInfos() {
+        return coordinatorContext.asLoadProcessor().loadContext.getErrorTabletInfos();
     }
 
     // this method is used to provide profile metrics: `Instances Num Per BE`
