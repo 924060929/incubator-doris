@@ -95,7 +95,7 @@ public class NereidsCoordinator extends Coordinator {
         DataSink topDataSink = processTopSink(coordinatorContext.connectContext, coordinatorContext.planner);
         coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
 
-        QeProcessorImpl.INSTANCE.registerInstances(queryId, coordinatorContext.instanceNum);
+        QeProcessorImpl.INSTANCE.registerInstances(coordinatorContext.queryId, coordinatorContext.instanceNum);
 
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
