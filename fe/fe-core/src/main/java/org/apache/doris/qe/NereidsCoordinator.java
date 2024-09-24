@@ -89,7 +89,7 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     @Override
-    protected void execInternal() throws Exception {
+    public void exec() throws Exception {
         enqueue(coordinatorContext.connectContext);
 
         DataSink topDataSink = processTopSink(coordinatorContext.connectContext, coordinatorContext.planner);
