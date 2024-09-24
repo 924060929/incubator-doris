@@ -303,7 +303,7 @@ public class Coordinator implements CoordInterface {
         return numReceivedRows;
     }
 
-    public List<TPipelineWorkloadGroup> gettWorkloadGroups() {
+    public List<TPipelineWorkloadGroup> getTWorkloadGroups() {
         return tWorkloadGroups;
     }
 
@@ -311,8 +311,8 @@ public class Coordinator implements CoordInterface {
 
     private final ExecutionProfile executionProfile;
 
-    protected volatile QueueToken queueToken = null;
-    protected QueryQueue queryQueue = null;
+    private volatile QueueToken queueToken = null;
+    private QueryQueue queryQueue = null;
 
     public ExecutionProfile getExecutionProfile() {
         return executionProfile;

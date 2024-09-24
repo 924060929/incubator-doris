@@ -28,7 +28,7 @@ public class LoadProcessor implements JobProcessor {
 
     public final CoordinatorContext coordinatorContext;
     public final LoadContext loadContext;
-    private final long jobId;
+    public final long jobId;
     private final SqlPipelineTask executionTask;
 
     // this latch is used to wait finish for load, for example, insert into statement

@@ -185,4 +185,12 @@ public class QueryProcessor implements JobProcessor {
             fragmentsTask.cancelExecute(cancelReason);
         }
     }
+
+    public int getReceiverOffset() {
+        return receiverOffset;
+    }
+
+    public long getNumReceivedRows() {
+        return numReceivedRows;
+    }
 }
