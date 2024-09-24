@@ -25,6 +25,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
+import org.apache.doris.common.profile.ExecutionProfile;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.NereidsPlanner;
@@ -33,12 +34,15 @@ import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
+import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.DataSink;
+import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ResultFileSink;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.planner.SchemaScanNode;
 import org.apache.doris.qe.ConnectContext.ConnectType;
+import org.apache.doris.qe.QueryStatisticsItem.FragmentInstanceInfo;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
 import org.apache.doris.qe.runtime.QueryProcessor;
@@ -51,6 +55,7 @@ import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TErrorTabletInfo;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
+import org.apache.doris.thrift.TPipelineWorkloadGroup;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TQueryType;
 import org.apache.doris.thrift.TReportExecStatusParams;
@@ -106,6 +111,21 @@ public class NereidsCoordinator extends Coordinator {
 
     public boolean isEof() {
         return coordinatorContext.asQueryProcessor().isEof();
+    }
+
+    @Override
+    public void setTWorkloadGroups(List<TPipelineWorkloadGroup> tWorkloadGroups) {
+        coordinatorContext.setWorkloadGroups(tWorkloadGroups);
+    }
+
+    @Override
+    public List<TPipelineWorkloadGroup> getTWorkloadGroups() {
+        return coordinatorContext.getWorkloadGroups();
+    }
+
+    @Override
+    public long getJobId() {
+        return coordinatorContext.asLoadProcessor().jobId;
     }
 
     @Override
@@ -253,6 +273,70 @@ public class NereidsCoordinator extends Coordinator {
         return coordinatorContext.asLoadProcessor().loadContext.getErrorTabletInfos();
     }
 
+    @Override
+    public List<TNetworkAddress> getInvolvedBackends() {
+        return Utils.fastToImmutableList(coordinatorContext.backends.get().keySet());
+    }
+
+    @Override
+    public List<FragmentInstanceInfo> getFragmentInstanceInfos() {
+        return super.getFragmentInstanceInfos();
+    }
+
+    @Override
+    public List<PlanFragment> getFragments() {
+        return coordinatorContext.planner.getFragments();
+    }
+
+    @Override
+    public ExecutionProfile getExecutionProfile() {
+        return coordinatorContext.executionProfile;
+    }
+
+    @Override
+    public long getNumReceivedRows() {
+        return coordinatorContext.asQueryProcessor().getNumReceivedRows();
+    }
+
+    @Override
+    public void setTxnId(long txnId) {
+        coordinatorContext.asLoadProcessor().loadContext.updateTransactionId(txnId);
+    }
+
+    @Override
+    public void setMemTableOnSinkNode(boolean enableMemTableOnSinkNode) {
+        coordinatorContext.queryOptions.setEnableMemtableOnSinkNode(enableMemTableOnSinkNode);
+    }
+
+    @Override
+    public void setBatchSize(int batchSize) {
+        coordinatorContext.queryOptions.setBatchSize(batchSize);
+    }
+
+    @Override
+    public void setTimeout(int timeout) {
+        coordinatorContext.queryOptions.setQueryTimeout(timeout);
+        coordinatorContext.queryOptions.setExecutionTimeout(timeout);
+        if (coordinatorContext.queryOptions.getExecutionTimeout() < 1) {
+            LOG.warn("try set timeout less than 1: {}", coordinatorContext.queryOptions.getExecutionTimeout());
+        }
+    }
+
+    @Override
+    public void setGroupCommitBe(Backend backend) {
+        super.setGroupCommitBe(backend);
+    }
+
+    @Override
+    public void setLoadMemLimit(long loadMemLimit) {
+        coordinatorContext.queryOptions.setLoadMemLimit(loadMemLimit);
+    }
+
+    @Override
+    public void setExecMemoryLimit(long execMemoryLimit) {
+        coordinatorContext.queryOptions.setMemLimit(execMemoryLimit);
+    }
+
     // this method is used to provide profile metrics: `Instances Num Per BE`
     @Override
     public Map<String, Integer> getBeToInstancesNum() {
@@ -263,6 +347,26 @@ public class NereidsCoordinator extends Coordinator {
             result.put(brpcAddrString, beTasks.getChildrenTasks().size());
         }
         return result;
+    }
+
+    @Override
+    public void close() {
+        // NOTE: all close method should be no exception
+        if (coordinatorContext.getQueryQueue().isPresent() && coordinatorContext.getQueueToken().isPresent()) {
+            try {
+                coordinatorContext.getQueryQueue().get().releaseAndNotify(coordinatorContext.getQueueToken().get());
+            } catch (Throwable t) {
+                LOG.error("error happens when coordinator close ", t);
+            }
+        }
+
+        try {
+            for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+                scanNode.stop();
+            }
+        } catch (Throwable t) {
+            LOG.error("error happens when scannode stop ", t);
+        }
     }
 
     protected void cancelInternal(Status cancelReason) {

@@ -20,6 +20,7 @@ package org.apache.doris.qe;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Status;
+import org.apache.doris.common.profile.ExecutionProfile;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.mysql.MysqlCommand;
@@ -63,12 +64,14 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public class CoordinatorContext {
     private static final Logger LOG = LogManager.getLogger(CoordinatorContext.class);
 
     // these are some constant parameters
     public final NereidsCoordinator coordinator;
+    public final ExecutionProfile executionProfile;
     public final ConnectContext connectContext;
     public final NereidsPlanner planner;
     public final TUniqueId queryId;
@@ -96,6 +99,7 @@ public class CoordinatorContext {
     private CoordinatorContext(NereidsCoordinator coordinator,
             ConnectContext connectContext,
             NereidsPlanner planner,
+            ExecutionProfile executionProfile,
             TQueryGlobals queryGlobals,
             TQueryOptions queryOptions,
             TDescriptorTable descriptorTable,
@@ -104,6 +108,7 @@ public class CoordinatorContext {
         this.connectContext = connectContext;
         this.planner = planner;
         this.queryId = connectContext.queryId();
+        this.executionProfile = executionProfile;
         this.queryGlobals = queryGlobals;
         this.queryOptions = queryOptions;
         this.descriptorTable = descriptorTable;
@@ -229,8 +234,15 @@ public class CoordinatorContext {
                         ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
                         : coordinatorAddress;
 
+        ExecutionProfile executionProfile = new ExecutionProfile(
+                coordinator.queryId,
+                planner.getFragments()
+                        .stream()
+                        .map(fragment -> fragment.getFragmentId().asInt())
+                        .collect(Collectors.toList())
+        );
         return new CoordinatorContext(
-                coordinator, connectContext, planner, queryGlobals, queryOptions, descriptorTable,
+                coordinator, connectContext, planner, executionProfile, queryGlobals, queryOptions, descriptorTable,
                 coordinatorAddress, directConnectFrontendAddress
         );
     }
