@@ -181,10 +181,10 @@ public class Coordinator implements CoordInterface {
 
     // Overall status of the entire query; set to the first reported fragment error
     // status or to CANCELLED, if Cancel() is called.
-    protected Status queryStatus = new Status();
+    private Status queryStatus = new Status();
 
     // save of related backends of this query
-    protected Map<TNetworkAddress, Long> addressToBackendID = Maps.newHashMap();
+    private Map<TNetworkAddress, Long> addressToBackendID = Maps.newHashMap();
 
     protected ImmutableMap<Long, Backend> idToBackend = ImmutableMap.of();
 
@@ -193,7 +193,7 @@ public class Coordinator implements CoordInterface {
     private FragmentIdMapping<DistributedPlan> distributedPlans;
 
     // scan node id -> TFileScanRangeParams
-    protected Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap = Maps.newHashMap();
+    private Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap = Maps.newHashMap();
 
     // Why do we use query global?
     // When `NOW()` function is in sql, we need only one now(),
@@ -217,16 +217,16 @@ public class Coordinator implements CoordInterface {
     private boolean returnedAllResults = false;
 
     // populated in computeFragmentExecParams()
-    protected final Map<PlanFragmentId, FragmentExecParams> fragmentExecParamsMap = Maps.newHashMap();
+    private final Map<PlanFragmentId, FragmentExecParams> fragmentExecParamsMap = Maps.newHashMap();
 
     private final List<PlanFragment> fragments;
 
     private Map<Long, PipelineExecContexts> beToPipelineExecCtxs = Maps.newHashMap();
 
-    protected final Map<Pair<Integer, Long>, PipelineExecContext> pipelineExecContexts = new HashMap<>();
+    private final Map<Pair<Integer, Long>, PipelineExecContext> pipelineExecContexts = new HashMap<>();
     private final List<PipelineExecContext> needCheckPipelineExecContexts = Lists.newArrayList();
-    protected List<ResultReceiver> receivers = Lists.newArrayList();
-    protected final List<ScanNode> scanNodes;
+    private List<ResultReceiver> receivers = Lists.newArrayList();
+    private final List<ScanNode> scanNodes;
     private int scanRangeNum = 0;
     // number of instances of this query, equals to
     // number of backends executing plan fragments on behalf of this query;
@@ -252,12 +252,12 @@ public class Coordinator implements CoordInterface {
     private final List<TErrorTabletInfo> errorTabletInfos = Lists.newArrayList();
 
     // Input parameter
-    protected long jobId = -1; // job which this task belongs to
-    protected TUniqueId queryId;
+    private long jobId = -1; // job which this task belongs to
+    private TUniqueId queryId;
 
     // a timestamp represent the absolute timeout
     // eg, System.currentTimeMillis() + executeTimeoutS * 1000
-    protected long timeoutDeadline;
+    private long timeoutDeadline;
 
     private boolean enableShareHashTableForBroadcastJoin = false;
 
@@ -266,16 +266,16 @@ public class Coordinator implements CoordInterface {
     private Backend groupCommitBackend;
 
     // Runtime filter merge instance address and ID
-    public TNetworkAddress runtimeFilterMergeAddr;
-    public TUniqueId runtimeFilterMergeInstanceId;
+    private TNetworkAddress runtimeFilterMergeAddr;
+    private TUniqueId runtimeFilterMergeInstanceId;
     // Runtime filter ID to the target instance address of the fragment,
     // that is expected to use this runtime filter, the instance address is not repeated
-    public Map<RuntimeFilterId, List<FRuntimeFilterTargetParam>> ridToTargetParam = Maps.newHashMap();
+    private Map<RuntimeFilterId, List<FRuntimeFilterTargetParam>> ridToTargetParam = Maps.newHashMap();
     // The runtime filter that expects the instance to be used
-    public List<RuntimeFilter> assignedRuntimeFilters = new ArrayList<>();
-    public List<TopnFilter> topnFilters = new ArrayList<>();
+    private List<RuntimeFilter> assignedRuntimeFilters = new ArrayList<>();
+    private List<TopnFilter> topnFilters = new ArrayList<>();
     // Runtime filter ID to the builder instance number
-    public Map<RuntimeFilterId, Integer> ridToBuilderNum = Maps.newHashMap();
+    private Map<RuntimeFilterId, Integer> ridToBuilderNum = Maps.newHashMap();
     private ConnectContext context;
 
     private StatsErrorEstimator statsErrorEstimator;
@@ -289,7 +289,7 @@ public class Coordinator implements CoordInterface {
 
     // A countdown latch to mark the completion of each fragment. use for pipelineX
     // fragmentid -> backendid
-    protected MarkedCountDownLatch<Integer, Long> fragmentsDoneLatch = null;
+    private MarkedCountDownLatch<Integer, Long> fragmentsDoneLatch = null;
 
     public void setGroupCommitBe(Backend backend) {
         this.groupCommitBackend = backend;

@@ -235,7 +235,7 @@ public class CoordinatorContext {
                         : coordinatorAddress;
 
         ExecutionProfile executionProfile = new ExecutionProfile(
-                coordinator.queryId,
+                connectContext.queryId,
                 planner.getFragments()
                         .stream()
                         .map(fragment -> fragment.getFragmentId().asInt())
