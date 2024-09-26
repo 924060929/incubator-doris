@@ -90,9 +90,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             }
         }
         this.backendFragmentTasks = backendFragmentTasks.build();
-
-        if (coordinatorContext.queryOptions.getQueryType() == TQueryType.LOAD) {
-        }
     }
 
     @Override
