@@ -18,20 +18,27 @@
 package org.apache.doris.nereids.trees.plans.distribute;
 
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
+import org.apache.doris.nereids.trees.plans.distribute.worker.DummyWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBuilder;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSource;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAssignedJob;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.StaticAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
+import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +110,36 @@ public class DistributePlanner {
 
     private void linkBucketShuffleJoinPlan(
             PipelineDistributedPlan joinSide, PipelineDistributedPlan shuffleSide, boolean useLocalShuffle) {
-        // joinSide.getFragmentJob().getFragment().getBucketNum()
+        UnassignedScanBucketOlapTableJob bucketJob = (UnassignedScanBucketOlapTableJob) joinSide.getFragmentJob();
+        int bucketNum = bucketJob.getOlapScanNodes().get(0).getBucketNum();
+        List<AssignedJob> instancePerBucket = sortInstanceByBuckets(joinSide, bucketNum);
+        shuffleSide.setDestinations(instancePerBucket);
+
+        // joinSide.getFragmentJob().getFragment().getBucketNum();
+        // linkAllInstances(joinSide, shuffleSide);
+    }
+
+    private List<AssignedJob> sortInstanceByBuckets(PipelineDistributedPlan plan, int bucketNum) {
+        AssignedJob[] instances = new AssignedJob[bucketNum];
+        for (AssignedJob instanceJob : plan.getInstanceJobs()) {
+            BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
+            for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
+                instances[bucketIndex] = instanceJob;
+            }
+        }
+
+        for (int i = 0; i < instances.length; i++) {
+            if (instances[i] == null) {
+                instances[i] = new StaticAssignedJob(
+                        i,
+                        new TUniqueId(-1, -1),
+                        plan.getFragmentJob(),
+                        DummyWorker.INSTANCE,
+                        new DefaultScanSource(ImmutableMap.of())
+                );
+            }
+        }
+        return Arrays.asList(instances);
     }
 
     private void linkNormalPlans(

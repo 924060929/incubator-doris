@@ -164,7 +164,7 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     public boolean isEof() {
-        return coordinatorContext.asQueryProcessor().isEof();
+        return coordinatorContext.asQueryProcessor().isEos();
     }
 
     @Override

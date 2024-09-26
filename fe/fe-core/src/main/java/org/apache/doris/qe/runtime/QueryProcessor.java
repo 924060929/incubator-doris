@@ -36,11 +36,13 @@ import org.apache.doris.thrift.TStatusCode;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.thrift.TException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -83,7 +85,12 @@ public class QueryProcessor implements JobProcessor {
 
         List<AssignedJob> topInstances = topFragment.getInstanceJobs();
         List<ResultReceiver> receivers = Lists.newArrayListWithCapacity(topInstances.size());
+        Map<Long, AssignedJob> distinctWorkerJobs = Maps.newLinkedHashMap();
         for (AssignedJob topInstance : topInstances) {
+            distinctWorkerJobs.putIfAbsent(topInstance.getAssignedWorker().id(), topInstance);
+        }
+
+        for (AssignedJob topInstance : distinctWorkerJobs.values()) {
             DistributedPlanWorker topWorker = topInstance.getAssignedWorker();
             TNetworkAddress execBeAddr = new TNetworkAddress(topWorker.host(), topWorker.brpcPort());
             receivers.add(
@@ -104,15 +111,11 @@ public class QueryProcessor implements JobProcessor {
         return new QueryProcessor(coordinatorContext, sqlPipelineTask, receivers);
     }
 
-    public boolean isEof() {
+    public boolean isEos() {
         return runningReceivers.isEmpty();
     }
 
     public RowBatch getNext() throws UserException, TException, RpcException {
-        if (runningReceivers.isEmpty()) {
-            throw new UserException("There is no receiver.");
-        }
-
         ResultReceiver receiver = runningReceivers.get(receiverOffset);
         Status status = new Status();
         RowBatch resultBatch = receiver.getNext(status);
@@ -120,8 +123,9 @@ public class QueryProcessor implements JobProcessor {
             LOG.warn("Query {} coordinator get next fail, {}, need cancel.",
                     DebugUtil.printId(coordinatorContext.queryId), status.getErrorMsg());
         }
+        coordinatorContext.updateStatusIfOk(status);
 
-        Status copyStatus = coordinatorContext.updateStatusIfOk(status);
+        Status copyStatus = coordinatorContext.readCloneStatus();
         if (!copyStatus.ok()) {
             if (Strings.isNullOrEmpty(copyStatus.getErrorMsg())) {
                 copyStatus.rewriteErrorMsg();

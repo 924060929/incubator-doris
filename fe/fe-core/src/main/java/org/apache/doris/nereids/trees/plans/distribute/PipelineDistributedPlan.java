@@ -56,8 +56,7 @@ public class PipelineDistributedPlan extends DistributedPlan {
         return destinations;
     }
 
-    public void setDestinations(
-            List<AssignedJob> destinations) {
+    public void setDestinations(List<AssignedJob> destinations) {
         this.destinations = destinations;
     }
 

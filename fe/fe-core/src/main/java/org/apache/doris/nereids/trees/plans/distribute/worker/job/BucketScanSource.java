@@ -18,8 +18,10 @@
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
 import org.apache.doris.common.util.ListUtil;
+import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.ScanNode;
 
+import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -27,6 +29,7 @@ import com.google.common.collect.Maps;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.Supplier;
 
 /** BucketScanSource */
 public class BucketScanSource extends ScanSource {
@@ -35,8 +38,22 @@ public class BucketScanSource extends ScanSource {
     //   2. bucket 1 use OlapScanNode(tableName=`tbl`) to scan with tablet: [tablet 10002, tablet 10004]
     public final Map<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanNodeToTablets;
 
+    private final Supplier<Integer> bucketNum;
+
     public BucketScanSource(Map<Integer, Map<ScanNode, ScanRanges>> bucketIndexToScanNodeToTablets) {
         this.bucketIndexToScanNodeToTablets = bucketIndexToScanNodeToTablets;
+
+        this.bucketNum = Suppliers.memoize(() -> bucketIndexToScanNodeToTablets.values()
+                .stream()
+                .flatMap(scanNodeToRanges -> scanNodeToRanges.keySet().stream())
+                .filter(OlapScanNode.class::isInstance)
+                .map(scanNode -> ((OlapScanNode) scanNode).getBucketNum())
+                .reduce(Integer::max)
+                .orElse(1));
+    }
+
+    public int bucketNum() {
+        return bucketNum.get();
     }
 
     @Override
