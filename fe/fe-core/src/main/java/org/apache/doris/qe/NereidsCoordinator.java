@@ -105,35 +105,6 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     @Override
-    public RowBatch getNext() throws Exception {
-        return coordinatorContext.asQueryProcessor().getNext();
-    }
-
-    public boolean isEof() {
-        return coordinatorContext.asQueryProcessor().isEof();
-    }
-
-    @Override
-    public void setTWorkloadGroups(List<TPipelineWorkloadGroup> tWorkloadGroups) {
-        coordinatorContext.setWorkloadGroups(tWorkloadGroups);
-    }
-
-    @Override
-    public List<TPipelineWorkloadGroup> getTWorkloadGroups() {
-        return coordinatorContext.getWorkloadGroups();
-    }
-
-    @Override
-    public long getJobId() {
-        return coordinatorContext.asLoadProcessor().jobId;
-    }
-
-    @Override
-    public boolean isQueryCancelled() {
-        return coordinatorContext.readCloneStatus().isCancelled();
-    }
-
-    @Override
     public boolean isTimeout() {
         return System.currentTimeMillis() > coordinatorContext.timeoutDeadline;
     }
@@ -162,6 +133,40 @@ public class NereidsCoordinator extends Coordinator {
         LOG.warn("Cancel execution of query {}, this is a outside invoke, cancelReason {}",
                 DebugUtil.printId(queryId), cancelReason);
         cancelInternal(cancelReason);
+    }
+
+    @Override
+    public void setTWorkloadGroups(List<TPipelineWorkloadGroup> tWorkloadGroups) {
+        coordinatorContext.setWorkloadGroups(tWorkloadGroups);
+    }
+
+    @Override
+    public List<TPipelineWorkloadGroup> getTWorkloadGroups() {
+        return coordinatorContext.getWorkloadGroups();
+    }
+
+    @Override
+    public boolean isQueryCancelled() {
+        return coordinatorContext.readCloneStatus().isCancelled();
+    }
+
+    @Override
+    public RowBatch getNext() throws Exception {
+        return coordinatorContext.asQueryProcessor().getNext();
+    }
+
+    public boolean isEof() {
+        return coordinatorContext.asQueryProcessor().isEof();
+    }
+
+    @Override
+    public long getNumReceivedRows() {
+        return coordinatorContext.asQueryProcessor().getNumReceivedRows();
+    }
+
+    @Override
+    public long getJobId() {
+        return coordinatorContext.asLoadProcessor().jobId;
     }
 
     /*
@@ -194,6 +199,11 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     @Override
+    public TUniqueId getQueryId() {
+        return coordinatorContext.queryId;
+    }
+
+    @Override
     public TQueryOptions getQueryOptions() {
         return coordinatorContext.queryOptions;
     }
@@ -214,6 +224,21 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     @Override
+    public int getScanRangeNum() {
+        return coordinatorContext.scanRangeNum.get();
+    }
+
+    @Override
+    public ConnectContext getConnectContext() {
+        return coordinatorContext.connectContext;
+    }
+
+    @Override
+    public QueueToken getQueueToken() {
+        return coordinatorContext.getQueueToken().get();
+    }
+
+    @Override
     public Map<String, String> getLoadCounters() {
         return coordinatorContext.asLoadProcessor().loadContext.getLoadCounters();
     }
@@ -229,28 +254,18 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     @Override
-    public int getScanRangeNum() {
-        return coordinatorContext.scanRangeNum.get();
-    }
-
-    @Override
-    public ConnectContext getConnectContext() {
-        return coordinatorContext.connectContext;
-    }
-
-    @Override
     public List<String> getExportFiles() {
         return coordinatorContext.asLoadProcessor().loadContext.getExportFiles();
     }
 
     @Override
-    public QueueToken getQueueToken() {
-        return coordinatorContext.getQueueToken().get();
+    public long getTxnId() {
+        return coordinatorContext.asLoadProcessor().loadContext.getTransactionId();
     }
 
     @Override
-    public long getTxnId() {
-        return coordinatorContext.asLoadProcessor().loadContext.getTransactionId();
+    public void setTxnId(long txnId) {
+        coordinatorContext.asLoadProcessor().loadContext.updateTransactionId(txnId);
     }
 
     @Override
@@ -261,11 +276,6 @@ public class NereidsCoordinator extends Coordinator {
     @Override
     public String getTrackingUrl() {
         return coordinatorContext.asLoadProcessor().loadContext.getTrackingUrl();
-    }
-
-    @Override
-    public TUniqueId getQueryId() {
-        return coordinatorContext.queryId;
     }
 
     @Override
@@ -280,6 +290,7 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public List<FragmentInstanceInfo> getFragmentInstanceInfos() {
+        // TODO
         return super.getFragmentInstanceInfos();
     }
 
@@ -291,16 +302,6 @@ public class NereidsCoordinator extends Coordinator {
     @Override
     public ExecutionProfile getExecutionProfile() {
         return coordinatorContext.executionProfile;
-    }
-
-    @Override
-    public long getNumReceivedRows() {
-        return coordinatorContext.asQueryProcessor().getNumReceivedRows();
-    }
-
-    @Override
-    public void setTxnId(long txnId) {
-        coordinatorContext.asLoadProcessor().loadContext.updateTransactionId(txnId);
     }
 
     @Override
@@ -324,6 +325,7 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public void setGroupCommitBe(Backend backend) {
+        // TODO
         super.setGroupCommitBe(backend);
     }
 
