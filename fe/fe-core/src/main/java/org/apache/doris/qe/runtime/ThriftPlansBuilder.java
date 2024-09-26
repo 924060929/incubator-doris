@@ -25,6 +25,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWor
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
@@ -86,14 +87,15 @@ public class ThriftPlansBuilder {
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         exchangeSenderNum, fileScanRangeParams,
                         workerProcessInstanceNum, destinations, coordinatorContext);
-                TPipelineInstanceParams instanceParam
-                        = instanceToThrift(currentFragmentPlan, instanceJob, currentInstanceIndex++);
+                TPipelineInstanceParams instanceParam = instanceToThrift(
+                        currentFragmentPlan, currentFragmentParam, instanceJob, currentInstanceIndex++);
                 List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
                 currentFragmentParam.getShuffleIdxToInstanceIdx().put(recvrId, instancesParams.size());
                 currentFragmentParam.getPerNodeSharedScans().putAll(instanceParam.getPerNodeSharedScans());
 
                 instancesParams.add(instanceParam);
             }
+
 
             // arrange fragments by the same worker,
             // so we can merge and send multiple fragment to a backend use one rpc
@@ -286,10 +288,12 @@ public class ThriftPlansBuilder {
     }
 
     private static TPipelineInstanceParams instanceToThrift(
-            PipelineDistributedPlan distributedPlan, AssignedJob instance, int currentInstanceNum) {
+            PipelineDistributedPlan distributedPlan, TPipelineFragmentParams currentFragmentParam,
+            AssignedJob instance, int currentInstanceNum) {
         TPipelineInstanceParams instanceParam = new TPipelineInstanceParams();
         instanceParam.setFragmentInstanceId(instance.instanceId());
-        setScanSourceParam(instance.getScanSource(), instanceParam);
+        setScanSourceParam(currentFragmentParam, instance, instanceParam);
+
         instanceParam.setSenderId(instance.indexInUnassignedJob());
         instanceParam.setBackendNum(currentInstanceNum);
         instanceParam.setRuntimeFilterParams(new TRuntimeFilterParams());
@@ -298,40 +302,61 @@ public class ThriftPlansBuilder {
         return instanceParam;
     }
 
-    private static void setScanSourceParam(ScanSource scanSource, TPipelineInstanceParams params) {
+    private static void setScanSourceParam(
+            TPipelineFragmentParams currentFragmentParam, AssignedJob instance, TPipelineInstanceParams params) {
+        ScanSource scanSource = instance.getScanSource();
         if (scanSource instanceof BucketScanSource) {
-            setBucketScanSourceParam((BucketScanSource) scanSource, params);
+            setBucketScanSourceParam(currentFragmentParam, instance, (BucketScanSource) scanSource, params);
         } else {
-            setDefaultScanSourceParam((DefaultScanSource) scanSource, params);
+            setDefaultScanSourceParam(currentFragmentParam, instance, (DefaultScanSource) scanSource, params);
         }
     }
 
-    private static void setDefaultScanSourceParam(DefaultScanSource defaultScanSource, TPipelineInstanceParams params) {
+    private static void setDefaultScanSourceParam(
+            TPipelineFragmentParams currentFragmentParam, AssignedJob assignedJob,
+            DefaultScanSource defaultScanSource, TPipelineInstanceParams params) {
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
+        boolean isLocalShuffle = assignedJob instanceof LocalShuffleAssignedJob;
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
             int scanNodeId = kv.getKey().getId().asInt();
             scanNodeIdToScanRanges.put(scanNodeId, kv.getValue().params);
-            // ???
-            perNodeSharedScans.put(scanNodeId, false);
-        }
-        params.setPerNodeScanRanges(scanNodeIdToScanRanges);
-        params.setPerNodeSharedScans(perNodeSharedScans);
-    }
-
-    private static void setBucketScanSourceParam(BucketScanSource bucketScanSource, TPipelineInstanceParams params) {
-        Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
-        Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
-        for (Map<ScanNode, ScanRanges> scanNodeToRanges : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
-            for (Entry<ScanNode, ScanRanges> kv2 : scanNodeToRanges.entrySet()) {
-                int scanNodeId = kv2.getKey().getId().asInt();
-                perNodeSharedScans.put(scanNodeId, false);
-                List<TScanRangeParams> scanRanges = scanNodeIdToScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
-                List<TScanRangeParams> currentScanRanges = kv2.getValue().params;
-                scanRanges.addAll(currentScanRanges);
+            if (isLocalShuffle) {
+                perNodeSharedScans.put(scanNodeId, isLocalShuffle);
             }
         }
         params.setPerNodeScanRanges(scanNodeIdToScanRanges);
         params.setPerNodeSharedScans(perNodeSharedScans);
+        if (isLocalShuffle) {
+            params.setPerNodeSharedScans(perNodeSharedScans);
+            currentFragmentParam.setParallelInstances(1);
+        } else {
+            currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
+        }
+    }
+
+    private static void setBucketScanSourceParam(
+            TPipelineFragmentParams currentFragmentParam, AssignedJob assignedJob,
+            BucketScanSource bucketScanSource, TPipelineInstanceParams params) {
+        Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
+        Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
+        boolean isLocalShuffle = assignedJob instanceof LocalShuffleAssignedJob;
+        for (Map<ScanNode, ScanRanges> scanNodeToRanges : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
+            for (Entry<ScanNode, ScanRanges> kv2 : scanNodeToRanges.entrySet()) {
+                int scanNodeId = kv2.getKey().getId().asInt();
+                List<TScanRangeParams> scanRanges = scanNodeIdToScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
+                List<TScanRangeParams> currentScanRanges = kv2.getValue().params;
+                scanRanges.addAll(currentScanRanges);
+                if (isLocalShuffle) {
+                    perNodeSharedScans.put(scanNodeId, isLocalShuffle);
+                }
+            }
+        }
+        if (isLocalShuffle) {
+            params.setPerNodeSharedScans(perNodeSharedScans);
+            currentFragmentParam.setParallelInstances(1);
+        } else {
+            currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
+        }
     }
 }
