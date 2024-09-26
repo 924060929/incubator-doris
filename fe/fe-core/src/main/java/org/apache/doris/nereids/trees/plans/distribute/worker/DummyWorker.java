@@ -15,26 +15,45 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.doris.nereids.trees.plans.distribute.worker.job;
+package org.apache.doris.nereids.trees.plans.distribute.worker;
 
-import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
-import org.apache.doris.thrift.TUniqueId;
+public class DummyWorker implements DistributedPlanWorker {
+    public static final DummyWorker INSTANCE = new DummyWorker();
 
-/**
- * AssignedJob.
- * for example: an instance job in a fragment job, which already assign to a worker and some data sources
- */
-public interface AssignedJob {
-    int indexInUnassignedJob();
+    private DummyWorker() {}
 
-    TUniqueId instanceId();
+    @Override
+    public long id() {
+        return 0;
+    }
 
-    UnassignedJob unassignedJob();
+    @Override
+    public String address() {
+        return "0.0.0.0:0";
+    }
 
-    DistributedPlanWorker getAssignedWorker();
+    @Override
+    public String host() {
+        return "0.0.0.0";
+    }
 
-    ScanSource getScanSource();
+    @Override
+    public int port() {
+        return 0;
+    }
 
-    String toString(boolean showUnassignedJob);
+    @Override
+    public String brpcAddress() {
+        return "0.0.0.0:0";
+    }
 
+    @Override
+    public int brpcPort() {
+        return 0;
+    }
+
+    @Override
+    public boolean available() {
+        return false;
+    }
 }

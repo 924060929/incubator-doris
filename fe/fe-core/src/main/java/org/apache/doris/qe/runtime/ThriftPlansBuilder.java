@@ -27,6 +27,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSour
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.planner.PlanFragment;
@@ -81,8 +82,6 @@ public class ThriftPlansBuilder {
 
             for (int recvrId = 0; recvrId < currentFragmentPlan.getInstanceJobs().size(); recvrId++) {
                 AssignedJob instanceJob = currentFragmentPlan.getInstanceJobs().get(recvrId);
-                // Suggestion: Do not modify currentFragmentParam out of the `fragmentToThriftIfAbsent` method,
-                //             except add instanceParam into local_params
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         exchangeSenderNum, fileScanRangeParams,
@@ -92,7 +91,6 @@ public class ThriftPlansBuilder {
                 List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
                 currentFragmentParam.getShuffleIdxToInstanceIdx().put(recvrId, instancesParams.size());
                 currentFragmentParam.getPerNodeSharedScans().putAll(instanceParam.getPerNodeSharedScans());
-                currentFragmentParam.setNumBuckets(0);
 
                 instancesParams.add(instanceParam);
             }
@@ -254,7 +252,15 @@ public class ThriftPlansBuilder {
             params.setWorkloadGroups(coordinatorContext.getWorkloadGroups());
 
             params.setFileScanParams(fileScanRangeParamsMap);
-            // params.setNumBuckets(fragment.getBucketNum());
+
+            if (fragmentPlan.getFragmentJob() instanceof UnassignedScanBucketOlapTableJob) {
+                int bucketNum = ((UnassignedScanBucketOlapTableJob) fragmentPlan.getFragmentJob())
+                        .getOlapScanNodes()
+                        .get(0)
+                        .getBucketNum();
+                params.setNumBuckets(bucketNum);
+            }
+
             params.setPerNodeSharedScans(new LinkedHashMap<>());
             // if (ignoreDataDistribution) {
             //     params.setParallelInstances(parallelTasksNum);
@@ -315,14 +321,17 @@ public class ThriftPlansBuilder {
 
     private static void setBucketScanSourceParam(BucketScanSource bucketScanSource, TPipelineInstanceParams params) {
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
+        Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Map<ScanNode, ScanRanges> scanNodeToRanges : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
             for (Entry<ScanNode, ScanRanges> kv2 : scanNodeToRanges.entrySet()) {
                 int scanNodeId = kv2.getKey().getId().asInt();
+                perNodeSharedScans.put(scanNodeId, false);
                 List<TScanRangeParams> scanRanges = scanNodeIdToScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
                 List<TScanRangeParams> currentScanRanges = kv2.getValue().params;
                 scanRanges.addAll(currentScanRanges);
             }
         }
         params.setPerNodeScanRanges(scanNodeIdToScanRanges);
+        params.setPerNodeSharedScans(perNodeSharedScans);
     }
 }
