@@ -135,6 +135,14 @@ public class NereidsCoordinator extends Coordinator {
         cancelInternal(cancelReason);
     }
 
+    public QueryProcessor asQueryProcessor() {
+        return coordinatorContext.asQueryProcessor();
+    }
+
+    public LoadProcessor asLoadProcessor() {
+        return coordinatorContext.asLoadProcessor();
+    }
+
     @Override
     public void setTWorkloadGroups(List<TPipelineWorkloadGroup> tWorkloadGroups) {
         coordinatorContext.setWorkloadGroups(tWorkloadGroups);
@@ -235,7 +243,7 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public QueueToken getQueueToken() {
-        return coordinatorContext.getQueueToken().get();
+        return coordinatorContext.getQueueToken().orElse(null);
     }
 
     @Override
