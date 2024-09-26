@@ -196,7 +196,7 @@ public class LoadProcessor implements JobProcessor {
                 for (TFragmentInstanceReport report : params.getFragmentInstanceReports()) {
                     Env.getCurrentEnv().getLoadManager().updateJobProgress(
                             jobId, params.getBackendId(), params.getQueryId(), report.getFragmentInstanceId(),
-                            params.getLoadedRows(), params.getLoadedBytes(), params.isDone());
+                            report.getLoadedRows(), report.getLoadedBytes(), params.isDone());
                     Env.getCurrentEnv().getProgressManager().updateProgress(String.valueOf(jobId),
                             params.getQueryId(), report.getFragmentInstanceId(), report.getNumFinishedRange());
                 }
