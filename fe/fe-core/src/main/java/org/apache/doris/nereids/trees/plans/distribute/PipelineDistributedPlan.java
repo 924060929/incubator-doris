@@ -29,6 +29,7 @@ import com.google.common.collect.ListMultimap;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /** PipelineDistributedPlan */
@@ -80,8 +81,11 @@ public class PipelineDistributedPlan extends DistributedPlan {
                 fragmentJob.getFragment().getExplainString(TExplainLevel.VERBOSE).trim(), "  "
         );
 
+        AtomicInteger bucketNum = new AtomicInteger(0);
         String destinationStr = destinations.stream()
-                .map(destination -> "    " + DebugUtil.printId(destination.instanceId()))
+                .map(destination -> "    "
+                        + "#" + bucketNum.getAndIncrement() + ": "
+                        + DebugUtil.printId(destination.instanceId()))
                 .collect(Collectors.joining(",\n"));
         return "PipelineDistributedPlan(\n"
                 + "  id: " + displayFragmentId + ",\n"

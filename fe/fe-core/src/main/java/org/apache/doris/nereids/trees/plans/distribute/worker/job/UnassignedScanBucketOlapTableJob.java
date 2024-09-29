@@ -219,7 +219,7 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
                 if (!mergedBucketsInSameWorkerInstance) {
                     fillUpInstance = new LocalShuffleAssignedJob(
                             newInstances.size(), shareScanIdGenerator.getAndIncrement(),
-                            context.nextInstanceId(), this, worker, scanSource
+                            false, context.nextInstanceId(), this, worker, scanSource
                     );
                 }
             } else {
