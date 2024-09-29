@@ -17,7 +17,6 @@
 
 package org.apache.doris.nereids.trees.plans.distribute;
 
-import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DummyWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBuilder;
@@ -148,7 +147,6 @@ public class DistributePlanner {
         return Arrays.asList(instances);
     }
 
-
     private List<AssignedJob> getFirstInstancePerShareScan(PipelineDistributedPlan plan) {
         Map<Integer, AssignedJob> distinctShareScanJobs = Maps.newLinkedHashMap();
         for (AssignedJob instanceJob : plan.getInstanceJobs()) {
@@ -156,13 +154,5 @@ public class DistributePlanner {
             distinctShareScanJobs.putIfAbsent(localShuffleJob.shareScanId, localShuffleJob);
         }
         return Utils.fastToImmutableList(distinctShareScanJobs.values());
-    }
-
-    private ListMultimap<DistributedPlanWorker, AssignedJob> groupInstancesByWorker(PipelineDistributedPlan plan) {
-        ListMultimap<DistributedPlanWorker, AssignedJob> workerToInstances = ArrayListMultimap.create();
-        for (AssignedJob instanceJob : plan.getInstanceJobs()) {
-            workerToInstances.put(instanceJob.getAssignedWorker(), instanceJob);
-        }
-        return workerToInstances;
     }
 }

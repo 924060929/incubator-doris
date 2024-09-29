@@ -56,10 +56,11 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 
 public class ThriftPlansBuilder {
     private static final Logger LOG = LogManager.getLogger(ThriftPlansBuilder.class);
@@ -81,8 +82,10 @@ public class ThriftPlansBuilder {
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
             List<TPlanFragmentDestination> destinations = destinationToThrift(currentFragmentPlan);
 
-            for (int recvrId = 0; recvrId < currentFragmentPlan.getInstanceJobs().size(); recvrId++) {
-                AssignedJob instanceJob = currentFragmentPlan.getInstanceJobs().get(recvrId);
+            for (int instanceNumInCurrentFragment = 0;
+                    instanceNumInCurrentFragment < currentFragmentPlan.getInstanceJobs().size();
+                    instanceNumInCurrentFragment++) {
+                AssignedJob instanceJob = currentFragmentPlan.getInstanceJobs().get(instanceNumInCurrentFragment);
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         exchangeSenderNum, fileScanRangeParams,
@@ -90,13 +93,8 @@ public class ThriftPlansBuilder {
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
                         currentFragmentPlan, currentFragmentParam, instanceJob, currentInstanceIndex++);
-                List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
-                currentFragmentParam.getShuffleIdxToInstanceIdx().put(recvrId, instancesParams.size());
-
-
-                instancesParams.add(instanceParam);
+                currentFragmentParam.getLocalParams().add(instanceParam);
             }
-
 
             // arrange fragments by the same worker,
             // so we can merge and send multiple fragment to a backend use one rpc
@@ -264,8 +262,8 @@ public class ThriftPlansBuilder {
                 params.setNumBuckets(bucketNum);
             }
 
-            params.setBucketSeqToInstanceIdx(new LinkedHashMap<>());
-            params.setShuffleIdxToInstanceIdx(new LinkedHashMap<>());
+            params.setBucketSeqToInstanceIdx(computeBucketIdToInstanceId(fragmentPlan));
+            params.setShuffleIdxToInstanceIdx(computeDestIdToInstanceId(fragmentPlan));
             return params;
         });
     }
@@ -364,13 +362,57 @@ public class ThriftPlansBuilder {
                 if (currentFragmentParam.getPerNodeSharedScans() == null) {
                     currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
                 }
-
-                Integer bucketIndex = kv.getKey();
-                // Set each bucket belongs to which instance on this BE.
-                // This is used for LocalExchange(BUCKET_HASH_SHUFFLE).
-                Map<Integer, Integer> bucketSeqToInstanceIdx = currentFragmentParam.getBucketSeqToInstanceIdx();
-                bucketSeqToInstanceIdx.put(bucketIndex, currentFragmentParam.local_params.size());
             }
+        }
+    }
+
+    private static Map<Integer, Integer> computeBucketIdToInstanceId(PipelineDistributedPlan receivePlan) {
+        List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
+        if (instanceJobs.isEmpty() || !(instanceJobs.get(0).getScanSource() instanceof BucketScanSource)) {
+            return null;
+        }
+
+        Map<Integer, Integer> bucketIdToInstanceId = Maps.newLinkedHashMap();
+        filterInstancesWhichReceiveDataFromRemote(receivePlan, (instanceJob, instanceIdInThisBackend) -> {
+            BucketScanSource scanSource = (BucketScanSource) instanceJob.getScanSource();
+            for (Integer bucketIndex : scanSource.bucketIndexToScanNodeToTablets.keySet()) {
+                bucketIdToInstanceId.put(bucketIndex, instanceIdInThisBackend);
+            }
+        });
+        return bucketIdToInstanceId;
+    }
+
+    private static Map<Integer, Integer> computeDestIdToInstanceId(PipelineDistributedPlan receivePlan) {
+        if (receivePlan.getInputs().isEmpty()) {
+            return Maps.newLinkedHashMap();
+        }
+
+        AtomicInteger receiveFromRemoteInstanceNum = new AtomicInteger();
+        Map<Integer, Integer> destIdToInstanceId = Maps.newLinkedHashMap();
+        filterInstancesWhichReceiveDataFromRemote(receivePlan, (instanceJob, instanceIdInThisBackend) ->
+                destIdToInstanceId.put(receiveFromRemoteInstanceNum.getAndIncrement(), instanceIdInThisBackend)
+        );
+        return destIdToInstanceId;
+    }
+
+    private static void filterInstancesWhichReceiveDataFromRemote(
+            PipelineDistributedPlan receivePlan, BiConsumer<AssignedJob, Integer> computeFn) {
+        Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
+
+        List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
+        for (int i = 0; i < instanceJobs.size(); i++) {
+            AssignedJob instanceJob = instanceJobs.get(i);
+            AtomicInteger instanceCount = backendIdToInstanceCount.computeIfAbsent(
+                    instanceJob.getAssignedWorker().id(),
+                    (backendId) -> new AtomicInteger()
+            );
+            int instanceIdInThisBackend = instanceCount.getAndIncrement();
+            if (instanceJob instanceof LocalShuffleAssignedJob
+                    && ((LocalShuffleAssignedJob) instanceJob).receiveDataFromLocal) {
+                // not receive data from remote fragment
+                continue;
+            }
+            computeFn.accept(instanceJob, instanceIdInThisBackend);
         }
     }
 }

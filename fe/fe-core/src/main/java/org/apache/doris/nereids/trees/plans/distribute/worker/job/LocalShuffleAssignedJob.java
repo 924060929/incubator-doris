@@ -27,13 +27,15 @@ import java.util.Map;
 /** LocalShuffleAssignedJob */
 public class LocalShuffleAssignedJob extends StaticAssignedJob {
     public final int shareScanId;
+    public final boolean receiveDataFromLocal;
 
     public LocalShuffleAssignedJob(
-            int indexInUnassignedJob, int shareScanId, TUniqueId instanceId,
+            int indexInUnassignedJob, int shareScanId, boolean receiveDataFromLocal, TUniqueId instanceId,
             UnassignedJob unassignedJob,
             DistributedPlanWorker worker, ScanSource scanSource) {
         super(indexInUnassignedJob, instanceId, unassignedJob, worker, scanSource);
         this.shareScanId = shareScanId;
+        this.receiveDataFromLocal = receiveDataFromLocal;
     }
 
     @Override
