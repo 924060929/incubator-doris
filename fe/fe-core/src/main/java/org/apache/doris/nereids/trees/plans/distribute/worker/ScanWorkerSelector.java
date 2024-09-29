@@ -56,7 +56,7 @@ public interface ScanWorkerSelector {
         TScanRangeParams replicaParam = new TScanRangeParams();
         replicaParam.scan_range = tabletLocation.scan_range;
         // Volume is optional, so we need to set the value and the is-set bit
-        replicaParam.setVolumeId(replicaLocation.volume_id);
+        // replicaParam.setVolumeId(replicaLocation.volume_id);
         return replicaParam;
     }
 }

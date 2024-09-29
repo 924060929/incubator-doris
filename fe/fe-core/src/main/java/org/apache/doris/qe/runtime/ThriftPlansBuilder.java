@@ -87,11 +87,12 @@ public class ThriftPlansBuilder {
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         exchangeSenderNum, fileScanRangeParams,
                         workerProcessInstanceNum, destinations, coordinatorContext);
+
                 TPipelineInstanceParams instanceParam = instanceToThrift(
                         currentFragmentPlan, currentFragmentParam, instanceJob, currentInstanceIndex++);
                 List<TPipelineInstanceParams> instancesParams = currentFragmentParam.getLocalParams();
                 currentFragmentParam.getShuffleIdxToInstanceIdx().put(recvrId, instancesParams.size());
-                currentFragmentParam.getPerNodeSharedScans().putAll(instanceParam.getPerNodeSharedScans());
+
 
                 instancesParams.add(instanceParam);
             }
@@ -263,10 +264,6 @@ public class ThriftPlansBuilder {
                 params.setNumBuckets(bucketNum);
             }
 
-            params.setPerNodeSharedScans(new LinkedHashMap<>());
-            // if (ignoreDataDistribution) {
-            //     params.setParallelInstances(parallelTasksNum);
-            // }
             params.setBucketSeqToInstanceIdx(new LinkedHashMap<>());
             params.setShuffleIdxToInstanceIdx(new LinkedHashMap<>());
             return params;
@@ -314,22 +311,27 @@ public class ThriftPlansBuilder {
 
     private static void setDefaultScanSourceParam(
             TPipelineFragmentParams currentFragmentParam, AssignedJob assignedJob,
-            DefaultScanSource defaultScanSource, TPipelineInstanceParams params) {
+            DefaultScanSource defaultScanSource, TPipelineInstanceParams instanceParam) {
+
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
-        Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         boolean isLocalShuffle = assignedJob instanceof LocalShuffleAssignedJob;
+        Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
             int scanNodeId = kv.getKey().getId().asInt();
             scanNodeIdToScanRanges.put(scanNodeId, kv.getValue().params);
             if (isLocalShuffle) {
-                perNodeSharedScans.put(scanNodeId, isLocalShuffle);
+                perNodeSharedScans.put(scanNodeId, true);
             }
         }
-        params.setPerNodeScanRanges(scanNodeIdToScanRanges);
-        params.setPerNodeSharedScans(perNodeSharedScans);
+
+        instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
         if (isLocalShuffle) {
-            params.setPerNodeSharedScans(perNodeSharedScans);
-            currentFragmentParam.setParallelInstances(1);
+            instanceParam.setPerNodeSharedScans(perNodeSharedScans);
+            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
+            if (currentFragmentParam.getPerNodeSharedScans() == null) {
+                currentFragmentParam.setParallelInstances(1);
+                currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
+            }
         } else {
             currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
         }
@@ -337,26 +339,38 @@ public class ThriftPlansBuilder {
 
     private static void setBucketScanSourceParam(
             TPipelineFragmentParams currentFragmentParam, AssignedJob assignedJob,
-            BucketScanSource bucketScanSource, TPipelineInstanceParams params) {
+            BucketScanSource bucketScanSource, TPipelineInstanceParams instanceParam) {
+
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
+
         boolean isLocalShuffle = assignedJob instanceof LocalShuffleAssignedJob;
-        for (Map<ScanNode, ScanRanges> scanNodeToRanges : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
+        for (Entry<Integer, Map<ScanNode, ScanRanges>> kv :
+                bucketScanSource.bucketIndexToScanNodeToTablets.entrySet()) {
+            Map<ScanNode, ScanRanges> scanNodeToRanges = kv.getValue();
             for (Entry<ScanNode, ScanRanges> kv2 : scanNodeToRanges.entrySet()) {
                 int scanNodeId = kv2.getKey().getId().asInt();
                 List<TScanRangeParams> scanRanges = scanNodeIdToScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
-                List<TScanRangeParams> currentScanRanges = kv2.getValue().params;
-                scanRanges.addAll(currentScanRanges);
+                scanRanges.addAll(kv2.getValue().params);
                 if (isLocalShuffle) {
-                    perNodeSharedScans.put(scanNodeId, isLocalShuffle);
+                    perNodeSharedScans.put(scanNodeId, true);
                 }
             }
-        }
-        if (isLocalShuffle) {
-            params.setPerNodeSharedScans(perNodeSharedScans);
-            currentFragmentParam.setParallelInstances(1);
-        } else {
-            currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
+
+            instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
+            if (isLocalShuffle) {
+                instanceParam.setPerNodeSharedScans(perNodeSharedScans);
+                // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
+                if (currentFragmentParam.getPerNodeSharedScans() == null) {
+                    currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
+                }
+
+                Integer bucketIndex = kv.getKey();
+                // Set each bucket belongs to which instance on this BE.
+                // This is used for LocalExchange(BUCKET_HASH_SHUFFLE).
+                Map<Integer, Integer> bucketSeqToInstanceIdx = currentFragmentParam.getBucketSeqToInstanceIdx();
+                bucketSeqToInstanceIdx.put(bucketIndex, currentFragmentParam.local_params.size());
+            }
         }
     }
 }
