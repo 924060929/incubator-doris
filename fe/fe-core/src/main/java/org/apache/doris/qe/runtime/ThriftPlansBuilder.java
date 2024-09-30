@@ -321,7 +321,7 @@ public class ThriftPlansBuilder {
 
         if (isLocalShuffle) {
             // a fragment in a backend only enable local shuffle once for the first local shuffle instance,
-            // because we just skip set scan params for LocalShuffleAssignedJob.receiveDataFromLocal = true
+            // because we just skip set scan params for LocalShuffleAssignedJob.receiveDataFromLocal == true
             enableLocalShuffle(currentFragmentParam, scanParams);
         } else {
             disableLocalShuffle(currentFragmentParam);
