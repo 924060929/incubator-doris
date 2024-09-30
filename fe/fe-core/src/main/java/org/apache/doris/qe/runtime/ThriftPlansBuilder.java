@@ -320,6 +320,8 @@ public class ThriftPlansBuilder {
         instanceParams.setPerNodeScanRanges(scanParams.perNodeScanRanges);
 
         if (isLocalShuffle) {
+            // the first instance of fragment in a backend only set once, because we just skip
+            // set scan params for LocalShuffleAssignedJob.receiveDataFromLocal = true
             enableLocalShuffle(currentFragmentParam, scanParams);
         } else {
             disableLocalShuffle(currentFragmentParam);
