@@ -340,32 +340,31 @@ public class ThriftPlansBuilder {
     }
 
     private static ScanParams computeDefaultScanSourceParam(DefaultScanSource defaultScanSource) {
-
-        Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
+        Map<Integer, List<TScanRangeParams>> perNodeScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
             int scanNodeId = kv.getKey().getId().asInt();
-            scanNodeIdToScanRanges.put(scanNodeId, kv.getValue().params);
+            perNodeScanRanges.put(scanNodeId, kv.getValue().params);
             perNodeSharedScans.put(scanNodeId, true);
         }
 
-        return new ScanParams(scanNodeIdToScanRanges, perNodeSharedScans);
+        return new ScanParams(perNodeScanRanges, perNodeSharedScans);
     }
 
     private static ScanParams computeBucketScanSourceParam(BucketScanSource bucketScanSource) {
-        Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
+        Map<Integer, List<TScanRangeParams>> perNodeScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<Integer, Map<ScanNode, ScanRanges>> kv :
                 bucketScanSource.bucketIndexToScanNodeToTablets.entrySet()) {
             Map<ScanNode, ScanRanges> scanNodeToRanges = kv.getValue();
             for (Entry<ScanNode, ScanRanges> kv2 : scanNodeToRanges.entrySet()) {
                 int scanNodeId = kv2.getKey().getId().asInt();
-                List<TScanRangeParams> scanRanges = scanNodeIdToScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
+                List<TScanRangeParams> scanRanges = perNodeScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
                 scanRanges.addAll(kv2.getValue().params);
                 perNodeSharedScans.put(scanNodeId, true);
             }
         }
-        return new ScanParams(scanNodeIdToScanRanges, perNodeSharedScans);
+        return new ScanParams(perNodeScanRanges, perNodeSharedScans);
     }
 
     private static Map<Integer, Integer> computeBucketIdToInstanceId(PipelineDistributedPlan receivePlan) {
