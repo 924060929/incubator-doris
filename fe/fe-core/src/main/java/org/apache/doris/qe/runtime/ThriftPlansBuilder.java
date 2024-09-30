@@ -316,7 +316,6 @@ public class ThriftPlansBuilder {
         } else {
             scanParams = computeDefaultScanSourceParam((DefaultScanSource) scanSource);
         }
-
         // perNodeScanRanges is required
         instanceParams.setPerNodeScanRanges(scanParams.perNodeScanRanges);
 
