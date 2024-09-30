@@ -298,21 +298,34 @@ public class ThriftPlansBuilder {
     }
 
     private static void setScanSourceParam(
-            TPipelineFragmentParams currentFragmentParam, AssignedJob instance, TPipelineInstanceParams params) {
+            TPipelineFragmentParams currentFragmentParam, AssignedJob instance,
+            TPipelineInstanceParams instanceParams) {
+
+        boolean isLocalShuffle = instance instanceof LocalShuffleAssignedJob;
+        if (isLocalShuffle && ((LocalShuffleAssignedJob) instance).receiveDataFromLocal) {
+            // save thrift rpc message size, don't need perNodeScanRanges and perNodeSharedScans,
+            // but the perNodeScanRanges is required rpc field
+            instanceParams.setPerNodeScanRanges(Maps.newLinkedHashMap());
+            return;
+        }
+
         ScanSource scanSource = instance.getScanSource();
         if (scanSource instanceof BucketScanSource) {
-            setBucketScanSourceParam(currentFragmentParam, instance, (BucketScanSource) scanSource, params);
+            setBucketScanSourceParam(
+                    currentFragmentParam, (BucketScanSource) scanSource, instanceParams, isLocalShuffle
+            );
         } else {
-            setDefaultScanSourceParam(currentFragmentParam, instance, (DefaultScanSource) scanSource, params);
+            setDefaultScanSourceParam(
+                    currentFragmentParam, (DefaultScanSource) scanSource, instanceParams, isLocalShuffle
+            );
         }
     }
 
     private static void setDefaultScanSourceParam(
-            TPipelineFragmentParams currentFragmentParam, AssignedJob assignedJob,
-            DefaultScanSource defaultScanSource, TPipelineInstanceParams instanceParam) {
+            TPipelineFragmentParams currentFragmentParam, DefaultScanSource defaultScanSource,
+            TPipelineInstanceParams instanceParam, boolean isLocalShuffle) {
 
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
-        boolean isLocalShuffle = assignedJob instanceof LocalShuffleAssignedJob;
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
             int scanNodeId = kv.getKey().getId().asInt();
@@ -324,25 +337,21 @@ public class ThriftPlansBuilder {
 
         instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
         if (isLocalShuffle) {
-            instanceParam.setPerNodeSharedScans(perNodeSharedScans);
             // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
-            if (currentFragmentParam.getPerNodeSharedScans() == null) {
-                currentFragmentParam.setParallelInstances(1);
-                currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
-            }
+            instanceParam.setPerNodeSharedScans(perNodeSharedScans);
+            currentFragmentParam.setParallelInstances(1);
+            currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
         } else {
             currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
         }
     }
 
     private static void setBucketScanSourceParam(
-            TPipelineFragmentParams currentFragmentParam, AssignedJob assignedJob,
-            BucketScanSource bucketScanSource, TPipelineInstanceParams instanceParam) {
+            TPipelineFragmentParams currentFragmentParam, BucketScanSource bucketScanSource,
+            TPipelineInstanceParams instanceParam, boolean isLocalShuffle) {
 
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
-
-        boolean isLocalShuffle = assignedJob instanceof LocalShuffleAssignedJob;
         for (Entry<Integer, Map<ScanNode, ScanRanges>> kv :
                 bucketScanSource.bucketIndexToScanNodeToTablets.entrySet()) {
             Map<ScanNode, ScanRanges> scanNodeToRanges = kv.getValue();
@@ -354,18 +363,16 @@ public class ThriftPlansBuilder {
                     perNodeSharedScans.put(scanNodeId, true);
                 }
             }
+        }
 
-            instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
-            if (isLocalShuffle) {
-                instanceParam.setPerNodeSharedScans(perNodeSharedScans);
-                // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
-                if (currentFragmentParam.getPerNodeSharedScans() == null) {
-                    currentFragmentParam.setParallelInstances(1);
-                    currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
-                }
-            } else {
-                currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
-            }
+        instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
+        if (isLocalShuffle) {
+            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
+            instanceParam.setPerNodeSharedScans(perNodeSharedScans);
+            currentFragmentParam.setParallelInstances(1);
+            currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
+        } else {
+            currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
         }
     }
 

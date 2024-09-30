@@ -87,6 +87,11 @@ public class DefaultScanSource extends ScanSource {
         toString(scanNodeToScanRanges, str, prefix);
     }
 
+    @Override
+    public ScanSource newEmpty() {
+        return empty();
+    }
+
     /** toString */
     public static void toString(Map<ScanNode, ScanRanges> scanNodeToScanRanges, StringBuilder str, String prefix) {
         if (scanNodeToScanRanges.isEmpty()) {

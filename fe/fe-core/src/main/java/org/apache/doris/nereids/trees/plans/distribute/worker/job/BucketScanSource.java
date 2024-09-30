@@ -21,6 +21,7 @@ import org.apache.doris.common.util.ListUtil;
 import org.apache.doris.planner.ScanNode;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
@@ -139,6 +140,11 @@ public class BucketScanSource extends ScanSource {
             }
         }
         str.append("\n").append(prefix).append("]");
+    }
+
+    @Override
+    public ScanSource newEmpty() {
+        return new BucketScanSource(ImmutableMap.of());
     }
 
     @Override
