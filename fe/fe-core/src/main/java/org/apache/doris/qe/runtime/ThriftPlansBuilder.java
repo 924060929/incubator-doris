@@ -105,7 +105,7 @@ public class ThriftPlansBuilder {
             }
         }
 
-        // we should init fragment from target to source in backend
+        // backend should initialize fragment from target to source in backend,
         for (DistributedPlanWorker worker : fragmentsGroupByWorker.keySet()) {
             Collections.reverse(fragmentsGroupByWorker.get(worker).getParamsList());
         }
