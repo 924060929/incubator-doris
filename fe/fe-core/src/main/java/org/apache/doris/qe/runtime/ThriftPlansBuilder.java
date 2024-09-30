@@ -337,10 +337,8 @@ public class ThriftPlansBuilder {
 
         instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
         if (isLocalShuffle) {
-            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
-            instanceParam.setPerNodeSharedScans(perNodeSharedScans);
-
-            // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle
+            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
+            // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
             currentFragmentParam.setParallelInstances(1);
             currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
         } else {
@@ -369,10 +367,8 @@ public class ThriftPlansBuilder {
 
         instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
         if (isLocalShuffle) {
-            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
-            instanceParam.setPerNodeSharedScans(perNodeSharedScans);
-
-            // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle
+            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
+            // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
             currentFragmentParam.setParallelInstances(1);
             currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
         } else {
