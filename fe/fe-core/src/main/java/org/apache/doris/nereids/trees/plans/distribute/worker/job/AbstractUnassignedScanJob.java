@@ -115,10 +115,13 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                 // one scan range generate multiple instances,
                 // different instances reference the same scan source
                 int shareScanId = shareScanIdGenerator.getAndIncrement();
+                ScanSource emptyShareScanSource = shareScanSource.newEmpty();
                 for (int i = 0; i < instanceNum; i++) {
                     LocalShuffleAssignedJob instance = new LocalShuffleAssignedJob(
                             instanceIndexInFragment++, shareScanId, i > 0,
-                            context.nextInstanceId(), this, worker, shareScanSource);
+                            context.nextInstanceId(), this, worker,
+                            i == 0 ? shareScanSource : emptyShareScanSource
+                    );
                     instances.add(instance);
                 }
             } else {
