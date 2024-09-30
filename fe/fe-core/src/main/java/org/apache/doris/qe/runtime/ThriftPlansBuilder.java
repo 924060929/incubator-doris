@@ -310,48 +310,50 @@ public class ThriftPlansBuilder {
         }
 
         ScanSource scanSource = instance.getScanSource();
+        ScanParams scanParams;
         if (scanSource instanceof BucketScanSource) {
-            setBucketScanSourceParam(
-                    currentFragmentParam, (BucketScanSource) scanSource, instanceParams, isLocalShuffle
-            );
+            scanParams = computeBucketScanSourceParam((BucketScanSource) scanSource);
         } else {
-            setDefaultScanSourceParam(
-                    currentFragmentParam, (DefaultScanSource) scanSource, instanceParams, isLocalShuffle
-            );
+            scanParams = computeDefaultScanSourceParam((DefaultScanSource) scanSource);
+        }
+
+        // perNodeScanRanges is required
+        instanceParams.setPerNodeScanRanges(scanParams.perNodeScanRanges);
+
+        if (isLocalShuffle) {
+            enableLocalShuffle(currentFragmentParam, scanParams);
+        } else {
+            disableLocalShuffle(currentFragmentParam);
         }
     }
 
-    private static void setDefaultScanSourceParam(
-            TPipelineFragmentParams currentFragmentParam, DefaultScanSource defaultScanSource,
-            TPipelineInstanceParams instanceParam, boolean isLocalShuffle) {
+    private static void enableLocalShuffle(TPipelineFragmentParams currentFragmentParam, ScanParams scanParams) {
+        // enable local shuffle.
+        // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
+        // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
+        currentFragmentParam.setParallelInstances(1);
+        currentFragmentParam.setPerNodeSharedScans(scanParams.perNodeSharedScans);
+    }
+
+    private static void disableLocalShuffle(TPipelineFragmentParams currentFragmentParam) {
+        // disable local shuffle, because the parallel_instances == fragments.instances.size
+        currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
+    }
+
+    private static ScanParams computeDefaultScanSourceParam(DefaultScanSource defaultScanSource) {
 
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
             int scanNodeId = kv.getKey().getId().asInt();
             scanNodeIdToScanRanges.put(scanNodeId, kv.getValue().params);
-            if (isLocalShuffle) {
-                perNodeSharedScans.put(scanNodeId, true);
-            }
+            perNodeSharedScans.put(scanNodeId, true);
         }
 
-        instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
-        if (isLocalShuffle) {
-            // enable local shuffle.
-            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
-            // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
-            currentFragmentParam.setParallelInstances(1);
-            currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
-        } else {
-            // disable local shuffle, because the parallel_instances == fragments.instances.size
-            currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
-        }
+        return new ScanParams(scanNodeIdToScanRanges, perNodeSharedScans);
     }
 
-    private static void setBucketScanSourceParam(
-            TPipelineFragmentParams currentFragmentParam, BucketScanSource bucketScanSource,
-            TPipelineInstanceParams instanceParam, boolean isLocalShuffle) {
-
+    private static ScanParams computeBucketScanSourceParam(BucketScanSource bucketScanSource) {
         Map<Integer, List<TScanRangeParams>> scanNodeIdToScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<Integer, Map<ScanNode, ScanRanges>> kv :
@@ -361,23 +363,10 @@ public class ThriftPlansBuilder {
                 int scanNodeId = kv2.getKey().getId().asInt();
                 List<TScanRangeParams> scanRanges = scanNodeIdToScanRanges.computeIfAbsent(scanNodeId, ArrayList::new);
                 scanRanges.addAll(kv2.getValue().params);
-                if (isLocalShuffle) {
-                    perNodeSharedScans.put(scanNodeId, true);
-                }
+                perNodeSharedScans.put(scanNodeId, true);
             }
         }
-
-        instanceParam.setPerNodeScanRanges(scanNodeIdToScanRanges);
-        if (isLocalShuffle) {
-            // enable local shuffle.
-            // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
-            // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
-            currentFragmentParam.setParallelInstances(1);
-            currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
-        } else {
-            // disable local shuffle, because the parallel_instances == fragments.instances.size
-            currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
-        }
+        return new ScanParams(scanNodeIdToScanRanges, perNodeSharedScans);
     }
 
     private static Map<Integer, Integer> computeBucketIdToInstanceId(PipelineDistributedPlan receivePlan) {
@@ -429,6 +418,17 @@ public class ThriftPlansBuilder {
                 continue;
             }
             computeFn.accept(instanceJob, instanceIdInThisBackend);
+        }
+    }
+
+    private static class ScanParams {
+        Map<Integer, List<TScanRangeParams>> perNodeScanRanges;
+        Map<Integer, Boolean> perNodeSharedScans;
+
+        public ScanParams(Map<Integer, List<TScanRangeParams>> perNodeScanRanges,
+                Map<Integer, Boolean> perNodeSharedScans) {
+            this.perNodeScanRanges = perNodeScanRanges;
+            this.perNodeSharedScans = perNodeSharedScans;
         }
     }
 }
