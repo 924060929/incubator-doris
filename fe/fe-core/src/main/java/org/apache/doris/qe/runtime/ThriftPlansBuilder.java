@@ -92,7 +92,7 @@ public class ThriftPlansBuilder {
                         workerProcessInstanceNum, destinations, coordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
-                        currentFragmentPlan, currentFragmentParam, instanceJob, currentInstanceIndex++);
+                        currentFragmentParam, instanceJob, currentInstanceIndex++);
                 currentFragmentParam.getLocalParams().add(instanceParam);
             }
 
@@ -283,7 +283,7 @@ public class ThriftPlansBuilder {
     }
 
     private static TPipelineInstanceParams instanceToThrift(
-            PipelineDistributedPlan distributedPlan, TPipelineFragmentParams currentFragmentParam,
+            TPipelineFragmentParams currentFragmentParam,
             AssignedJob instance, int currentInstanceNum) {
         TPipelineInstanceParams instanceParam = new TPipelineInstanceParams();
         instanceParam.setFragmentInstanceId(instance.instanceId());
