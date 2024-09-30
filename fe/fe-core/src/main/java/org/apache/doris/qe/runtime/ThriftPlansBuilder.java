@@ -360,8 +360,11 @@ public class ThriftPlansBuilder {
                 instanceParam.setPerNodeSharedScans(perNodeSharedScans);
                 // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans
                 if (currentFragmentParam.getPerNodeSharedScans() == null) {
+                    currentFragmentParam.setParallelInstances(1);
                     currentFragmentParam.setPerNodeSharedScans(perNodeSharedScans);
                 }
+            } else {
+                currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
             }
         }
     }
@@ -369,6 +372,7 @@ public class ThriftPlansBuilder {
     private static Map<Integer, Integer> computeBucketIdToInstanceId(PipelineDistributedPlan receivePlan) {
         List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
         if (instanceJobs.isEmpty() || !(instanceJobs.get(0).getScanSource() instanceof BucketScanSource)) {
+            // bucket_seq_to_instance_id is optional, so we can return null to save memory
             return null;
         }
 
@@ -384,6 +388,7 @@ public class ThriftPlansBuilder {
 
     private static Map<Integer, Integer> computeDestIdToInstanceId(PipelineDistributedPlan receivePlan) {
         if (receivePlan.getInputs().isEmpty()) {
+            // shuffle_idx_to_index_id is required
             return Maps.newLinkedHashMap();
         }
 
