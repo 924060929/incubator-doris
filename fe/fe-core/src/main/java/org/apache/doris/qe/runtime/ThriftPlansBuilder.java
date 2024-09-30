@@ -105,8 +105,9 @@ public class ThriftPlansBuilder {
             }
         }
 
-        // backend should initialize fragment from target to source in backend,
-        // but frontend compute thrift message from source to fragment, so reverse
+        // backend should initialize fragment from target to source in backend, then
+        // it can bind the receiver fragment, but frontend compute thrift message
+        // from source to fragment, so we need to reverse fragments.
         for (DistributedPlanWorker worker : fragmentsGroupByWorker.keySet()) {
             Collections.reverse(fragmentsGroupByWorker.get(worker).getParamsList());
         }
