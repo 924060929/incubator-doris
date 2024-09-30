@@ -312,7 +312,7 @@ public class ThriftPlansBuilder {
         }
 
         ScanSource scanSource = instance.getScanSource();
-        ScanParams scanParams;
+        PerNodeScanParams scanParams;
         if (scanSource instanceof BucketScanSource) {
             scanParams = computeBucketScanSourceParam((BucketScanSource) scanSource);
         } else {
@@ -331,7 +331,7 @@ public class ThriftPlansBuilder {
         }
     }
 
-    private static void enableLocalShuffle(TPipelineFragmentParams currentFragmentParam, ScanParams scanParams) {
+    private static void enableLocalShuffle(TPipelineFragmentParams currentFragmentParam, PerNodeScanParams scanParams) {
         // enable local shuffle.
         // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
         // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
@@ -347,7 +347,7 @@ public class ThriftPlansBuilder {
         currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
     }
 
-    private static ScanParams computeDefaultScanSourceParam(DefaultScanSource defaultScanSource) {
+    private static PerNodeScanParams computeDefaultScanSourceParam(DefaultScanSource defaultScanSource) {
         Map<Integer, List<TScanRangeParams>> perNodeScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<ScanNode, ScanRanges> kv : defaultScanSource.scanNodeToScanRanges.entrySet()) {
@@ -356,10 +356,10 @@ public class ThriftPlansBuilder {
             perNodeSharedScans.put(scanNodeId, true);
         }
 
-        return new ScanParams(perNodeScanRanges, perNodeSharedScans);
+        return new PerNodeScanParams(perNodeScanRanges, perNodeSharedScans);
     }
 
-    private static ScanParams computeBucketScanSourceParam(BucketScanSource bucketScanSource) {
+    private static PerNodeScanParams computeBucketScanSourceParam(BucketScanSource bucketScanSource) {
         Map<Integer, List<TScanRangeParams>> perNodeScanRanges = Maps.newLinkedHashMap();
         Map<Integer, Boolean> perNodeSharedScans = Maps.newLinkedHashMap();
         for (Entry<Integer, Map<ScanNode, ScanRanges>> kv :
@@ -372,7 +372,7 @@ public class ThriftPlansBuilder {
                 perNodeSharedScans.put(scanNodeId, true);
             }
         }
-        return new ScanParams(perNodeScanRanges, perNodeSharedScans);
+        return new PerNodeScanParams(perNodeScanRanges, perNodeSharedScans);
     }
 
     private static Map<Integer, Integer> computeBucketIdToInstanceId(PipelineDistributedPlan receivePlan) {
@@ -427,11 +427,11 @@ public class ThriftPlansBuilder {
         }
     }
 
-    private static class ScanParams {
+    private static class PerNodeScanParams {
         Map<Integer, List<TScanRangeParams>> perNodeScanRanges;
         Map<Integer, Boolean> perNodeSharedScans;
 
-        public ScanParams(Map<Integer, List<TScanRangeParams>> perNodeScanRanges,
+        public PerNodeScanParams(Map<Integer, List<TScanRangeParams>> perNodeScanRanges,
                 Map<Integer, Boolean> perNodeSharedScans) {
             this.perNodeScanRanges = perNodeScanRanges;
             this.perNodeSharedScans = perNodeSharedScans;
