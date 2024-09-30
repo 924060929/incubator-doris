@@ -106,6 +106,7 @@ public class ThriftPlansBuilder {
         }
 
         // backend should initialize fragment from target to source in backend,
+        // but frontend compute thrift message from source to fragment, so reverse
         for (DistributedPlanWorker worker : fragmentsGroupByWorker.keySet()) {
             Collections.reverse(fragmentsGroupByWorker.get(worker).getParamsList());
         }
@@ -324,7 +325,7 @@ public class ThriftPlansBuilder {
             // because we just skip set scan params for LocalShuffleAssignedJob.receiveDataFromLocal == true
             enableLocalShuffle(currentFragmentParam, scanParams);
         } else {
-            // this path will enter multi times for all instance in a fragment
+            // this path will enter multi times for all instances in a fragment
             disableLocalShuffle(currentFragmentParam);
         }
     }
