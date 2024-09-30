@@ -324,6 +324,7 @@ public class ThriftPlansBuilder {
             // because we just skip set scan params for LocalShuffleAssignedJob.receiveDataFromLocal == true
             enableLocalShuffle(currentFragmentParam, scanParams);
         } else {
+            // this path will enter multi times for all instance in a fragment
             disableLocalShuffle(currentFragmentParam);
         }
     }
