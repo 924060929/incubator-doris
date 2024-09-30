@@ -340,7 +340,7 @@ public class ThriftPlansBuilder {
     }
 
     private static void disableLocalShuffle(TPipelineFragmentParams currentFragmentParam) {
-        // disable local shuffle, because the parallel_instances == fragments.instances.size,
+        // disable local shuffle, because the parallel_instances == fragments.instances.size.
         // if a fragment use local shuffle, all instanceJob would be LocalShuffleAssignedJob.
         // if not, all instanceJob would be StaticAssignedJob.
         // so we can cumulative parallel_instances as the fragments.instances.size.
