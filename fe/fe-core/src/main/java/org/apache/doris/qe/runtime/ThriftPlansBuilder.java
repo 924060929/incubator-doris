@@ -51,6 +51,7 @@ import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
+import com.google.common.collect.Sets;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -59,6 +60,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
@@ -324,27 +326,19 @@ public class ThriftPlansBuilder {
         if (isLocalShuffle) {
             // a fragment in a backend only enable local shuffle once for the first local shuffle instance,
             // because we just skip set scan params for LocalShuffleAssignedJob.receiveDataFromLocal == true
-            enableLocalShuffle(currentFragmentParam, scanParams);
-        } else {
-            // this path will enter multi times for all instances in a fragment
-            disableLocalShuffle(currentFragmentParam);
+            ignoreDataDistribution(currentFragmentParam);
         }
     }
 
-    private static void enableLocalShuffle(TPipelineFragmentParams currentFragmentParam, PerNodeScanParams scanParams) {
-        // enable local shuffle.
-        // only set fragment.per_node_shared_scans by first instance.per_node_shared_scans.
-        // parallel_instances == 1 && fragments.instances.size > 1 is the switch of local shuffle.
+    // local shuffle has two functions:
+    // 1. use 10 scan instances -> local shuffle -> 10 agg instances, this function can balance data in agg
+    // 2. use 1 scan instance -> local shuffle -> 10 agg, this function is ignore_data_distribution,
+    //    it can add parallel in agg
+    private static void ignoreDataDistribution(TPipelineFragmentParams currentFragmentParam) {
+        // `parallel_instances == 1` is the switch of ignore_data_distribution,
+        // and backend will use 1 instance to scan a little data, and local shuffle to
+        // # SessionVariable.parallel_pipeline_task_num instances to increment parallel
         currentFragmentParam.setParallelInstances(1);
-        currentFragmentParam.setPerNodeSharedScans(scanParams.perNodeSharedScans);
-    }
-
-    private static void disableLocalShuffle(TPipelineFragmentParams currentFragmentParam) {
-        // disable local shuffle, because the parallel_instances == fragments.instances.size.
-        // if a fragment use local shuffle, all instanceJob would be LocalShuffleAssignedJob.
-        // if not, all instanceJob would be StaticAssignedJob.
-        // so we can cumulative parallel_instances as the fragments.instances.size.
-        currentFragmentParam.setParallelInstances(currentFragmentParam.getParallelInstances() + 1);
     }
 
     private static PerNodeScanParams computeDefaultScanSourceParam(DefaultScanSource defaultScanSource) {
@@ -408,21 +402,30 @@ public class ThriftPlansBuilder {
 
     private static void filterInstancesWhichReceiveDataFromRemote(
             PipelineDistributedPlan receivePlan, BiConsumer<AssignedJob, Integer> computeFn) {
-        Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
 
+        // current only support all input plans have same destination with same order,
+        // so we can get first input plan to compute shuffle index to instance id
+        PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) receivePlan.getInputs()
+                .values()
+                .iterator()
+                .next();
+        Set<AssignedJob> destinations = Sets.newLinkedHashSet(firstInputPlan.getDestinations());
+
+        Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
         List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
-        for (int i = 0; i < instanceJobs.size(); i++) {
-            AssignedJob instanceJob = instanceJobs.get(i);
+        for (AssignedJob instanceJob : instanceJobs) {
+            if (!destinations.contains(instanceJob)) {
+                // the non-first-local-shuffle instances per host
+                // and non-first-share-broadcast-hash-table instances per host
+                // are not need receive data from other fragments, so we will skip it
+                continue;
+            }
+
             AtomicInteger instanceCount = backendIdToInstanceCount.computeIfAbsent(
                     instanceJob.getAssignedWorker().id(),
                     (backendId) -> new AtomicInteger()
             );
             int instanceIdInThisBackend = instanceCount.getAndIncrement();
-            if (instanceJob instanceof LocalShuffleAssignedJob
-                    && ((LocalShuffleAssignedJob) instanceJob).receiveDataFromLocal) {
-                // not receive data from remote fragment
-                continue;
-            }
             computeFn.accept(instanceJob, instanceIdInThisBackend);
         }
     }
