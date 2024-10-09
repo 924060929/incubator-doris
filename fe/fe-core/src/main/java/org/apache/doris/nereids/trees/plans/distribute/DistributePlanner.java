@@ -144,7 +144,7 @@ public class DistributePlanner {
         if (useLocalShuffle) {
             return getFirstInstancePerShareScan(receiverPlan);
         } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
-            return getFirstInstancePerShareScan(receiverPlan);
+            return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else {
             return receiverPlan.getInstanceJobs();
         }
