@@ -98,10 +98,11 @@ public class DistributePlanner {
                 .getSessionVariable()
                 .enableShareHashTableForBroadcastJoin;
         for (DistributedPlan receiverPlan : plans.values()) {
-            for (DistributedPlan senderPlan : receiverPlan.getInputs().values()) {
+            for (Entry<ExchangeNode, DistributedPlan> link : receiverPlan.getInputs().entries()) {
                 linkPipelinePlan(
                         (PipelineDistributedPlan) receiverPlan,
-                        (PipelineDistributedPlan) senderPlan,
+                        (PipelineDistributedPlan) link.getValue(),
+                        link.getKey(),
                         enableShareHashTableForBroadcastJoin
                 );
             }
@@ -113,6 +114,7 @@ public class DistributePlanner {
     private void linkPipelinePlan(
             PipelineDistributedPlan receiverPlan,
             PipelineDistributedPlan senderPlan,
+            ExchangeNode linkNode,
             boolean enableShareHashTableForBroadcastJoin) {
         List<AssignedJob> receiverInstances = filterInstancesWhichCanReceiveDataFromRemote(receiverPlan);
 
@@ -120,7 +122,7 @@ public class DistributePlanner {
                 = receiverPlan.getFragmentJob() instanceof UnassignedScanBucketOlapTableJob;
         if (receiveSideIsBucketShuffleJoinSide) {
             receiverInstances = getDestinationsByBuckets(receiverPlan, receiverInstances);
-        } else if (enableShareHashTableForBroadcastJoin) {
+        } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
             receiverInstances = getFirstInstancePerWorker(receiverInstances);
         }
         senderPlan.setDestinations(receiverInstances);
