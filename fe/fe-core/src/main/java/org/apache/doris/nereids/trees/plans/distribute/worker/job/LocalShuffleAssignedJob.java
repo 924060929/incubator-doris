@@ -24,7 +24,9 @@ import com.google.common.collect.ImmutableMap;
 
 import java.util.Map;
 
-/** LocalShuffleAssignedJob */
+/**
+ * LocalShuffleAssignedJob: this instance will use ignore_data_distribution function of local shuffle
+ */
 public class LocalShuffleAssignedJob extends StaticAssignedJob {
     public final int shareScanId;
     public final boolean receiveDataFromLocal;
