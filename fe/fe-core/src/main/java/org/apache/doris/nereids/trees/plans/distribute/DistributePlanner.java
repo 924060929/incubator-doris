@@ -17,6 +17,8 @@
 
 package org.apache.doris.nereids.trees.plans.distribute;
 
+import org.apache.doris.nereids.CascadesContext;
+import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DummyWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBuilder;
@@ -27,6 +29,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.StaticAssigned
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
+import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
@@ -42,13 +45,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** DistributePlanner */
 public class DistributePlanner {
+    private final CascadesContext cascadesContext;
     private final List<PlanFragment> fragments;
     private final FragmentIdMapping<PlanFragment> idToFragments;
 
-    public DistributePlanner(List<PlanFragment> fragments) {
+    public DistributePlanner(List<PlanFragment> fragments, CascadesContext cascadesContext) {
+        this.cascadesContext = Objects.requireNonNull(cascadesContext, "cascadesContext can not be null");
         this.fragments = Objects.requireNonNull(fragments, "fragments can not be null");
         this.idToFragments = FragmentIdMapping.buildFragmentMapping(fragments);
     }
@@ -87,22 +94,34 @@ public class DistributePlanner {
     }
 
     private FragmentIdMapping<DistributedPlan> linkPlans(FragmentIdMapping<DistributedPlan> plans) {
+        boolean enableShareHashTableForBroadcastJoin = cascadesContext.getConnectContext()
+                .getSessionVariable()
+                .enableShareHashTableForBroadcastJoin;
         for (DistributedPlan receiverPlan : plans.values()) {
             for (DistributedPlan senderPlan : receiverPlan.getInputs().values()) {
-                linkPipelinePlan((PipelineDistributedPlan) receiverPlan, (PipelineDistributedPlan) senderPlan);
+                linkPipelinePlan(
+                        (PipelineDistributedPlan) receiverPlan,
+                        (PipelineDistributedPlan) senderPlan,
+                        enableShareHashTableForBroadcastJoin
+                );
             }
         }
         return plans;
     }
 
     // set shuffle destinations
-    private void linkPipelinePlan(PipelineDistributedPlan receiverPlan, PipelineDistributedPlan senderPlan) {
+    private void linkPipelinePlan(
+            PipelineDistributedPlan receiverPlan,
+            PipelineDistributedPlan senderPlan,
+            boolean enableShareHashTableForBroadcastJoin) {
         List<AssignedJob> receiverInstances = filterInstancesWhichCanReceiveDataFromRemote(receiverPlan);
 
         boolean receiveSideIsBucketShuffleJoinSide
                 = receiverPlan.getFragmentJob() instanceof UnassignedScanBucketOlapTableJob;
         if (receiveSideIsBucketShuffleJoinSide) {
             receiverInstances = getDestinationsByBuckets(receiverPlan, receiverInstances);
+        } else if (enableShareHashTableForBroadcastJoin) {
+            receiverInstances = getFirstInstancePerWorker(receiverInstances);
         }
         senderPlan.setDestinations(receiverInstances);
     }
@@ -163,5 +182,15 @@ public class DistributePlanner {
             }
         }
         return canReceiveDataFromRemote;
+    }
+
+    private List<AssignedJob> getFirstInstancePerWorker(List<AssignedJob> instances) {
+        Map<DistributedPlanWorker, AssignedJob> firstInstancePerWorker = instances.stream()
+                .collect(Collectors.toMap(
+                        AssignedJob::getAssignedWorker,
+                        Function.identity(),
+                        (firstInstance, otherInstance) -> firstInstance)
+                );
+        return Utils.fastToImmutableList(firstInstancePerWorker.values());
     }
 }

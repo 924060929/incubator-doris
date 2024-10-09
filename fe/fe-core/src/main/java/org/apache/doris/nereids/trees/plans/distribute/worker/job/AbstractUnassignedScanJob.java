@@ -98,17 +98,18 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
                         scanNodes, 1
                 );
 
-                // Some tablets too big, we need add parallel to process these tablets after scan,
-                // for example, use one OlapScanNode to scan data, and use some local instances
-                // to process Aggregation parallel. We call it `share scan`. Backend will know this
-                // instances share the same ScanSource, and will not scan same data multiple times.
+                // when data not big, but aggregation too slow, we will use 1 instance to scan data,
+                // and use more instances (to ***add parallel***) to process aggregate.
+                // We call it `ignore data distribution` of `share scan`. Backend will know this instances
+                // share the same ScanSource, and will not scan same data multiple times.
                 //
                 // +-------------------------------- same fragment in one host -------------------------------------+
                 // |                instance1      instance2     instance3     instance4                            |
                 // |                    \              \             /            /                                 |
                 // |                                                                                                |
                 // |                                     OlapScanNode                                               |
-                // |(share scan node, and local shuffle data to other local instances to parallel compute this data)|
+                // |(share scan node, instance1 will scan all data and local shuffle to other local instances       |
+                // |                           to parallel compute this data)                                       |
                 // +------------------------------------------------------------------------------------------------+
                 ScanSource shareScanSource = instanceToScanRanges.get(0);
 
