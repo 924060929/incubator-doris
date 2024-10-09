@@ -92,7 +92,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
             int instanceNum = degreeOfParallelism(scanSourceMaxParallel);
 
             List<ScanSource> instanceToScanRanges;
-            if (useLocalShuffleToAddParallel) {
+            if (useLocalShuffleToAddParallel && instanceNum > 1) {
                 // only generate one instance to scan all data, in this step
                 instanceToScanRanges = scanSource.parallelize(
                         scanNodes, 1
