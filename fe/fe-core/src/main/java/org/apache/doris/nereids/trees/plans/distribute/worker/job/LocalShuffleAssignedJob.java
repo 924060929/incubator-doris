@@ -42,4 +42,13 @@ public class LocalShuffleAssignedJob extends StaticAssignedJob {
     protected Map<String, String> extraInfo() {
         return ImmutableMap.of("shareScanIndex", String.valueOf(shareScanId));
     }
+
+    @Override
+    protected String formatScanSourceString() {
+        if (receiveDataFromLocal) {
+            return "read data from first instance of " + getAssignedWorker();
+        } else {
+            return super.formatScanSourceString();
+        }
+    }
 }
