@@ -18,6 +18,7 @@
 package org.apache.doris.qe.protocol;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.UnsafeByteOperations;
 import org.apache.thrift.TBase;
 import org.apache.thrift.TConfiguration;
 import org.apache.thrift.TException;
@@ -25,6 +26,8 @@ import org.apache.thrift.protocol.TProtocol;
 import org.apache.thrift.protocol.TProtocolFactory;
 import org.apache.thrift.transport.TIOStreamTransport;
 import org.apache.thrift.transport.TTransportException;
+
+import java.io.ByteArrayOutputStream;
 
 /**
  * Copy from TSerializer and support change the initial byte array capacity
@@ -34,7 +37,8 @@ public class TFastSerializer {
     /**
      * This is the byte array that data is actually serialized into
      */
-    private final NoResizeByteOutputStream baos;
+    // private final NoResizeByteOutputStream baos;
+    private final ByteArrayOutputStream baos;
 
     /**
      * This transport wraps that byte array
@@ -55,7 +59,7 @@ public class TFastSerializer {
      * @throws TTransportException if there an error initializing the underlying transport.
      */
     public TFastSerializer(int initCapacity, TProtocolFactory protocolFactory) throws TTransportException {
-        baos = new NoResizeByteOutputStream(initCapacity);
+        baos = new ByteArrayOutputStream(initCapacity);
         transport = new TIOStreamTransport(new TConfiguration(), baos);
         protocol = protocolFactory.getProtocol(transport);
     }
@@ -72,7 +76,7 @@ public class TFastSerializer {
     public ByteString serialize(TBase base) throws TException {
         baos.reset();
         base.write(protocol);
-        return baos.toByteString();
+        return UnsafeByteOperations.unsafeWrap(baos.toByteArray());
     }
 
     /**
