@@ -31,6 +31,7 @@ import org.apache.doris.thrift.TFragmentInstanceReport;
 import org.apache.doris.thrift.TReportExecStatusParams;
 import org.apache.doris.thrift.TUniqueId;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -38,6 +39,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 public class LoadProcessor implements JobProcessor {
@@ -46,19 +48,20 @@ public class LoadProcessor implements JobProcessor {
     public final CoordinatorContext coordinatorContext;
     public final LoadContext loadContext;
     public final long jobId;
-    private final SqlPipelineTask executionTask;
 
     // this latch is used to wait finish for load, for example, insert into statement
     // MarkedCountDownLatch:
     //  key: fragmentId, value: backendId
-    private volatile MarkedCountDownLatch<Integer, Long> latch;
+    private volatile Optional<SqlPipelineTask> executionTask;
+    private volatile Optional<MarkedCountDownLatch<Integer, Long>> latch;
+    private volatile Optional<Map<BackendFragmentId, SingleFragmentPipelineTask>> backendFragmentTasks;
 
-    private final Map<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks;
-
-    public LoadProcessor(CoordinatorContext coordinatorContext, long jobId, SqlPipelineTask sqlPipelineTask) {
+    public LoadProcessor(CoordinatorContext coordinatorContext, long jobId) {
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
         this.loadContext = new LoadContext();
-        this.executionTask = Objects.requireNonNull(sqlPipelineTask, "executionTask can not be null");
+        this.executionTask = Optional.empty();
+        this.latch = Optional.empty();
+        this.backendFragmentTasks = Optional.empty();
 
         // only we set is report success, then the backend would report the fragment status,
         // then we can not the fragment is finished, and we can return in the NereidsCoordinator::join
@@ -74,21 +77,45 @@ public class LoadProcessor implements JobProcessor {
                 String.valueOf(jobId), coordinatorContext.scanRangeNum.get()
         );
 
-        this.backendFragmentTasks = buildBackendFragmentTasks(executionTask);
-
-        this.latch = new MarkedCountDownLatch<>(this.backendFragmentTasks.size());
-        for (BackendFragmentId backendFragmentId : this.backendFragmentTasks.keySet()) {
-            this.latch.addMark(backendFragmentId.fragmentId, backendFragmentId.backendId);
-        }
-
         LOG.info("dispatch load job: {} to {}", DebugUtil.printId(queryId), coordinatorContext.backends.get().keySet());
     }
 
+    @Override
+    public void setSqlPipelineTask(SqlPipelineTask sqlPipelineTask) {
+        Preconditions.checkArgument(sqlPipelineTask != null, "sqlPipelineTask can not be null");
+
+        this.executionTask = Optional.of(sqlPipelineTask);
+        Map<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks
+                = buildBackendFragmentTasks(sqlPipelineTask);
+        this.backendFragmentTasks = Optional.of(backendFragmentTasks);
+
+        MarkedCountDownLatch<Integer, Long> latch = new MarkedCountDownLatch<>(backendFragmentTasks.size());
+        for (BackendFragmentId backendFragmentId : backendFragmentTasks.keySet()) {
+            latch.addMark(backendFragmentId.fragmentId, backendFragmentId.backendId);
+        }
+        this.latch = Optional.of(latch);
+    }
+
+    @Override
+    public void cancel(Status cancelReason) {
+        if (executionTask.isPresent()) {
+            for (MultiFragmentsPipelineTask fragmentsTask : executionTask.get().getChildrenTasks().values()) {
+                fragmentsTask.cancelExecute(cancelReason);
+            }
+            latch.get().countDownToZero(new Status());
+        }
+    }
+
     public boolean isDone() {
-        return latch.getCount() == 0;
+        return latch.map(l -> l.getCount() == 0).orElse(false);
     }
 
     public boolean join(int timeoutS) {
+        SqlPipelineTask sqlPipelineTask = this.executionTask.orElse(null);
+        if (sqlPipelineTask == null) {
+            return true;
+        }
+
         long fixedMaxWaitTime = 30;
 
         long leftTimeoutS = timeoutS;
@@ -104,7 +131,7 @@ public class LoadProcessor implements JobProcessor {
                 return true;
             }
 
-            if (!executionTask.checkHealthy()) {
+            if (!sqlPipelineTask.checkHealthy()) {
                 return true;
             }
 
@@ -114,14 +141,14 @@ public class LoadProcessor implements JobProcessor {
     }
 
     public boolean await(long timeout, TimeUnit unit) throws InterruptedException {
-        if (latch == null) {
-            return true;
+        if (!latch.isPresent()) {
+            return false;
         }
-        return latch.await(timeout, unit);
+        return latch.get().await(timeout, unit);
     }
 
     public void updateFragmentExecStatus(TReportExecStatusParams params) {
-        SingleFragmentPipelineTask fragmentTask = backendFragmentTasks.get(
+        SingleFragmentPipelineTask fragmentTask = backendFragmentTasks.get().get(
                 new BackendFragmentId(params.getBackendId(), params.getFragmentId()));
         if (fragmentTask == null || !fragmentTask.processReportExecStatus(params)) {
             return;
@@ -188,7 +215,7 @@ public class LoadProcessor implements JobProcessor {
                 LOG.debug("Query {} fragment {} is marked done",
                         DebugUtil.printId(queryId), params.getFragmentId());
             }
-            latch.markedCountDown(params.getFragmentId(), params.getBackendId());
+            latch.get().markedCountDown(params.getFragmentId(), params.getBackendId());
         }
 
         if (params.isSetLoadedRows() && jobId != -1) {
@@ -224,13 +251,5 @@ public class LoadProcessor implements JobProcessor {
             }
         }
         return backendFragmentTasks.build();
-    }
-
-    @Override
-    public void cancel(Status cancelReason) {
-        for (MultiFragmentsPipelineTask fragmentsTask : executionTask.getChildrenTasks().values()) {
-            fragmentsTask.cancelExecute(cancelReason);
-        }
-        latch.countDownToZero(new Status());
     }
 }

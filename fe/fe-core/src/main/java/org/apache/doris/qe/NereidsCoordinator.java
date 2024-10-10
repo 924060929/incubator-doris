@@ -83,16 +83,17 @@ public class NereidsCoordinator extends Coordinator {
         super(context, analyzer, planner, statsErrorEstimator);
 
         this.coordinatorContext = CoordinatorContext.build(planner, this);
+        this.coordinatorContext.setJobProcessor(buildJobProcessor(coordinatorContext));
 
-        Preconditions.checkState(!planner.getFragments().isEmpty() && coordinatorContext.instanceNum > 0,
-                "Fragment and Instance can not be empty˚");
+        Preconditions.checkState(!planner.getFragments().isEmpty()
+                        && coordinatorContext.instanceNum > 0, "Fragment and Instance can not be empty˚");
     }
 
     @Override
     public void exec() throws Exception {
         enqueue(coordinatorContext.connectContext);
 
-        DataSink topDataSink = processTopSink(coordinatorContext.connectContext, coordinatorContext.planner);
+        processTopSink(coordinatorContext, coordinatorContext.planner);
         coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
 
         QeProcessorImpl.INSTANCE.registerInstances(coordinatorContext.queryId, coordinatorContext.instanceNum);
@@ -100,7 +101,6 @@ public class NereidsCoordinator extends Coordinator {
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
         executionTask = SqlPipelineTaskBuilder.build(coordinatorContext, workerToFragments);
-        setResultProcessor(topDataSink, executionTask);
         executionTask.execute();
     }
 
@@ -383,18 +383,17 @@ public class NereidsCoordinator extends Coordinator {
         coordinatorContext.withLock(() -> coordinatorContext.getJobProcessor().cancel(cancelReason));
     }
 
-    private DataSink processTopSink(ConnectContext connectContext, NereidsPlanner nereidsPlanner)
+    private void processTopSink(CoordinatorContext coordinatorContext, NereidsPlanner nereidsPlanner)
             throws AnalysisException {
         PipelineDistributedPlan topPlan = (PipelineDistributedPlan) nereidsPlanner.getDistributedPlans().last();
-        DataSink topDataSink = topPlan.getFragmentJob().getFragment().getSink();
-        setForArrowFlight(connectContext, topPlan, topDataSink);
-        setForBroker(topPlan, topDataSink);
-        return topDataSink;
+        setForArrowFlight(coordinatorContext, topPlan);
+        setForBroker(coordinatorContext, topPlan);
     }
 
-    private void setForArrowFlight(
-            ConnectContext connectContext, PipelineDistributedPlan topPlan, DataSink topDataSink) {
-        if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
+    private void setForArrowFlight(CoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) {
+        ConnectContext connectContext = coordinatorContext.connectContext;
+        DataSink dataSink = coordinatorContext.dataSink;
+        if (dataSink instanceof ResultSink || dataSink instanceof ResultFileSink) {
             if (connectContext != null && !connectContext.isReturnResultFromLocal()) {
                 Preconditions.checkState(connectContext.getConnectType().equals(ConnectType.ARROW_FLIGHT_SQL));
 
@@ -413,11 +412,13 @@ public class NereidsCoordinator extends Coordinator {
         }
     }
 
-    private void setForBroker(PipelineDistributedPlan topPlan, DataSink topDataSink) throws AnalysisException {
-        if (topDataSink instanceof ResultFileSink
-                && ((ResultFileSink) topDataSink).getStorageType() == StorageBackend.StorageType.BROKER) {
+    private void setForBroker(
+            CoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) throws AnalysisException {
+        DataSink dataSink = coordinatorContext.dataSink;
+        if (dataSink instanceof ResultFileSink
+                && ((ResultFileSink) dataSink).getStorageType() == StorageBackend.StorageType.BROKER) {
             // set the broker address for OUTFILE sink
-            ResultFileSink topResultFileSink = (ResultFileSink) topDataSink;
+            ResultFileSink topResultFileSink = (ResultFileSink) dataSink;
             DistributedPlanWorker worker = topPlan.getInstanceJobs().get(0).getAssignedWorker();
             FsBroker broker = Env.getCurrentEnv().getBrokerMgr()
                     .getBroker(topResultFileSink.getBrokerName(), worker.host());
@@ -463,11 +464,13 @@ public class NereidsCoordinator extends Coordinator {
         return false;
     }
 
-    private void setResultProcessor(DataSink topDataSink, SqlPipelineTask executionTask) {
-        if ((topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink)) {
-            coordinatorContext.setJobProcessor(QueryProcessor.build(coordinatorContext, executionTask));
+    private JobProcessor buildJobProcessor(CoordinatorContext coordinatorContext) {
+        DataSink dataSink = coordinatorContext.dataSink;
+        if ((dataSink instanceof ResultSink || dataSink instanceof ResultFileSink)) {
+            return QueryProcessor.build(coordinatorContext);
         } else {
-            coordinatorContext.setJobProcessor(new LoadProcessor(coordinatorContext, -1L, executionTask));
+            // insert statement has jobId == -1
+            return new LoadProcessor(coordinatorContext, -1L);
         }
     }
 }

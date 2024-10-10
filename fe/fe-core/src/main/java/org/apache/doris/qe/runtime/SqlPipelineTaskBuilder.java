@@ -52,13 +52,14 @@ public class SqlPipelineTaskBuilder {
 
     private SqlPipelineTask buildTask(CoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
-
         BackendServiceProxy backendServiceProxy = BackendServiceProxy.getInstance();
-        return new SqlPipelineTask(
+        SqlPipelineTask sqlPipelineTask = new SqlPipelineTask(
                 coordinatorContext,
                 backendServiceProxy,
                 buildMultiFragmentTasks(coordinatorContext, backendServiceProxy, workerToFragmentsParam)
         );
+        coordinatorContext.getJobProcessor().setSqlPipelineTask(sqlPipelineTask);
+        return sqlPipelineTask;
     }
 
     private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
