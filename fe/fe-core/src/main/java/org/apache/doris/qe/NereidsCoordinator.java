@@ -203,7 +203,11 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public void updateFragmentExecStatus(TReportExecStatusParams params) {
-        coordinatorContext.asLoadProcessor().updateFragmentExecStatus(params);
+        JobProcessor jobProcessor = coordinatorContext.getJobProcessor();
+        // adbc will skip update status
+        if (jobProcessor instanceof LoadProcessor) {
+            coordinatorContext.asLoadProcessor().updateFragmentExecStatus(params);
+        }
     }
 
     @Override
