@@ -29,10 +29,13 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAs
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
+import org.apache.doris.nereids.trees.plans.physical.TopnFilter;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
+import org.apache.doris.planner.SortNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.CoordinatorContext;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
@@ -46,12 +49,15 @@ import org.apache.doris.thrift.TPlanFragmentDestination;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TRuntimeFilterParams;
 import org.apache.doris.thrift.TScanRangeParams;
+import org.apache.doris.thrift.TTopnFilterDesc;
 
+import com.google.common.base.Suppliers;
 import com.google.common.collect.LinkedHashMultiset;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -63,6 +69,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 public class ThriftPlansBuilder {
     private static final Logger LOG = LogManager.getLogger(ThriftPlansBuilder.class);
@@ -70,6 +77,10 @@ public class ThriftPlansBuilder {
     public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
             CoordinatorContext coordinatorContext) {
         List<PipelineDistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
+
+        // we should set runtime predicate first, then we can use heap sort and to thrift
+        setRuntimePredicateIfNeed(coordinatorContext);
+
         return plansToThrift(distributedPlans, coordinatorContext);
     }
 
@@ -78,6 +89,8 @@ public class ThriftPlansBuilder {
 
         RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder
                 = RuntimeFiltersThriftBuilder.compute(coordinatorContext.planner, distributedPlans);
+        Supplier<List<TTopnFilterDesc>> topNFilterThriftSupplier = topNFilterToThrift(coordinatorContext);
+
         Multiset<DistributedPlanWorker> workerProcessInstanceNum = computeInstanceNumPerWorker(distributedPlans);
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker = Maps.newLinkedHashMap();
         int currentInstanceIndex = 0;
@@ -97,7 +110,8 @@ public class ThriftPlansBuilder {
                         workerProcessInstanceNum, destinations, coordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
-                        currentFragmentParam, instanceJob, runtimeFiltersThriftBuilder, currentInstanceIndex++
+                        currentFragmentParam, instanceJob, runtimeFiltersThriftBuilder,
+                        topNFilterThriftSupplier, currentInstanceIndex++
                 );
                 currentFragmentParam.getLocalParams().add(instanceParam);
             }
@@ -136,6 +150,31 @@ public class ThriftPlansBuilder {
             }
         }
         return fragmentsGroupByWorker;
+    }
+
+    private static void setRuntimePredicateIfNeed(CoordinatorContext coordinatorContext) {
+        for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+            if (scanNode instanceof OlapScanNode) {
+                for (SortNode topnFilterSortNode : scanNode.getTopnFilterSortNodes()) {
+                    topnFilterSortNode.setHasRuntimePredicate();
+                }
+            }
+        }
+    }
+
+    private static Supplier<List<TTopnFilterDesc>> topNFilterToThrift(CoordinatorContext coordinatorContext) {
+        return Suppliers.memoize(() -> {
+            List<TopnFilter> topnFilters = coordinatorContext.planner.getTopnFilters();
+            if (CollectionUtils.isEmpty(topnFilters)) {
+                return null;
+            }
+
+            List<TTopnFilterDesc> filterDescs = new ArrayList<>(topnFilters.size());
+            for (TopnFilter topnFilter : topnFilters) {
+                filterDescs.add(topnFilter.toThrift());
+            }
+            return filterDescs;
+        });
     }
 
     private static void setParamsForOlapTableSink(List<PipelineDistributedPlan> distributedPlans,
@@ -292,7 +331,8 @@ public class ThriftPlansBuilder {
 
     private static TPipelineInstanceParams instanceToThrift(
             TPipelineFragmentParams currentFragmentParam, AssignedJob instance,
-            RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder, int currentInstanceNum) {
+            RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder,
+            Supplier<List<TTopnFilterDesc>> topNFilterThriftSupplier, int currentInstanceNum) {
         TPipelineInstanceParams instanceParam = new TPipelineInstanceParams();
         instanceParam.setFragmentInstanceId(instance.instanceId());
         setScanSourceParam(currentFragmentParam, instance, instanceParam);
@@ -301,12 +341,15 @@ public class ThriftPlansBuilder {
         instanceParam.setBackendNum(currentInstanceNum);
         instanceParam.setRuntimeFilterParams(new TRuntimeFilterParams());
 
-        if (runtimeFiltersThriftBuilder.isMergeRuntimeFilterInstance(instance)) {
-            runtimeFiltersThriftBuilder.setRuntimeFilterThriftParams(instanceParam);
-        }
+        instanceParam.setTopnFilterDescs(topNFilterThriftSupplier.get());
 
-        // instanceParam.runtime_filter_params.setRuntimeFilterMergeAddr(runtimeFilterMergeAddr);
-        // topn filter
+        // set for runtime filter
+        TRuntimeFilterParams runtimeFilterParams = new TRuntimeFilterParams();
+        runtimeFilterParams.setRuntimeFilterMergeAddr(runtimeFiltersThriftBuilder.mergeAddress);
+        instanceParam.setRuntimeFilterParams(runtimeFilterParams);
+        if (runtimeFiltersThriftBuilder.isMergeRuntimeFilterInstance(instance)) {
+            runtimeFiltersThriftBuilder.setRuntimeFilterThriftParams(runtimeFilterParams);
+        }
         return instanceParam;
     }
 

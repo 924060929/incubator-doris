@@ -27,7 +27,7 @@ import org.apache.doris.planner.RuntimeFilter;
 import org.apache.doris.planner.RuntimeFilterId;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
-import org.apache.doris.thrift.TPipelineInstanceParams;
+import org.apache.doris.thrift.TRuntimeFilterParams;
 import org.apache.doris.thrift.TRuntimeFilterTargetParams;
 import org.apache.doris.thrift.TRuntimeFilterTargetParamsV2;
 import org.apache.doris.thrift.TUniqueId;
@@ -44,16 +44,20 @@ import java.util.stream.Collectors;
 
 /** RuntimeFiltersThriftBuilder */
 public class RuntimeFiltersThriftBuilder {
+    public final TNetworkAddress mergeAddress;
+
     private final List<RuntimeFilter> runtimeFilters;
     private final AssignedJob mergeInstance;
     private final Set<Integer> broadcastRuntimeFilterIds;
     private final Map<RuntimeFilterId, List<RuntimeFilterTarget>> ridToTargets;
     private final Map<RuntimeFilterId, Integer> ridToBuilderNum;
 
-    private RuntimeFiltersThriftBuilder(List<RuntimeFilter> runtimeFilters,
+    private RuntimeFiltersThriftBuilder(
+            TNetworkAddress mergeAddress, List<RuntimeFilter> runtimeFilters,
             AssignedJob mergeInstance, Set<Integer> broadcastRuntimeFilterIds,
             Map<RuntimeFilterId, List<RuntimeFilterTarget>> ridToTargets,
             Map<RuntimeFilterId, Integer> ridToBuilderNum) {
+        this.mergeAddress = mergeAddress;
         this.runtimeFilters = runtimeFilters;
         this.mergeInstance = mergeInstance;
         this.broadcastRuntimeFilterIds = broadcastRuntimeFilterIds;
@@ -65,7 +69,7 @@ public class RuntimeFiltersThriftBuilder {
         return mergeInstance == instance;
     }
 
-    public void setRuntimeFilterThriftParams(TPipelineInstanceParams instanceParams) {
+    public void setRuntimeFilterThriftParams(TRuntimeFilterParams runtimeFilterParams) {
         for (RuntimeFilter rf : runtimeFilters) {
             List<RuntimeFilterTarget> targets = ridToTargets.get(rf.getFilterId());
             if (targets == null) {
@@ -86,7 +90,7 @@ public class RuntimeFiltersThriftBuilder {
                     targetParams.target_fragment_instance_ids.add(target.instanceId);
                 }
 
-                instanceParams.runtime_filter_params.putToRidToTargetParamv2(
+                runtimeFilterParams.putToRidToTargetParamv2(
                         rf.getFilterId().asInt(), new ArrayList<>(targetToParams.values())
                 );
             } else {
@@ -94,7 +98,7 @@ public class RuntimeFiltersThriftBuilder {
                 for (RuntimeFilterTarget target : targets) {
                     targetParams.add(new TRuntimeFilterTargetParams(target.instanceId, target.address));
                 }
-                instanceParams.runtime_filter_params.putToRidToTargetParam(
+                runtimeFilterParams.putToRidToTargetParam(
                         rf.getFilterId().asInt(), targetParams
                 );
             }
@@ -102,12 +106,12 @@ public class RuntimeFiltersThriftBuilder {
         for (Map.Entry<RuntimeFilterId, Integer> entry : ridToBuilderNum.entrySet()) {
             boolean isBroadcastRuntimeFilter = broadcastRuntimeFilterIds.contains(entry.getKey().asInt());
             int builderNum = isBroadcastRuntimeFilter ? 1 : entry.getValue();
-            instanceParams.runtime_filter_params.putToRuntimeFilterBuilderNum(
+            runtimeFilterParams.putToRuntimeFilterBuilderNum(
                     entry.getKey().asInt(), builderNum
             );
         }
         for (RuntimeFilter rf : runtimeFilters) {
-            instanceParams.runtime_filter_params.putToRidToRuntimeFilter(
+            runtimeFilterParams.putToRidToRuntimeFilter(
                     rf.getFilterId().asInt(), rf.toThrift()
             );
         }
@@ -116,6 +120,8 @@ public class RuntimeFiltersThriftBuilder {
     public static RuntimeFiltersThriftBuilder compute(NereidsPlanner planner, List<PipelineDistributedPlan> distributedPlans) {
         PipelineDistributedPlan topMostPlan = distributedPlans.get(distributedPlans.size() - 1);
         AssignedJob mergeInstance = topMostPlan.getInstanceJobs().get(0);
+        BackendWorker worker = (BackendWorker) mergeInstance.getAssignedWorker();
+        TNetworkAddress mergeAddress = new TNetworkAddress(worker.host(), worker.port());
 
         List<RuntimeFilter> runtimeFilters = planner.getRuntimeFilters();
         Set<Integer> broadcastRuntimeFilterIds = runtimeFilters
@@ -153,7 +159,8 @@ public class RuntimeFiltersThriftBuilder {
             }
         }
         return new RuntimeFiltersThriftBuilder(
-                runtimeFilters, mergeInstance, broadcastRuntimeFilterIds, ridToTargetParam, ridToBuilderNum
+                mergeAddress, runtimeFilters, mergeInstance,
+                broadcastRuntimeFilterIds, ridToTargetParam, ridToBuilderNum
         );
     }
 
