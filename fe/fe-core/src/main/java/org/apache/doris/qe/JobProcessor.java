@@ -18,7 +18,10 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.common.Status;
+import org.apache.doris.qe.runtime.SqlPipelineTask;
 
 public interface JobProcessor {
+    void setSqlPipelineTask(SqlPipelineTask sqlPipelineTask);
+
     void cancel(Status cancelReason);
 }

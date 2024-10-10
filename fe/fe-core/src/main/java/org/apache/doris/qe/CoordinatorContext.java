@@ -33,6 +33,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSour
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
+import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.QueryProcessor;
@@ -71,6 +72,7 @@ public class CoordinatorContext {
 
     // these are some constant parameters
     public final NereidsCoordinator coordinator;
+    public final DataSink dataSink;
     public final ExecutionProfile executionProfile;
     public final ConnectContext connectContext;
     public final NereidsPlanner planner;
@@ -114,6 +116,9 @@ public class CoordinatorContext {
         this.descriptorTable = descriptorTable;
         this.coordinatorAddress = coordinatorAddress;
         this.directConnectFrontendAddress = directConnectFrontendAddress;
+
+        PipelineDistributedPlan topPlan = (PipelineDistributedPlan) planner.getDistributedPlans().last();
+        this.dataSink = topPlan.getFragmentJob().getFragment().getSink();
 
         // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
         // else use exec_plan_fragments directly.

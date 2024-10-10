@@ -44,6 +44,7 @@ import org.apache.thrift.TException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class QueryProcessor implements JobProcessor {
@@ -51,18 +52,16 @@ public class QueryProcessor implements JobProcessor {
 
     // constant fields
     private final long limitRows;
-    private final SqlPipelineTask sqlPipelineTask;
 
     // mutable field
+    private Optional<SqlPipelineTask> sqlPipelineTask;
     private final CoordinatorContext coordinatorContext;
     private final List<ResultReceiver> runningReceivers;
     private int receiverOffset;
     private long numReceivedRows;
 
-    public QueryProcessor(CoordinatorContext coordinatorContext,
-            SqlPipelineTask sqlPipelineTask, List<ResultReceiver> runningReceivers) {
+    public QueryProcessor(CoordinatorContext coordinatorContext, List<ResultReceiver> runningReceivers) {
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
-        this.sqlPipelineTask = Objects.requireNonNull(sqlPipelineTask, "sqlPipelineTask can not be null");
         this.runningReceivers = new CopyOnWriteArrayList<>(
                 Objects.requireNonNull(runningReceivers, "runningReceivers can not be null")
         );
@@ -73,9 +72,11 @@ public class QueryProcessor implements JobProcessor {
                 .getFragment()
                 .getPlanRoot()
                 .getLimit();
+
+        this.sqlPipelineTask = Optional.empty();
     }
 
-    public static QueryProcessor build(CoordinatorContext coordinatorContext, SqlPipelineTask sqlPipelineTask) {
+    public static QueryProcessor build(CoordinatorContext coordinatorContext) {
         List<DistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
         PipelineDistributedPlan topFragment =
                 (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
@@ -108,7 +109,12 @@ public class QueryProcessor implements JobProcessor {
                     )
             );
         }
-        return new QueryProcessor(coordinatorContext, sqlPipelineTask, receivers);
+        return new QueryProcessor(coordinatorContext, receivers);
+    }
+
+    @Override
+    public void setSqlPipelineTask(SqlPipelineTask sqlPipelineTask) {
+        this.sqlPipelineTask = Optional.ofNullable(sqlPipelineTask);
     }
 
     public boolean isEos() {
@@ -185,9 +191,11 @@ public class QueryProcessor implements JobProcessor {
             receiver.cancel(cancelReason);
         }
 
-        for (MultiFragmentsPipelineTask fragmentsTask : sqlPipelineTask.getChildrenTasks().values()) {
-            fragmentsTask.cancelExecute(cancelReason);
-        }
+        this.sqlPipelineTask.ifPresent(sqlPipelineTask -> {
+            for (MultiFragmentsPipelineTask fragmentsTask : sqlPipelineTask.getChildrenTasks().values()) {
+                fragmentsTask.cancelExecute(cancelReason);
+            }
+        });
     }
 
     public int getReceiverOffset() {
