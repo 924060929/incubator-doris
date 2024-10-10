@@ -75,6 +75,9 @@ public class ThriftPlansBuilder {
 
     private static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
             List<PipelineDistributedPlan> distributedPlans, CoordinatorContext coordinatorContext) {
+
+        RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder
+                = RuntimeFiltersThriftBuilder.compute(coordinatorContext.planner, distributedPlans);
         Multiset<DistributedPlanWorker> workerProcessInstanceNum = computeInstanceNumPerWorker(distributedPlans);
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker = Maps.newLinkedHashMap();
         int currentInstanceIndex = 0;
@@ -94,7 +97,8 @@ public class ThriftPlansBuilder {
                         workerProcessInstanceNum, destinations, coordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
-                        currentFragmentParam, instanceJob, currentInstanceIndex++);
+                        currentFragmentParam, instanceJob, runtimeFiltersThriftBuilder, currentInstanceIndex++
+                );
                 currentFragmentParam.getLocalParams().add(instanceParam);
             }
 
@@ -287,8 +291,8 @@ public class ThriftPlansBuilder {
     }
 
     private static TPipelineInstanceParams instanceToThrift(
-            TPipelineFragmentParams currentFragmentParam,
-            AssignedJob instance, int currentInstanceNum) {
+            TPipelineFragmentParams currentFragmentParam, AssignedJob instance,
+            RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder, int currentInstanceNum) {
         TPipelineInstanceParams instanceParam = new TPipelineInstanceParams();
         instanceParam.setFragmentInstanceId(instance.instanceId());
         setScanSourceParam(currentFragmentParam, instance, instanceParam);
@@ -296,6 +300,11 @@ public class ThriftPlansBuilder {
         instanceParam.setSenderId(instance.indexInUnassignedJob());
         instanceParam.setBackendNum(currentInstanceNum);
         instanceParam.setRuntimeFilterParams(new TRuntimeFilterParams());
+
+        if (runtimeFiltersThriftBuilder.isMergeRuntimeFilterInstance(instance)) {
+            runtimeFiltersThriftBuilder.setRuntimeFilterThriftParams(instanceParam);
+        }
+
         // instanceParam.runtime_filter_params.setRuntimeFilterMergeAddr(runtimeFilterMergeAddr);
         // topn filter
         return instanceParam;
