@@ -337,7 +337,6 @@ public class NereidsCoordinator extends Coordinator {
 
     @Override
     public void setGroupCommitBe(Backend backend) {
-        // TODO
         super.setGroupCommitBe(backend);
     }
 
