@@ -26,7 +26,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWor
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.qe.ConnectContext;
-import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.JobProcessor;
 import org.apache.doris.qe.ResultReceiver;
 import org.apache.doris.qe.RowBatch;
@@ -55,12 +55,12 @@ public class QueryProcessor implements JobProcessor {
 
     // mutable field
     private Optional<SqlPipelineTask> sqlPipelineTask;
-    private final CoordinatorContext coordinatorContext;
+    private final SqlCoordinatorContext coordinatorContext;
     private final List<ResultReceiver> runningReceivers;
     private int receiverOffset;
     private long numReceivedRows;
 
-    public QueryProcessor(CoordinatorContext coordinatorContext, List<ResultReceiver> runningReceivers) {
+    public QueryProcessor(SqlCoordinatorContext coordinatorContext, List<ResultReceiver> runningReceivers) {
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
         this.runningReceivers = new CopyOnWriteArrayList<>(
                 Objects.requireNonNull(runningReceivers, "runningReceivers can not be null")
@@ -76,7 +76,7 @@ public class QueryProcessor implements JobProcessor {
         this.sqlPipelineTask = Optional.empty();
     }
 
-    public static QueryProcessor build(CoordinatorContext coordinatorContext) {
+    public static QueryProcessor build(SqlCoordinatorContext coordinatorContext) {
         List<DistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
         PipelineDistributedPlan topFragment =
                 (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);

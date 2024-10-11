@@ -37,7 +37,7 @@ import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.planner.SortNode;
 import org.apache.doris.qe.ConnectContext;
-import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
 import org.apache.doris.thrift.TDataSinkType;
 import org.apache.doris.thrift.TFileScanRangeParams;
@@ -75,7 +75,7 @@ public class ThriftPlansBuilder {
     private static final Logger LOG = LogManager.getLogger(ThriftPlansBuilder.class);
 
     public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
-            CoordinatorContext coordinatorContext) {
+            SqlCoordinatorContext coordinatorContext) {
         List<PipelineDistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
 
         // we should set runtime predicate first, then we can use heap sort and to thrift
@@ -85,7 +85,7 @@ public class ThriftPlansBuilder {
     }
 
     private static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
-            List<PipelineDistributedPlan> distributedPlans, CoordinatorContext coordinatorContext) {
+            List<PipelineDistributedPlan> distributedPlans, SqlCoordinatorContext coordinatorContext) {
 
         RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder
                 = RuntimeFiltersThriftBuilder.compute(coordinatorContext.planner, distributedPlans);
@@ -152,7 +152,7 @@ public class ThriftPlansBuilder {
         return fragmentsGroupByWorker;
     }
 
-    private static void setRuntimePredicateIfNeed(CoordinatorContext coordinatorContext) {
+    private static void setRuntimePredicateIfNeed(SqlCoordinatorContext coordinatorContext) {
         for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
             if (scanNode instanceof OlapScanNode) {
                 for (SortNode topnFilterSortNode : scanNode.getTopnFilterSortNodes()) {
@@ -162,7 +162,7 @@ public class ThriftPlansBuilder {
         }
     }
 
-    private static Supplier<List<TTopnFilterDesc>> topNFilterToThrift(CoordinatorContext coordinatorContext) {
+    private static Supplier<List<TTopnFilterDesc>> topNFilterToThrift(SqlCoordinatorContext coordinatorContext) {
         return Suppliers.memoize(() -> {
             List<TopnFilter> topnFilters = coordinatorContext.planner.getTopnFilters();
             if (CollectionUtils.isEmpty(topnFilters)) {
@@ -255,7 +255,7 @@ public class ThriftPlansBuilder {
             Map<Integer, Integer> exchangeSenderNum,
             Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
             Multiset<DistributedPlanWorker> workerProcessInstanceNum,
-            List<TPlanFragmentDestination> destinations, CoordinatorContext coordinatorContext) {
+            List<TPlanFragmentDestination> destinations, SqlCoordinatorContext coordinatorContext) {
         DistributedPlanWorker worker = assignedJob.getAssignedWorker();
         return workerToFragmentParams.computeIfAbsent(worker, w -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();

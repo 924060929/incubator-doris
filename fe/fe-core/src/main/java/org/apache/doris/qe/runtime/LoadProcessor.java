@@ -24,7 +24,7 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.datasource.hive.HMSTransaction;
 import org.apache.doris.datasource.iceberg.IcebergTransaction;
 import org.apache.doris.nereids.util.Utils;
-import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.JobProcessor;
 import org.apache.doris.qe.LoadContext;
 import org.apache.doris.thrift.TFragmentInstanceReport;
@@ -45,7 +45,7 @@ import java.util.concurrent.TimeUnit;
 public class LoadProcessor implements JobProcessor {
     private static final Logger LOG = LogManager.getLogger(LoadProcessor.class);
 
-    public final CoordinatorContext coordinatorContext;
+    public final SqlCoordinatorContext coordinatorContext;
     public final LoadContext loadContext;
     public final long jobId;
 
@@ -56,7 +56,7 @@ public class LoadProcessor implements JobProcessor {
     private volatile Optional<MarkedCountDownLatch<Integer, Long>> latch;
     private volatile Optional<Map<BackendFragmentId, SingleFragmentPipelineTask>> backendFragmentTasks;
 
-    public LoadProcessor(CoordinatorContext coordinatorContext, long jobId) {
+    public LoadProcessor(SqlCoordinatorContext coordinatorContext, long jobId) {
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
         this.loadContext = new LoadContext();
         this.executionTask = Optional.empty();
