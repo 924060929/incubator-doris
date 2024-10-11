@@ -190,6 +190,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
             return 1;
         }
         if (fragment.queryCacheParam != null) {
+            // backend need use one parallel for one tablet to look up tablet query cache
             return maxParallel;
         }
         if (scanNodes.size() == 1 && scanNodes.get(0) instanceof OlapScanNode) {
