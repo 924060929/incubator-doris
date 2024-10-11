@@ -20,12 +20,18 @@ package org.apache.doris.qe.runtime;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TReportExecStatusParams;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SingleFragmentPipelineTask extends LeafRuntimeTask {
+    private static final Logger LOG = LogManager.getLogger(SqlPipelineTask.class);
+
     // immutable parameters
     private final Backend backend;
     private final int fragmentId;
+    private final long lastMissingHeartbeatTime;
 
     // mutate states
     private final AtomicBoolean done = new AtomicBoolean();
@@ -33,6 +39,7 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
     public SingleFragmentPipelineTask(Backend backend, int fragmentId) {
         this.backend = backend;
         this.fragmentId = fragmentId;
+        this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
     }
 
     // update profile.
@@ -45,6 +52,14 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
             return false;
         }
         return this.done.compareAndSet(false, true);
+    }
+
+    public boolean isBackendHealthy(long jobId) {
+        if (backend.getLastMissingHeartbeatTime() > lastMissingHeartbeatTime && !backend.isAlive()) {
+            LOG.warn("backend {} is down while joining the coordinator. job id: {}", backend.getId(), jobId);
+            return false;
+        }
+        return true;
     }
 
     public boolean isDone() {

@@ -102,19 +102,6 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         });
     }
 
-    /*
-     * Check the state of backends in needCheckBackendExecStates.
-     * return true if all of them are OK. Otherwise, return false.
-     */
-    public boolean checkHealthy() {
-        for (MultiFragmentsPipelineTask backendTask : childrenTasks.allTasks()) {
-            if (!backendTask.checkHealthy()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     @Override
     public String toString() {
         return "SqlPipelineTask(\n"

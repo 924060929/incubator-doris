@@ -287,6 +287,7 @@ public class ThriftPlansBuilder {
             params.setQueryGlobals(coordinatorContext.queryGlobals);
             params.setQueryOptions(new TQueryOptions(coordinatorContext.queryOptions));
             long memLimit = coordinatorContext.queryOptions.getMemLimit();
+            // update memory limit for colocate join
             if (!connectContext.getSessionVariable().isDisableColocatePlan() && fragment.hasColocatePlanNode()) {
                 int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNumInThisFragment);
                 memLimit = coordinatorContext.queryOptions.getMemLimit() / rate;

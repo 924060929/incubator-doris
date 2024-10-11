@@ -24,18 +24,21 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.datasource.hive.HMSTransaction;
 import org.apache.doris.datasource.iceberg.IcebergTransaction;
 import org.apache.doris.nereids.util.Utils;
-import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.JobProcessor;
 import org.apache.doris.qe.LoadContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.thrift.TFragmentInstanceReport;
 import org.apache.doris.thrift.TReportExecStatusParams;
+import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -55,6 +58,7 @@ public class LoadProcessor implements JobProcessor {
     private volatile Optional<SqlPipelineTask> executionTask;
     private volatile Optional<MarkedCountDownLatch<Integer, Long>> latch;
     private volatile Optional<Map<BackendFragmentId, SingleFragmentPipelineTask>> backendFragmentTasks;
+    private volatile List<SingleFragmentPipelineTask> topFragmentTasks;
 
     public LoadProcessor(SqlCoordinatorContext coordinatorContext, long jobId) {
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
@@ -77,7 +81,9 @@ public class LoadProcessor implements JobProcessor {
                 String.valueOf(jobId), coordinatorContext.scanRangeNum.get()
         );
 
-        LOG.info("dispatch load job: {} to {}", DebugUtil.printId(queryId), coordinatorContext.backends.get().keySet());
+        topFragmentTasks = Lists.newArrayList();
+
+        LOG.info("dispatch load job: {} to {}",DebugUtil.printId(queryId), coordinatorContext.backends.get().keySet());
     }
 
     @Override
@@ -94,6 +100,23 @@ public class LoadProcessor implements JobProcessor {
             latch.addMark(backendFragmentId.fragmentId, backendFragmentId.backendId);
         }
         this.latch = Optional.of(latch);
+
+        int topFragmentId = coordinatorContext.planner
+                .getDistributedPlans()
+                .last()
+                .getFragmentJob()
+                .getFragment()
+                .getFragmentId()
+                .asInt();
+        List<SingleFragmentPipelineTask> topFragmentTasks = Lists.newArrayList();
+        for (MultiFragmentsPipelineTask multiFragmentPipelineTask : sqlPipelineTask.childrenTasks.allTasks()) {
+            for (SingleFragmentPipelineTask fragmentTask : multiFragmentPipelineTask.childrenTasks.allTasks()) {
+                if (fragmentTask.getFragmentId() == topFragmentId) {
+                    topFragmentTasks.add(fragmentTask);
+                }
+            }
+        }
+        this.topFragmentTasks = topFragmentTasks;
     }
 
     @Override
@@ -131,7 +154,7 @@ public class LoadProcessor implements JobProcessor {
                 return true;
             }
 
-            if (!sqlPipelineTask.checkHealthy()) {
+            if (!checkHealthy()) {
                 return true;
             }
 
@@ -251,5 +274,22 @@ public class LoadProcessor implements JobProcessor {
             }
         }
         return backendFragmentTasks.build();
+    }
+
+    /*
+     * Check the state of backends in needCheckBackendExecStates.
+     * return true if all of them are OK. Otherwise, return false.
+     */
+    private boolean checkHealthy() {
+        for (SingleFragmentPipelineTask topFragmentTask : topFragmentTasks) {
+            if (!topFragmentTask.isBackendHealthy(jobId)) {
+                long backendId = topFragmentTask.getBackend().getId();
+                Status unhealthyStatus = new Status(
+                        TStatusCode.INTERNAL_ERROR, "backend " + backendId + " is down");
+                coordinatorContext.updateStatusIfOk(unhealthyStatus);
+                return false;
+            }
+        }
+        return true;
     }
 }
