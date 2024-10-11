@@ -45,6 +45,7 @@ import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TPipelineInstanceParams;
+import org.apache.doris.thrift.TPlanFragment;
 import org.apache.doris.thrift.TPlanFragmentDestination;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TRuntimeFilterParams;
@@ -296,7 +297,9 @@ public class ThriftPlansBuilder {
 
             params.setSendQueryStatisticsWithEveryBatch(fragment.isTransferQueryStatisticsWithEveryBatch());
 
-            params.setFragment(fragment.toThrift());
+            TPlanFragment planThrift = fragment.toThrift();
+            planThrift.query_cache_param = fragment.queryCacheParam;
+            params.setFragment(planThrift);
             params.setLocalParams(Lists.newArrayList());
             params.setWorkloadGroups(coordinatorContext.getWorkloadGroups());
 
