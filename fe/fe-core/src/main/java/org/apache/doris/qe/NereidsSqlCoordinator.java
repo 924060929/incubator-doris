@@ -70,7 +70,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.List;
 import java.util.Map;
 
-/** NereidsCoordinator */
+/** NereidsSqlCoordinator */
 public class NereidsSqlCoordinator extends Coordinator {
     private static final Logger LOG = LogManager.getLogger(NereidsSqlCoordinator.class);
 
