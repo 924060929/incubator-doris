@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.trees.plans.distribute;
 
 import org.apache.doris.nereids.CascadesContext;
+import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DummyWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
@@ -50,18 +51,18 @@ import java.util.stream.Collectors;
 
 /** DistributePlanner */
 public class DistributePlanner {
+    private final NereidsPlanner planner;
     private final CascadesContext cascadesContext;
-    private final List<PlanFragment> fragments;
     private final FragmentIdMapping<PlanFragment> idToFragments;
 
-    public DistributePlanner(List<PlanFragment> fragments, CascadesContext cascadesContext) {
-        this.cascadesContext = Objects.requireNonNull(cascadesContext, "cascadesContext can not be null");
-        this.fragments = Objects.requireNonNull(fragments, "fragments can not be null");
+    public DistributePlanner(NereidsPlanner planner, List<PlanFragment> fragments) {
+        this.planner = Objects.requireNonNull(planner, "planner can not be null");
+        this.cascadesContext = planner.getCascadesContext();
         this.idToFragments = FragmentIdMapping.buildFragmentMapping(fragments);
     }
 
     public FragmentIdMapping<DistributedPlan> plan() {
-        FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(idToFragments);
+        FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
         ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
         FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
         return linkPlans(distributedPlans);

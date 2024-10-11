@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
+import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.FragmentIdMapping;
 import org.apache.doris.nereids.trees.plans.distribute.worker.LoadBalanceScanWorkerSelector;
 import org.apache.doris.nereids.trees.plans.distribute.worker.ScanWorkerSelector;
@@ -50,7 +51,8 @@ public class UnassignedJobBuilder {
     /**
      * build job from fragment.
      */
-    public static FragmentIdMapping<UnassignedJob> buildJobs(FragmentIdMapping<PlanFragment> fragments) {
+    public static FragmentIdMapping<UnassignedJob> buildJobs(
+            NereidsPlanner planner, FragmentIdMapping<PlanFragment> fragments) {
         UnassignedJobBuilder builder = new UnassignedJobBuilder();
 
         FragmentLineage fragmentLineage = buildFragmentLineage(fragments);
@@ -63,26 +65,26 @@ public class UnassignedJobBuilder {
 
             ListMultimap<ExchangeNode, UnassignedJob> inputJobs = findInputJobs(
                     fragmentLineage, fragmentId, unassignedJobs);
-            UnassignedJob unassignedJob = builder.buildJob(fragment, inputJobs);
+            UnassignedJob unassignedJob = builder.buildJob(planner, fragment, inputJobs);
             unassignedJobs.put(fragmentId, unassignedJob);
         }
         return unassignedJobs;
     }
 
     private UnassignedJob buildJob(
-            PlanFragment planFragment, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
+            NereidsPlanner planner, PlanFragment planFragment, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
         List<ScanNode> scanNodes = collectScanNodesInThisFragment(planFragment);
         if (planFragment.specifyInstances.isPresent()) {
-            return buildSpecifyInstancesJob(planFragment, scanNodes, inputJobs);
+            return buildSpecifyInstancesJob(planner, planFragment, scanNodes, inputJobs);
         } else if (!scanNodes.isEmpty() || isLeafFragment(planFragment)) {
-            return buildLeafOrScanJob(planFragment, scanNodes, inputJobs);
+            return buildLeafOrScanJob(planner, planFragment, scanNodes, inputJobs);
         } else {
-            return buildShuffleJob(planFragment, inputJobs);
+            return buildShuffleJob(planner, planFragment, inputJobs);
         }
     }
 
     private UnassignedJob buildLeafOrScanJob(
-            PlanFragment planFragment, List<ScanNode> scanNodes,
+            NereidsPlanner planner, PlanFragment planFragment, List<ScanNode> scanNodes,
             ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
         int olapScanNodeNum = olapScanNodeNum(scanNodes);
 
@@ -91,20 +93,26 @@ public class UnassignedJobBuilder {
             // we need assign a backend which contains the data,
             // so that the OlapScanNode can find the data in the backend
             // e.g. select * from olap_table
-            unassignedJob = buildScanOlapTableJob(planFragment, (List) scanNodes, inputJobs, scanWorkerSelector);
+            unassignedJob = buildScanOlapTableJob(
+                    planner, planFragment, (List) scanNodes, inputJobs, scanWorkerSelector
+            );
         } else if (scanNodes.isEmpty()) {
             // select constant without table,
             // e.g. select 100 union select 200
-            unassignedJob = buildQueryConstantJob(planFragment);
+            unassignedJob = buildQueryConstantJob(planner, planFragment);
         } else if (olapScanNodeNum == 0) {
             ScanNode scanNode = scanNodes.get(0);
             if (scanNode instanceof SchemaScanNode) {
                 // select * from information_schema.tables
-                unassignedJob = buildScanMetadataJob(planFragment, (SchemaScanNode) scanNode, scanWorkerSelector);
+                unassignedJob = buildScanMetadataJob(
+                        planner, planFragment, (SchemaScanNode) scanNode, scanWorkerSelector
+                );
             } else {
                 // only scan external tables or cloud tables or table valued functions
                 // e,g. select * from numbers('number'='100')
-                unassignedJob = buildScanRemoteTableJob(planFragment, scanNodes, inputJobs, scanWorkerSelector);
+                unassignedJob = buildScanRemoteTableJob(
+                        planner, planFragment, scanNodes, inputJobs, scanWorkerSelector
+                );
             }
         }
 
@@ -117,20 +125,21 @@ public class UnassignedJobBuilder {
     }
 
     private UnassignedJob buildSpecifyInstancesJob(
-            PlanFragment planFragment, List<ScanNode> scanNodes, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
-        return new UnassignedSpecifyInstancesJob(planFragment, scanNodes, inputJobs);
+            NereidsPlanner planner, PlanFragment planFragment,
+            List<ScanNode> scanNodes, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
+        return new UnassignedSpecifyInstancesJob(planner, planFragment, scanNodes, inputJobs);
     }
 
     private UnassignedJob buildScanOlapTableJob(
-            PlanFragment planFragment, List<OlapScanNode> olapScanNodes,
+            NereidsPlanner planner, PlanFragment planFragment, List<OlapScanNode> olapScanNodes,
             ListMultimap<ExchangeNode, UnassignedJob> inputJobs,
             ScanWorkerSelector scanWorkerSelector) {
         if (shouldAssignByBucket(planFragment)) {
             return new UnassignedScanBucketOlapTableJob(
-                    planFragment, olapScanNodes, inputJobs, scanWorkerSelector);
+                    planner, planFragment, olapScanNodes, inputJobs, scanWorkerSelector);
         } else if (olapScanNodes.size() == 1) {
             return new UnassignedScanSingleOlapTableJob(
-                    planFragment, olapScanNodes.get(0), inputJobs, scanWorkerSelector);
+                    planner, planFragment, olapScanNodes.get(0), inputJobs, scanWorkerSelector);
         } else {
             throw new IllegalStateException("Not supported multiple scan multiple "
                     + "OlapTable but not contains colocate join or bucket shuffle join: "
@@ -156,34 +165,36 @@ public class UnassignedJobBuilder {
         return planFragment.getChildren().isEmpty();
     }
 
-    private UnassignedQueryConstantJob buildQueryConstantJob(PlanFragment planFragment) {
-        return new UnassignedQueryConstantJob(planFragment);
+    private UnassignedQueryConstantJob buildQueryConstantJob(
+            NereidsPlanner nereidsPlanner, PlanFragment planFragment) {
+        return new UnassignedQueryConstantJob(nereidsPlanner, planFragment);
     }
 
     private UnassignedJob buildScanMetadataJob(
-            PlanFragment fragment, SchemaScanNode schemaScanNode, ScanWorkerSelector scanWorkerSelector) {
-        return new UnassignedScanMetadataJob(fragment, schemaScanNode, scanWorkerSelector);
+            NereidsPlanner planner, PlanFragment fragment,
+            SchemaScanNode schemaScanNode, ScanWorkerSelector scanWorkerSelector) {
+        return new UnassignedScanMetadataJob(planner, fragment, schemaScanNode, scanWorkerSelector);
     }
 
     private UnassignedJob buildScanRemoteTableJob(
-            PlanFragment planFragment, List<ScanNode> scanNodes,
+            NereidsPlanner planner, PlanFragment planFragment, List<ScanNode> scanNodes,
             ListMultimap<ExchangeNode, UnassignedJob> inputJobs,
             ScanWorkerSelector scanWorkerSelector) {
         if (scanNodes.size() == 1) {
             return new UnassignedScanSingleRemoteTableJob(
-                    planFragment, scanNodes.get(0), inputJobs, scanWorkerSelector);
+                    planner, planFragment, scanNodes.get(0), inputJobs, scanWorkerSelector);
         } else if (UnassignedGatherScanMultiRemoteTablesJob.canApply(scanNodes)) {
             // select * from numbers("number" = "10") a union all select * from numbers("number" = "20") b;
             // use an instance to scan table a and table b
-            return new UnassignedGatherScanMultiRemoteTablesJob(planFragment, scanNodes, inputJobs);
+            return new UnassignedGatherScanMultiRemoteTablesJob(planner, planFragment, scanNodes, inputJobs);
         } else {
             return null;
         }
     }
 
     private UnassignedShuffleJob buildShuffleJob(
-            PlanFragment planFragment, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
-        return new UnassignedShuffleJob(planFragment, inputJobs);
+            NereidsPlanner planner, PlanFragment planFragment, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
+        return new UnassignedShuffleJob(planner, planFragment, inputJobs);
     }
 
     private static ListMultimap<ExchangeNode, UnassignedJob> findInputJobs(

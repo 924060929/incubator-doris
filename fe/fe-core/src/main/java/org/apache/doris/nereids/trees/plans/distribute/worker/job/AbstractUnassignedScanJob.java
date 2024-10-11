@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
+import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorkerManager;
 import org.apache.doris.planner.ExchangeNode;
@@ -39,17 +40,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
     protected final AtomicInteger shareScanIdGenerator = new AtomicInteger();
 
-    public AbstractUnassignedScanJob(PlanFragment fragment,
+    public AbstractUnassignedScanJob(NereidsPlanner planner, PlanFragment fragment,
             List<ScanNode> scanNodes, ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob) {
-        super(fragment, scanNodes, exchangeToChildJob);
+        super(planner, fragment, scanNodes, exchangeToChildJob);
     }
 
     @Override
-    public List<AssignedJob> computeAssignedJobs(DistributedPlanWorkerManager workerManager,
-            ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
+    public List<AssignedJob> computeAssignedJobs(
+            DistributedPlanWorkerManager workerManager, ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
 
-        Map<DistributedPlanWorker, UninstancedScanSource> workerToScanSource = multipleMachinesParallelization(
-                workerManager, inputJobs);
+        Map<DistributedPlanWorker, UninstancedScanSource> workerToScanSource
+                = multipleMachinesParallelization(workerManager, inputJobs);
 
         List<AssignedJob> assignedJobs = insideMachineParallelization(workerToScanSource, inputJobs, workerManager);
 
@@ -70,7 +71,7 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
             Map<DistributedPlanWorker, UninstancedScanSource> workerToScanRanges,
             ListMultimap<ExchangeNode, AssignedJob> inputJobs, DistributedPlanWorkerManager workerManager) {
 
-        ConnectContext context = ConnectContext.get();
+        ConnectContext context = planner.getCascadesContext().getConnectContext();
         boolean useLocalShuffleToAddParallel = useLocalShuffleToAddParallel(workerToScanRanges);
         int instanceIndexInFragment = 0;
         List<AssignedJob> instances = Lists.newArrayList();
