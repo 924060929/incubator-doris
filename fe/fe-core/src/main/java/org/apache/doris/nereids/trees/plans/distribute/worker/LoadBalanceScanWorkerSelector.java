@@ -88,7 +88,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
 
         boolean orderedScanRangeLocations = shouldSortTablets(ImmutableList.of(scanNode), context);
         if (orderedScanRangeLocations) {
-            allScanRangesLocations = sortTablets(allScanRangesLocations);
+            allScanRangesLocations = sortScanRanges(allScanRangesLocations);
         }
 
         for (TScanRangeLocations onePartitionOneScanRangeLocation : allScanRangesLocations) {
@@ -156,7 +156,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
                 List<TScanRangeLocations> scanRangeLocations
                         = ((OlapScanNode) scanNode).bucketSeq2locations.get(bucketIndex);
                 if (shouldSortTablets) {
-                    scanRangeLocations = sortTablets(scanRangeLocations);
+                    scanRangeLocations = sortScanRanges(scanRangeLocations);
                 }
                 return scanRangeLocations;
             } else {
@@ -355,7 +355,7 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
                 && context.getSessionVariable().enableOrderedScanRangeLocations;
     }
 
-    private List<TScanRangeLocations> sortTablets(List<TScanRangeLocations> tablets) {
+    private List<TScanRangeLocations> sortScanRanges(List<TScanRangeLocations> tablets) {
         tablets = Lists.newArrayList(tablets);
         tablets.sort(
                 (p1, p2) -> org.apache.thrift.TBaseHelper.compareTo(
