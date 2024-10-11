@@ -46,6 +46,7 @@ import org.apache.doris.qe.QueryStatisticsItem.FragmentInstanceInfo;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.MultiFragmentsPipelineTask;
 import org.apache.doris.qe.runtime.QueryProcessor;
+import org.apache.doris.qe.runtime.SingleFragmentPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTask;
 import org.apache.doris.qe.runtime.SqlPipelineTaskBuilder;
 import org.apache.doris.qe.runtime.ThriftPlansBuilder;
@@ -63,10 +64,12 @@ import org.apache.doris.thrift.TTabletCommitInfo;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -301,8 +304,14 @@ public class NereidsSqlCoordinator extends Coordinator {
 
     @Override
     public List<FragmentInstanceInfo> getFragmentInstanceInfos() {
-        // TODO
-        return super.getFragmentInstanceInfos();
+        List<QueryStatisticsItem.FragmentInstanceInfo> infos = Lists.newArrayList();
+        for (MultiFragmentsPipelineTask multiFragmentsPipelineTask : executionTask.getChildrenTasks().values()) {
+            for (SingleFragmentPipelineTask fragmentTask : multiFragmentsPipelineTask.getChildrenTasks().values()) {
+                infos.addAll(fragmentTask.buildFragmentInstanceInfo());
+            }
+        }
+        infos.sort(Comparator.comparing(FragmentInstanceInfo::getFragmentId));
+        return infos;
     }
 
     @Override

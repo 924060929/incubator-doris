@@ -17,12 +17,18 @@
 
 package org.apache.doris.qe.runtime;
 
+import org.apache.doris.qe.QueryStatisticsItem.FragmentInstanceInfo;
 import org.apache.doris.system.Backend;
+import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TReportExecStatusParams;
+import org.apache.doris.thrift.TUniqueId;
 
+import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class SingleFragmentPipelineTask extends LeafRuntimeTask {
@@ -32,13 +38,15 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
     private final Backend backend;
     private final int fragmentId;
     private final long lastMissingHeartbeatTime;
+    private final Set<TUniqueId> instanceIds;
 
     // mutate states
     private final AtomicBoolean done = new AtomicBoolean();
 
-    public SingleFragmentPipelineTask(Backend backend, int fragmentId) {
+    public SingleFragmentPipelineTask(Backend backend, int fragmentId, Set<TUniqueId> instanceIds) {
         this.backend = backend;
         this.fragmentId = fragmentId;
+        this.instanceIds = instanceIds;
         this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
     }
 
@@ -72,5 +80,20 @@ public class SingleFragmentPipelineTask extends LeafRuntimeTask {
 
     public int getFragmentId() {
         return fragmentId;
+    }
+
+    public List<FragmentInstanceInfo> buildFragmentInstanceInfo() {
+        TNetworkAddress address = new TNetworkAddress(backend.getHost(), backend.getBePort());
+        List<FragmentInstanceInfo> infos = Lists.newArrayListWithCapacity(instanceIds.size());
+        for (TUniqueId instanceId : instanceIds) {
+            infos.add(
+                new FragmentInstanceInfo.Builder()
+                        .address(address)
+                        .fragmentId(String.valueOf(fragmentId))
+                        .instanceId(instanceId)
+                        .build()
+            );
+        }
+        return infos;
     }
 }

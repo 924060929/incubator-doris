@@ -27,6 +27,8 @@ import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TPipelineFragmentParams;
 import org.apache.doris.thrift.TPipelineFragmentParamsList;
+import org.apache.doris.thrift.TPipelineInstanceParams;
+import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
@@ -34,6 +36,7 @@ import org.apache.thrift.protocol.TCompactProtocol.Factory;
 
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -95,7 +98,11 @@ public class SqlPipelineTaskBuilder {
         Map<Integer, SingleFragmentPipelineTask> tasks = Maps.newLinkedHashMap();
         for (TPipelineFragmentParams fragmentParams : fragmentParamsList.getParamsList()) {
             int fragmentId = fragmentParams.getFragmentId();
-            tasks.put(fragmentId, new SingleFragmentPipelineTask(backend, fragmentId));
+            Set<TUniqueId> instanceIds = fragmentParams.getLocalParams()
+                    .stream()
+                    .map(TPipelineInstanceParams::getFragmentInstanceId)
+                    .collect(Collectors.toSet());
+            tasks.put(fragmentId, new SingleFragmentPipelineTask(backend, fragmentId, instanceIds));
         }
         return tasks;
     }
