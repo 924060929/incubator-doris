@@ -26,7 +26,7 @@ import org.apache.doris.proto.InternalService.PExecPlanFragmentStartRequest;
 import org.apache.doris.proto.Types;
 import org.apache.doris.proto.Types.PUniqueId;
 import org.apache.doris.qe.Coordinator;
-import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.SimpleScheduler;
 import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.rpc.RpcException;
@@ -54,7 +54,7 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     private static final Logger LOG = LogManager.getLogger(SqlPipelineTask.class);
 
     // immutable parameters
-    private CoordinatorContext coordinatorContext;
+    private final SqlCoordinatorContext coordinatorContext;
     private final Backend backend;
     private final BackendServiceProxy backendClientProxy;
     private final long lastMissingHeartbeatTime;
@@ -67,7 +67,7 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     private final AtomicBoolean cancelInProcess;
 
     public MultiFragmentsPipelineTask(
-            CoordinatorContext coordinatorContext, Backend backend, BackendServiceProxy backendClientProxy,
+            SqlCoordinatorContext coordinatorContext, Backend backend, BackendServiceProxy backendClientProxy,
             ByteString serializeFragments,
             Map<Integer, SingleFragmentPipelineTask> fragmentTasks) {
         super(new ChildrenRuntimeTasks<>(fragmentTasks));

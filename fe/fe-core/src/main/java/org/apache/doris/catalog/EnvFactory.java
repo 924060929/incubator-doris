@@ -40,7 +40,7 @@ import org.apache.doris.planner.Planner;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.Coordinator;
-import org.apache.doris.qe.NereidsCoordinator;
+import org.apache.doris.qe.NereidsSqlCoordinator;
 import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.system.SystemInfoService;
@@ -138,7 +138,7 @@ public class EnvFactory {
     public Coordinator createCoordinator(ConnectContext context, Analyzer analyzer, Planner planner,
                                          StatsErrorEstimator statsErrorEstimator) {
         if (planner instanceof NereidsPlanner && SessionVariable.canUseNereidsDistributePlanner()) {
-            return new NereidsCoordinator(context, analyzer, (NereidsPlanner) planner, statsErrorEstimator);
+            return new NereidsSqlCoordinator(context, analyzer, (NereidsPlanner) planner, statsErrorEstimator);
         }
         return new Coordinator(context, analyzer, planner, statsErrorEstimator);
     }

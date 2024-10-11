@@ -24,7 +24,7 @@ import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
-import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.SimpleScheduler;
 import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.rpc.RpcException;
@@ -61,13 +61,13 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
 
     // immutable parameters
     private final long timeoutDeadline;
-    private final CoordinatorContext coordinatorContext;
+    private final SqlCoordinatorContext coordinatorContext;
     private final BackendServiceProxy backendServiceProxy;
     private final Map<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks;
 
     // mutable states
     public SqlPipelineTask(
-            CoordinatorContext coordinatorContext,
+            SqlCoordinatorContext coordinatorContext,
             BackendServiceProxy backendServiceProxy,
             Map<Long, MultiFragmentsPipelineTask> fragmentTasks) {
         // insert into stmt need latch to wait finish, but query stmt not need because result receiver can wait finish

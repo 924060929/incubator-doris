@@ -21,7 +21,7 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
-import org.apache.doris.qe.CoordinatorContext;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.protocol.TFastSerializer;
 import org.apache.doris.rpc.BackendServiceProxy;
 import org.apache.doris.system.Backend;
@@ -38,19 +38,19 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class SqlPipelineTaskBuilder {
-    private CoordinatorContext coordinatorContext;
+    private SqlCoordinatorContext coordinatorContext;
 
-    public SqlPipelineTaskBuilder(CoordinatorContext coordinatorContext) {
+    public SqlPipelineTaskBuilder(SqlCoordinatorContext coordinatorContext) {
         this.coordinatorContext = coordinatorContext;
     }
 
-    public static SqlPipelineTask build(CoordinatorContext coordinatorContext,
+    public static SqlPipelineTask build(SqlCoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
         SqlPipelineTaskBuilder builder = new SqlPipelineTaskBuilder(coordinatorContext);
         return builder.buildTask(coordinatorContext, workerToFragmentsParam);
     }
 
-    private SqlPipelineTask buildTask(CoordinatorContext coordinatorContext,
+    private SqlPipelineTask buildTask(SqlCoordinatorContext coordinatorContext,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
         BackendServiceProxy backendServiceProxy = BackendServiceProxy.getInstance();
         SqlPipelineTask sqlPipelineTask = new SqlPipelineTask(
@@ -63,7 +63,7 @@ public class SqlPipelineTaskBuilder {
     }
 
     private Map<Long, MultiFragmentsPipelineTask> buildMultiFragmentTasks(
-            CoordinatorContext coordinatorContext, BackendServiceProxy backendServiceProxy,
+            SqlCoordinatorContext coordinatorContext, BackendServiceProxy backendServiceProxy,
             Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragmentsParam) {
 
         Map<DistributedPlanWorker, ByteString> workerToSerializeFragments = serializeFragments(workerToFragmentsParam);

@@ -71,18 +71,18 @@ import java.util.List;
 import java.util.Map;
 
 /** NereidsCoordinator */
-public class NereidsCoordinator extends Coordinator {
-    private static final Logger LOG = LogManager.getLogger(NereidsCoordinator.class);
+public class NereidsSqlCoordinator extends Coordinator {
+    private static final Logger LOG = LogManager.getLogger(NereidsSqlCoordinator.class);
 
-    private final CoordinatorContext coordinatorContext;
+    private final SqlCoordinatorContext coordinatorContext;
 
     private volatile SqlPipelineTask executionTask;
 
-    public NereidsCoordinator(ConnectContext context, Analyzer analyzer,
+    public NereidsSqlCoordinator(ConnectContext context, Analyzer analyzer,
             NereidsPlanner planner, StatsErrorEstimator statsErrorEstimator) {
         super(context, analyzer, planner, statsErrorEstimator);
 
-        this.coordinatorContext = CoordinatorContext.build(planner, this);
+        this.coordinatorContext = SqlCoordinatorContext.build(planner, this);
         this.coordinatorContext.setJobProcessor(buildJobProcessor(coordinatorContext));
 
         Preconditions.checkState(!planner.getFragments().isEmpty()
@@ -385,14 +385,14 @@ public class NereidsCoordinator extends Coordinator {
         coordinatorContext.withLock(() -> coordinatorContext.getJobProcessor().cancel(cancelReason));
     }
 
-    private void processTopSink(CoordinatorContext coordinatorContext, NereidsPlanner nereidsPlanner)
+    private void processTopSink(SqlCoordinatorContext coordinatorContext, NereidsPlanner nereidsPlanner)
             throws AnalysisException {
         PipelineDistributedPlan topPlan = (PipelineDistributedPlan) nereidsPlanner.getDistributedPlans().last();
         setForArrowFlight(coordinatorContext, topPlan);
         setForBroker(coordinatorContext, topPlan);
     }
 
-    private void setForArrowFlight(CoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) {
+    private void setForArrowFlight(SqlCoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) {
         ConnectContext connectContext = coordinatorContext.connectContext;
         DataSink dataSink = coordinatorContext.dataSink;
         if (dataSink instanceof ResultSink || dataSink instanceof ResultFileSink) {
@@ -415,7 +415,7 @@ public class NereidsCoordinator extends Coordinator {
     }
 
     private void setForBroker(
-            CoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) throws AnalysisException {
+            SqlCoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) throws AnalysisException {
         DataSink dataSink = coordinatorContext.dataSink;
         if (dataSink instanceof ResultFileSink
                 && ((ResultFileSink) dataSink).getStorageType() == StorageBackend.StorageType.BROKER) {
@@ -466,7 +466,7 @@ public class NereidsCoordinator extends Coordinator {
         return false;
     }
 
-    private JobProcessor buildJobProcessor(CoordinatorContext coordinatorContext) {
+    private JobProcessor buildJobProcessor(SqlCoordinatorContext coordinatorContext) {
         DataSink dataSink = coordinatorContext.dataSink;
         if ((dataSink instanceof ResultSink || dataSink instanceof ResultFileSink)) {
             return QueryProcessor.build(coordinatorContext);

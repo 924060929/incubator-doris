@@ -67,11 +67,11 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-public class CoordinatorContext {
-    private static final Logger LOG = LogManager.getLogger(CoordinatorContext.class);
+public class SqlCoordinatorContext {
+    private static final Logger LOG = LogManager.getLogger(SqlCoordinatorContext.class);
 
     // these are some constant parameters
-    public final NereidsCoordinator coordinator;
+    public final NereidsSqlCoordinator coordinator;
     public final DataSink dataSink;
     public final ExecutionProfile executionProfile;
     public final ConnectContext connectContext;
@@ -98,7 +98,7 @@ public class CoordinatorContext {
     // query or load processor
     private volatile JobProcessor jobProcessor;
 
-    private CoordinatorContext(NereidsCoordinator coordinator,
+    private SqlCoordinatorContext(NereidsSqlCoordinator coordinator,
             ConnectContext connectContext,
             NereidsPlanner planner,
             ExecutionProfile executionProfile,
@@ -227,7 +227,7 @@ public class CoordinatorContext {
         return (QueryProcessor) jobProcessor;
     }
 
-    public static CoordinatorContext build(NereidsPlanner planner, NereidsCoordinator coordinator) {
+    public static SqlCoordinatorContext build(NereidsPlanner planner, NereidsSqlCoordinator coordinator) {
         ConnectContext connectContext = planner.getCascadesContext().getConnectContext();
         TQueryOptions queryOptions = initQueryOptions(connectContext);
         TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
@@ -246,7 +246,7 @@ public class CoordinatorContext {
                         .map(fragment -> fragment.getFragmentId().asInt())
                         .collect(Collectors.toList())
         );
-        return new CoordinatorContext(
+        return new SqlCoordinatorContext(
                 coordinator, connectContext, planner, executionProfile, queryGlobals, queryOptions, descriptorTable,
                 coordinatorAddress, directConnectFrontendAddress
         );

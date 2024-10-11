@@ -1889,7 +1889,7 @@ public class StmtExecutor {
             coordBase = new PointQueryExecutor(shortCircuitQueryContext,
                         context.getSessionVariable().getMaxMsgSizeOfResultReceiver());
         } else if (planner instanceof NereidsPlanner && ((NereidsPlanner) planner).getDistributedPlans() != null) {
-            coord = new NereidsCoordinator(context, analyzer,
+            coord = new NereidsSqlCoordinator(context, analyzer,
                     (NereidsPlanner) planner, context.getStatsErrorEstimator());
             profile.addExecutionProfile(coord.getExecutionProfile());
             QeProcessorImpl.INSTANCE.registerQuery(context.queryId(),
