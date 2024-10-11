@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
 import org.apache.doris.common.Pair;
+import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorkerManager;
 import org.apache.doris.planner.ExchangeNode;
@@ -40,8 +41,10 @@ import java.util.function.Function;
 
 /** UnassignedShuffleJob */
 public class UnassignedShuffleJob extends AbstractUnassignedJob {
-    public UnassignedShuffleJob(PlanFragment fragment, ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob) {
-        super(fragment, ImmutableList.of(), exchangeToChildJob);
+    public UnassignedShuffleJob(
+            NereidsPlanner planner, PlanFragment fragment,
+            ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob) {
+        super(planner, fragment, ImmutableList.of(), exchangeToChildJob);
     }
 
     @Override
