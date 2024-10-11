@@ -189,24 +189,6 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
         }
     }
 
-    public boolean checkHealthy() {
-        if (!isBackendStateHealthy()) {
-            Status unhealthyStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend " + backend.getId() + " is down");
-            coordinatorContext.updateStatusIfOk(unhealthyStatus);
-            return false;
-        }
-        return true;
-    }
-
-    public boolean isBackendStateHealthy() {
-        int jobId = 0;
-        if (backend.getLastMissingHeartbeatTime() > lastMissingHeartbeatTime && !backend.isAlive()) {
-            LOG.warn("backend {} is down while joining the coordinator. job id: {}", backend.getId(), jobId);
-            return false;
-        }
-        return true;
-    }
-
     private Future<PExecPlanFragmentResult> futureWithException(RpcException e) {
         return new Future<PExecPlanFragmentResult>() {
             @Override
