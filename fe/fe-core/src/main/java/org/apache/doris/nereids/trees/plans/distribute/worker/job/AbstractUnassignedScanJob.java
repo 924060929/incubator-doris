@@ -152,6 +152,9 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
 
     protected boolean useLocalShuffleToAddParallel(
             Map<DistributedPlanWorker, UninstancedScanSource> workerToScanRanges) {
+        if (fragment.queryCacheParam != null) {
+            return false;
+        }
         if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().isForceToLocalShuffle()) {
             return true;
         }
@@ -185,6 +188,9 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         Preconditions.checkArgument(maxParallel > 0, "maxParallel must be positive");
         if (!fragment.getDataPartition().isPartitioned()) {
             return 1;
+        }
+        if (fragment.queryCacheParam != null) {
+            return maxParallel;
         }
         if (scanNodes.size() == 1 && scanNodes.get(0) instanceof OlapScanNode) {
             OlapScanNode olapScanNode = (OlapScanNode) scanNodes.get(0);
