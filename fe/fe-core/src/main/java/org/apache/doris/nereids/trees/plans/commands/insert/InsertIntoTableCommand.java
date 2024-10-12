@@ -329,7 +329,9 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         // 1. use NereidsPlanner to generate PhysicalPlan
         // 2. use PhysicalPlan to select InsertExecutorFactory, some InsertExecutors want to control
         //    which backend should be used, for example, OlapGroupCommitInsertExecutor need select
-        //    a backend to do group commit
+        //    a backend to do group commit.
+        //    Note: we can not initialize InsertExecutor at this time, because the DistributePlans
+        //    have not been generated, so the NereidsSqlCoordinator can not initial too,
         // 3. NereidsPlanner use PhysicalPlan and the provided backend to generate DistributePlan
         // 4. ExecutorFactory use the DistributePlan to generate the NereidsSqlCoordinator and InsertExecutor
 
