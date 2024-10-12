@@ -335,8 +335,6 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         // 3. NereidsPlanner use PhysicalPlan and the provided backend to generate DistributePlan
         // 4. ExecutorFactory use the DistributePlan to generate the NereidsSqlCoordinator and InsertExecutor
 
-        // we should compute group commit backend first,
-        // then we can do distribute and assign backend to the instance in Nereids's DistributePlan
         StatementContext statementContext = ctx.getStatementContext();
 
         AtomicReference<ExecutorFactory> executorFactoryRef = new AtomicReference<>();
