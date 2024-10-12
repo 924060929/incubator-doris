@@ -24,12 +24,13 @@ import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
+import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.ResultSink;
 import org.apache.doris.qe.ConnectContext;
-import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.qe.JobProcessor;
 import org.apache.doris.qe.ResultReceiver;
 import org.apache.doris.qe.RowBatch;
+import org.apache.doris.qe.SqlCoordinatorContext;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TStatusCode;
@@ -81,8 +82,13 @@ public class QueryProcessor implements JobProcessor {
         PipelineDistributedPlan topFragment =
                 (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
 
-        Boolean enableParallelResultSink = coordinatorContext.queryOptions.isEnableParallelResultSink()
-                && topFragment.getFragmentJob().getFragment().getSink() instanceof ResultSink;
+        DataSink topDataSink = coordinatorContext.dataSink;
+        Boolean enableParallelResultSink;
+        if (topDataSink instanceof ResultSink) {
+            enableParallelResultSink = coordinatorContext.queryOptions.isEnableParallelResultSink();
+        } else {
+            enableParallelResultSink = coordinatorContext.queryOptions.isEnableParallelOutfile();
+        }
 
         List<AssignedJob> topInstances = topFragment.getInstanceJobs();
         List<ResultReceiver> receivers = Lists.newArrayListWithCapacity(topInstances.size());
@@ -141,15 +147,6 @@ public class QueryProcessor implements JobProcessor {
             } else {
                 String errMsg = copyStatus.getErrorMsg();
                 LOG.warn("query failed: {}", errMsg);
-
-                // hide host info exclude localhost
-                if (errMsg.contains("localhost")) {
-                    throw new UserException(errMsg);
-                }
-                int hostIndex = errMsg.indexOf("host");
-                if (hostIndex != -1) {
-                    errMsg = errMsg.substring(0, hostIndex);
-                }
                 throw new UserException(errMsg);
             }
         }

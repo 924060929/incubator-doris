@@ -155,6 +155,9 @@ public abstract class AbstractUnassignedScanJob extends AbstractUnassignedJob {
         if (fragment.queryCacheParam != null) {
             return false;
         }
+        if (fragment.hasNullAwareLeftAntiJoin()) {
+            return false;
+        }
         if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().isForceToLocalShuffle()) {
             return true;
         }

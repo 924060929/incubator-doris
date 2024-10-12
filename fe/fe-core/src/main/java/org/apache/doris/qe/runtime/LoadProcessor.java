@@ -83,7 +83,7 @@ public class LoadProcessor implements JobProcessor {
 
         topFragmentTasks = Lists.newArrayList();
 
-        LOG.info("dispatch load job: {} to {}",DebugUtil.printId(queryId), coordinatorContext.backends.get().keySet());
+        LOG.info("dispatch load job: {} to {}", DebugUtil.printId(queryId), coordinatorContext.backends.get().keySet());
     }
 
     @Override

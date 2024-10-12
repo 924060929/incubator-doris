@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker;
 
+/** DummyWorker */
 public class DummyWorker implements DistributedPlanWorker {
     public static final DummyWorker INSTANCE = new DummyWorker();
 
