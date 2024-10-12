@@ -117,7 +117,8 @@ public class RuntimeFiltersThriftBuilder {
         }
     }
 
-    public static RuntimeFiltersThriftBuilder compute(NereidsPlanner planner, List<PipelineDistributedPlan> distributedPlans) {
+    public static RuntimeFiltersThriftBuilder compute(
+            NereidsPlanner planner, List<PipelineDistributedPlan> distributedPlans) {
         PipelineDistributedPlan topMostPlan = distributedPlans.get(distributedPlans.size() - 1);
         AssignedJob mergeInstance = topMostPlan.getInstanceJobs().get(0);
         BackendWorker worker = (BackendWorker) mergeInstance.getAssignedWorker();
@@ -142,8 +143,8 @@ public class RuntimeFiltersThriftBuilder {
                     BackendWorker backendWorker = (BackendWorker) instanceJob.getAssignedWorker();
                     Backend backend = backendWorker.getBackend();
                     targetFragments.add(new RuntimeFilterTarget(
-                        instanceJob.instanceId(),
-                        new TNetworkAddress(backend.getHost(), backend.getBePort())
+                            instanceJob.instanceId(),
+                            new TNetworkAddress(backend.getHost(), backend.getBePort())
                     ));
                 }
             }

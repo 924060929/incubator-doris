@@ -82,16 +82,6 @@ public class DefaultScanSource extends ScanSource {
         return scanNodeToScanRanges.isEmpty();
     }
 
-    @Override
-    public void toString(StringBuilder str, String prefix) {
-        toString(scanNodeToScanRanges, str, prefix);
-    }
-
-    @Override
-    public ScanSource newEmpty() {
-        return empty();
-    }
-
     /** toString */
     public static void toString(Map<ScanNode, ScanRanges> scanNodeToScanRanges, StringBuilder str, String prefix) {
         if (scanNodeToScanRanges.isEmpty()) {
@@ -116,5 +106,15 @@ public class DefaultScanSource extends ScanSource {
             }
         }
         str.append("\n").append(prefix).append("]");
+    }
+
+    @Override
+    public void toString(StringBuilder str, String prefix) {
+        toString(scanNodeToScanRanges, str, prefix);
+    }
+
+    @Override
+    public ScanSource newEmpty() {
+        return empty();
     }
 }

@@ -125,16 +125,19 @@ public class NereidsSqlCoordinator extends Coordinator {
         }
 
         TUniqueId queryId = coordinatorContext.queryId;
-        Status queryStatus = coordinatorContext.updateStatusIfOk(cancelReason);
-        if (!queryStatus.ok()) {
-            // Print an error stack here to know why send cancel again.
-            LOG.warn("Query {} already in abnormal status {}, but received cancel again,"
-                            + "so that send cancel to BE again",
-                    DebugUtil.printId(queryId), queryStatus.toString(),
-                    new Exception("cancel failed"));
+        Status originQueryStatus = coordinatorContext.updateStatusIfOk(cancelReason);
+        if (!originQueryStatus.ok()) {
+            if (LOG.isDebugEnabled()) {
+                // Print an error stack here to know why send cancel again.
+                LOG.warn("Query {} already in abnormal status {}, but received cancel again,"
+                                + "so that send cancel to BE again",
+                        DebugUtil.printId(queryId), originQueryStatus.toString(),
+                        new Exception("cancel failed"));
+            }
+        } else {
+            LOG.warn("Cancel execution of query {}, this is a outside invoke, cancelReason {}",
+                    DebugUtil.printId(queryId), cancelReason);
         }
-        LOG.warn("Cancel execution of query {}, this is a outside invoke, cancelReason {}",
-                DebugUtil.printId(queryId), cancelReason);
         cancelInternal(cancelReason);
     }
 

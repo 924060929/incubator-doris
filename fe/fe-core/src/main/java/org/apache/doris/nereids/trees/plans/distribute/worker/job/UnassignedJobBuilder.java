@@ -257,14 +257,10 @@ public class UnassignedJobBuilder {
         if (fragment.hasColocatePlanNode()) {
             return true;
         }
-        if (enableBucketShuffleJoin() && fragment.hasBucketShuffleJoin()) {
+        if (fragment.hasBucketShuffleJoin()) {
             return true;
         }
         return false;
-    }
-
-    private static boolean enableBucketShuffleJoin() {
-        return true;
     }
 
     // the class support find exchange nodes in the fragment, and find child fragment by exchange node id
