@@ -57,7 +57,6 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
     private final SqlCoordinatorContext coordinatorContext;
     private final Backend backend;
     private final BackendServiceProxy backendClientProxy;
-    private final long lastMissingHeartbeatTime;
 
     // mutable states
 
@@ -79,7 +78,6 @@ public class MultiFragmentsPipelineTask extends AbstractRuntimeTask<Integer, Sin
         );
         this.hasCancelled = new AtomicBoolean();
         this.cancelInProcess = new AtomicBoolean();
-        this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
     }
 
     public Future<PExecPlanFragmentResult> sendPhaseOneRpc(boolean twoPhaseExecution) {
