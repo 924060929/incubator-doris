@@ -115,7 +115,6 @@ public class SqlPipelineTaskBuilder {
                 .parallelStream()
                 .map(kv -> {
                     try {
-                        // zero copy
                         ByteString serializeString =
                                 new TFastSerializer(1024, new Factory()).serialize(kv.getValue());
                         return Pair.of(kv.getKey(), serializeString);
