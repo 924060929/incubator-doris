@@ -114,7 +114,7 @@ public class OlapGroupCommitInsertExecutor extends OlapInsertExecutor {
     }
 
     @Override
-    protected void doBeforeExec() {
+    protected void beforeExec() {
         if (Env.getCurrentEnv().getGroupCommitManager().isBlock(this.table.getId())) {
             String msg = "insert table " + this.table.getId() + GroupCommitPlanner.SCHEMA_CHANGE;
             LOG.info(msg);

@@ -64,7 +64,7 @@ public class OlapTxnInsertExecutor extends OlapInsertExecutor {
     }
 
     @Override
-    protected void doBeforeExec() {
+    protected void beforeExec() {
         String queryId = DebugUtil.printId(ctx.queryId());
         LOG.info("start insert [{}] with query id {} and txn id {}, txn_model=true", labelName, queryId, txnId);
     }

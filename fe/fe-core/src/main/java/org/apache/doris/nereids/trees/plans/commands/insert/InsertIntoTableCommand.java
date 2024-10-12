@@ -54,10 +54,12 @@ import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.planner.DataSink;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ConnectContext.ConnectType;
+import org.apache.doris.qe.Coordinator;
 import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.system.Backend;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.sparkproject.guava.base.Throwables;
@@ -66,6 +68,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -204,10 +207,10 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     // because Nereids's DistributePlan are not gernerated, so we return factory and after the
     // DistributePlan have been generated, we can create InsertExecutor
     private ExecutorFactory selectInsertExecutorFactory(
-            NereidsPlanner planner, ConnectContext ctx, StmtExecutor executor, TableIf targetTableIf) {
+            NereidsPlanner planner, ConnectContext ctx, StmtExecutor stmtExecutor, TableIf targetTableIf) {
         try {
-            executor.setPlanner(planner);
-            executor.checkBlockRules();
+            stmtExecutor.setPlanner(planner);
+            stmtExecutor.checkBlockRules();
             if (ctx.getConnectType() == ConnectType.MYSQL && ctx.getMysqlChannel() != null) {
                 ctx.getMysqlChannel().reset();
             }
@@ -224,9 +227,11 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             if (physicalSink instanceof PhysicalOlapTableSink) {
                 boolean emptyInsert = childIsEmptyRelation(physicalSink);
                 OlapTable olapTable = (OlapTable) targetTableIf;
+
+                ExecutorFactory executorFactory;
                 // the insertCtx contains some variables to adjust SinkNode
                 if (ctx.isTxnModel()) {
-                    return ExecutorFactory.from(
+                    executorFactory = ExecutorFactory.from(
                             planner,
                             dataSink,
                             physicalSink,
@@ -238,7 +243,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                             .selectBackendForGroupCommit(targetTableIf.getId(), ctx);
                     // set groupCommitBackend for Nereids's DistributePlanner
                     planner.getCascadesContext().getStatementContext().setGroupCommitMergeBackend(groupCommitBackend);
-                    return ExecutorFactory.from(
+                    executorFactory = ExecutorFactory.from(
                             planner,
                             dataSink,
                             physicalSink,
@@ -247,13 +252,20 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                             )
                     );
                 } else {
-                    return ExecutorFactory.from(
+                    executorFactory = ExecutorFactory.from(
                             planner,
                             dataSink,
                             physicalSink,
                             () -> new OlapInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert)
                     );
                 }
+
+                return executorFactory.onCreate(executor -> {
+                    Coordinator coordinator = executor.getCoordinator();
+                    boolean isEnableMemtableOnSinkNode = olapTable.getTableProperty().getUseSchemaLightChange()
+                                    && coordinator.getQueryOptions().isEnableMemtableOnSinkNode();
+                    coordinator.getQueryOptions().setEnableMemtableOnSinkNode(isEnableMemtableOnSinkNode);
+                });
             } else if (physicalSink instanceof PhysicalHiveTableSink) {
                 boolean emptyInsert = childIsEmptyRelation(physicalSink);
                 HMSExternalTable hiveExternalTable = (HMSExternalTable) targetTableIf;
@@ -313,6 +325,13 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     private BuildInsertExecutorResult planInsertExecutor(
             ConnectContext ctx, StmtExecutor stmtExecutor,
             LogicalPlanAdapter logicalPlanAdapter, TableIf targetTableIf) throws Throwable {
+        // the key logical when use new coordinator:
+        // 1. use NereidsPlanner to generate PhysicalPlan
+        // 2. use PhysicalPlan to select InsertExecutorFactory, some InsertExecutors want to control
+        //    which backend should be used
+        // 3. NereidsPlanner use PhysicalPlan and the provided backend to generate DistributePlan
+        // 4. ExecutorFactory use the DistributePlan to generate the NereidsSqlCoordinator and InsertExecutor
+
         // we should compute group commit backend first,
         // then we can do distribute and assign backend to the instance in Nereids's DistributePlan
         StatementContext statementContext = ctx.getStatementContext();
@@ -373,15 +392,12 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         return StmtType.INSERT;
     }
 
-    private interface InsertExecutorBuilder {
-        BuildInsertExecutorResult build(NereidsPlanner planner) throws Throwable;
-    }
-
     private static class ExecutorFactory {
         public final NereidsPlanner planner;
         public final DataSink dataSink;
         public final PhysicalSink<?> physicalSink;
         public final Supplier<AbstractInsertExecutor> executorSupplier;
+        private List<Consumer<AbstractInsertExecutor>> createCallback;
 
         private ExecutorFactory(NereidsPlanner planner, DataSink dataSink, PhysicalSink<?> physicalSink,
                 Supplier<AbstractInsertExecutor> executorSupplier) {
@@ -389,6 +405,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             this.dataSink = dataSink;
             this.physicalSink = physicalSink;
             this.executorSupplier = executorSupplier;
+            this.createCallback = Lists.newArrayList();
         }
 
         public static ExecutorFactory from(
@@ -397,8 +414,17 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             return new ExecutorFactory(planner, dataSink, physicalSink, executorSupplier);
         }
 
+        public ExecutorFactory onCreate(Consumer<AbstractInsertExecutor> onCreate) {
+            this.createCallback.add(onCreate);
+            return this;
+        }
+
         public BuildInsertExecutorResult build() {
-            return new BuildInsertExecutorResult(planner, executorSupplier.get(), dataSink, physicalSink);
+            AbstractInsertExecutor executor = executorSupplier.get();
+            for (Consumer<AbstractInsertExecutor> callback : createCallback) {
+                callback.accept(executor);
+            }
+            return new BuildInsertExecutorResult(planner, executor, dataSink, physicalSink);
         }
     }
 

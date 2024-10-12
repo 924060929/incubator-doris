@@ -191,17 +191,7 @@ public class OlapInsertExecutor extends AbstractInsertExecutor {
     }
 
     @Override
-    protected final void beforeExec() {
-        boolean isEnableMemtableOnSinkNode =
-                olapTable.getTableProperty().getUseSchemaLightChange()
-                        && getCoordinator().getQueryOptions().isEnableMemtableOnSinkNode();
-        getCoordinator().getQueryOptions()
-                .setEnableMemtableOnSinkNode(isEnableMemtableOnSinkNode);
-
-        doBeforeExec();
-    }
-
-    protected void doBeforeExec() {
+    protected void beforeExec() {
         String queryId = DebugUtil.printId(ctx.queryId());
         LOG.info("start insert [{}] with query id {} and txn id {}", labelName, queryId, txnId);
     }
