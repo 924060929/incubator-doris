@@ -78,7 +78,7 @@ public class JdbcInsertExecutor extends BaseExternalTableInsertExecutor {
         LOG.warn("insert [{}] with query id {} failed", labelName, queryId, t);
         StringBuilder sb = new StringBuilder(t.getMessage());
         if (txnId != INVALID_TXN_ID) {
-            Coordinator coordinator = this.coordinator.get();
+            Coordinator coordinator = this.coordinator;
             LOG.warn("insert [{}] with query id {} abort txn {} failed", labelName, queryId, txnId);
             if (!Strings.isNullOrEmpty(coordinator.getTrackingUrl())) {
                 sb.append(". url: ").append(coordinator.getTrackingUrl());
