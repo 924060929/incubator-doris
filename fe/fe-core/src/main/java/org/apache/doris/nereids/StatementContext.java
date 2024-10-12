@@ -47,6 +47,7 @@ import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.qe.ShortCircuitQueryContext;
 import org.apache.doris.qe.cache.CacheAnalyzer;
 import org.apache.doris.statistics.Statistics;
+import org.apache.doris.system.Backend;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
@@ -168,6 +169,8 @@ public class StatementContext implements Closeable {
     private FormatOptions formatOptions = FormatOptions.getDefault();
 
     private List<PlannerHook> plannerHooks = new ArrayList<>();
+
+    private Backend groupCommitMergeBackend;
 
     public StatementContext() {
         this(ConnectContext.get(), null, 0);
@@ -557,5 +560,14 @@ public class StatementContext implements Closeable {
         tableId = StatementScopeIdGenerator.newTableId();
         this.tableIdMapping.put(tableIdentifier, tableId);
         return tableId;
+    }
+
+    public Backend getGroupCommitMergeBackend() {
+        return groupCommitMergeBackend;
+    }
+
+    public void setGroupCommitMergeBackend(
+            Backend groupCommitMergeBackend) {
+        this.groupCommitMergeBackend = groupCommitMergeBackend;
     }
 }

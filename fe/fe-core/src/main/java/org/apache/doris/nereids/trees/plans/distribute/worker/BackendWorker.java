@@ -26,7 +26,7 @@ public class BackendWorker implements DistributedPlanWorker {
     private final Backend backend;
 
     public BackendWorker(Backend backend) {
-        this.backend = backend;
+        this.backend = Objects.requireNonNull(backend, "backend can not be null");
     }
 
     public Backend getBackend() {

@@ -55,6 +55,7 @@ import org.apache.doris.planner.DataSink;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ConnectContext.ConnectType;
 import org.apache.doris.qe.StmtExecutor;
+import org.apache.doris.system.Backend;
 
 import com.google.common.base.Preconditions;
 import org.apache.logging.log4j.LogManager;
@@ -223,8 +224,8 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                 if (ctx.isTxnModel()) {
                     insertExecutor = new OlapTxnInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert);
                 } else if (ctx.isGroupCommit()) {
-                    insertExecutor = new OlapGroupCommitInsertExecutor(ctx, olapTable, label, planner, insertCtx,
-                            emptyInsert);
+                    insertExecutor = new OlapGroupCommitInsertExecutor(
+                            ctx, olapTable, label, planner, insertCtx, emptyInsert);
                 } else {
                     insertExecutor = new OlapInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert);
                 }
@@ -275,8 +276,15 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
 
     private BuildInsertExecutorResult planInsertExecutor(
             ConnectContext ctx, LogicalPlanAdapter logicalPlanAdapter,
-            InsertExecutorBuilder insertExecutorBuilder) throws UserException {
+            TableIf targetTableIf, InsertExecutorBuilder insertExecutorBuilder) throws UserException {
         AtomicReference<BuildInsertExecutorResult> buildResult = new AtomicReference<>();
+
+        Backend groupCommitBackend = null;
+        if (!ctx.isTxnModel() && ctx.isGroupCommit()) {
+            groupCommitBackend = Env.getCurrentEnv()
+                    .getGroupCommitManager()
+                    .selectBackendForGroupCommit(targetTableIf.getId(), ctx);
+        }
 
         // we should compute group commit backend first,
         // then we can do distribute and assign backend to the instance in Nereids's DistributePlan
@@ -292,6 +300,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                 }
             }
         };
+        planner.getCascadesContext().getStatementContext().setGroupCommitMergeBackend(groupCommitBackend);
         planner.plan(logicalPlanAdapter, ctx.getSessionVariable().toThrift());
         return buildResult.get();
     }

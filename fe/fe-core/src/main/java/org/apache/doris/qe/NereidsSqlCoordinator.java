@@ -347,11 +347,6 @@ public class NereidsSqlCoordinator extends Coordinator {
     }
 
     @Override
-    public void setGroupCommitBe(Backend backend) {
-        super.setGroupCommitBe(backend);
-    }
-
-    @Override
     public void setLoadMemLimit(long loadMemLimit) {
         coordinatorContext.queryOptions.setLoadMemLimit(loadMemLimit);
     }

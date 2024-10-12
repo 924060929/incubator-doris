@@ -27,6 +27,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalSink;
 import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.Coordinator;
 import org.apache.doris.qe.QueryState;
 import org.apache.doris.transaction.TransactionStatus;
 import org.apache.doris.transaction.TransactionType;
@@ -77,6 +78,7 @@ public class JdbcInsertExecutor extends BaseExternalTableInsertExecutor {
         LOG.warn("insert [{}] with query id {} failed", labelName, queryId, t);
         StringBuilder sb = new StringBuilder(t.getMessage());
         if (txnId != INVALID_TXN_ID) {
+            Coordinator coordinator = this.coordinator.get();
             LOG.warn("insert [{}] with query id {} abort txn {} failed", labelName, queryId, txnId);
             if (!Strings.isNullOrEmpty(coordinator.getTrackingUrl())) {
                 sb.append(". url: ").append(coordinator.getTrackingUrl());
