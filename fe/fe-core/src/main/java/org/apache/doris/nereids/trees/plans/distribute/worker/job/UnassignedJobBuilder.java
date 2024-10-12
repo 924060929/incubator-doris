@@ -37,6 +37,7 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -59,23 +60,32 @@ public class UnassignedJobBuilder {
         FragmentIdMapping<UnassignedJob> unassignedJobs = new FragmentIdMapping<>();
 
         // build from leaf to parent
-        for (Entry<PlanFragmentId, PlanFragment> kv : fragments.entrySet()) {
+        Iterator<Entry<PlanFragmentId, PlanFragment>> iterator = fragments.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Entry<PlanFragmentId, PlanFragment> kv = iterator.next();
+            boolean isTopFragment = !iterator.hasNext();
+
             PlanFragmentId fragmentId = kv.getKey();
             PlanFragment fragment = kv.getValue();
 
             ListMultimap<ExchangeNode, UnassignedJob> inputJobs = findInputJobs(
                     fragmentLineage, fragmentId, unassignedJobs);
-            UnassignedJob unassignedJob = builder.buildJob(planner, fragment, inputJobs);
+            UnassignedJob unassignedJob = builder.buildJob(planner, fragment, inputJobs, isTopFragment);
             unassignedJobs.put(fragmentId, unassignedJob);
         }
+
         return unassignedJobs;
     }
 
     private UnassignedJob buildJob(
-            NereidsPlanner planner, PlanFragment planFragment, ListMultimap<ExchangeNode, UnassignedJob> inputJobs) {
+            NereidsPlanner planner, PlanFragment planFragment,
+            ListMultimap<ExchangeNode, UnassignedJob> inputJobs, boolean isTopFragment) {
         List<ScanNode> scanNodes = collectScanNodesInThisFragment(planFragment);
         if (planFragment.specifyInstances.isPresent()) {
             return buildSpecifyInstancesJob(planner, planFragment, scanNodes, inputJobs);
+        } else if (scanNodes.isEmpty() && isTopFragment
+                && planner.getCascadesContext().getStatementContext().getGroupCommitMergeBackend() != null) {
+            return new UnassignedGroupCommitJob(planner, planFragment, scanNodes, inputJobs);
         } else if (!scanNodes.isEmpty() || isLeafFragment(planFragment)) {
             return buildLeafOrScanJob(planner, planFragment, scanNodes, inputJobs);
         } else {
