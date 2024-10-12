@@ -24,7 +24,6 @@ import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.TableIf;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
-import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.ProfileManager.ProfileType;
 import org.apache.doris.datasource.hive.HMSExternalTable;
 import org.apache.doris.datasource.iceberg.IcebergExternalTable;
@@ -32,6 +31,7 @@ import org.apache.doris.datasource.jdbc.JdbcExternalTable;
 import org.apache.doris.load.loadv2.LoadStatistic;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.analyzer.UnboundTableSink;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
@@ -66,6 +66,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * insert into select command implementation
@@ -139,7 +140,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
      *       For external uses such as creating a job, only basic analysis is needed without starting a transaction,
      *       in which case this can be set to false.
      */
-    public AbstractInsertExecutor initPlan(ConnectContext ctx, StmtExecutor executor,
+    public AbstractInsertExecutor initPlan(ConnectContext ctx, StmtExecutor stmtExecutor,
                                            boolean needBeginTransaction) throws Exception {
         TableIf targetTableIf = InsertUtils.getTargetTable(logicalQuery, ctx);
         // check auth
@@ -165,7 +166,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             LogicalPlanAdapter logicalPlanAdapter = new LogicalPlanAdapter(logicalQuery, ctx.getStatementContext());
 
             BuildInsertExecutorResult buildResult = planInsertExecutor(
-                    ctx, logicalPlanAdapter, getInsertExecutorBuilder(ctx, executor, targetTableIf)
+                    ctx, stmtExecutor, logicalPlanAdapter, targetTableIf
             );
 
             insertExecutor = buildResult.executor;
@@ -187,20 +188,24 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             if (insertExecutor != null) {
                 insertExecutor.onFail(e);
             }
-            throw e;
+            Throwables.propagateIfInstanceOf(e, RuntimeException.class);
+            throw new IllegalStateException(e.getMessage(), e);
         }
 
-        executor.setProfileType(ProfileType.LOAD);
+        stmtExecutor.setProfileType(ProfileType.LOAD);
         // We exposed @StmtExecutor#cancel as a unified entry point for statement interruption,
         // so we need to set this here
         insertExecutor.getCoordinator().setTxnId(insertExecutor.getTxnId());
-        executor.setCoord(insertExecutor.getCoordinator());
+        stmtExecutor.setCoord(insertExecutor.getCoordinator());
         return insertExecutor;
     }
 
-    private InsertExecutorBuilder getInsertExecutorBuilder(
-            ConnectContext ctx, StmtExecutor executor, TableIf targetTableIf) {
-        return planner -> {
+    // we should select the factory type first, but we can not initial InsertExecutor at this time,
+    // because Nereids's DistributePlan are not gernerated, so we return factory and after the
+    // DistributePlan have been generated, we can create InsertExecutor
+    private ExecutorFactory selectInsertExecutorFactory(
+            NereidsPlanner planner, ConnectContext ctx, StmtExecutor executor, TableIf targetTableIf) {
+        try {
             executor.setPlanner(planner);
             executor.checkBlockRules();
             if (ctx.getConnectType() == ConnectType.MYSQL && ctx.getMysqlChannel() != null) {
@@ -216,37 +221,62 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             String label = this.labelName.orElse(
                     ctx.isTxnModel() ? null : String.format("label_%x_%x", ctx.queryId().hi, ctx.queryId().lo));
 
-            AbstractInsertExecutor insertExecutor;
             if (physicalSink instanceof PhysicalOlapTableSink) {
                 boolean emptyInsert = childIsEmptyRelation(physicalSink);
                 OlapTable olapTable = (OlapTable) targetTableIf;
                 // the insertCtx contains some variables to adjust SinkNode
                 if (ctx.isTxnModel()) {
-                    insertExecutor = new OlapTxnInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert);
+                    return ExecutorFactory.from(
+                            planner,
+                            dataSink,
+                            physicalSink,
+                            () -> new OlapTxnInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert)
+                    );
                 } else if (ctx.isGroupCommit()) {
-                    insertExecutor = new OlapGroupCommitInsertExecutor(
-                            ctx, olapTable, label, planner, insertCtx, emptyInsert);
+                    Backend groupCommitBackend = Env.getCurrentEnv()
+                            .getGroupCommitManager()
+                            .selectBackendForGroupCommit(targetTableIf.getId(), ctx);
+                    // set groupCommitBackend for Nereids's DistributePlanner
+                    planner.getCascadesContext().getStatementContext().setGroupCommitMergeBackend(groupCommitBackend);
+                    return ExecutorFactory.from(
+                            planner,
+                            dataSink,
+                            physicalSink,
+                            () -> new OlapGroupCommitInsertExecutor(
+                                    ctx, olapTable, label, planner, insertCtx, emptyInsert, groupCommitBackend
+                            )
+                    );
                 } else {
-                    insertExecutor = new OlapInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert);
+                    return ExecutorFactory.from(
+                            planner,
+                            dataSink,
+                            physicalSink,
+                            () -> new OlapInsertExecutor(ctx, olapTable, label, planner, insertCtx, emptyInsert)
+                    );
                 }
-
-                boolean isEnableMemtableOnSinkNode =
-                        olapTable.getTableProperty().getUseSchemaLightChange()
-                                ? insertExecutor.getCoordinator().getQueryOptions().isEnableMemtableOnSinkNode()
-                                : false;
-                insertExecutor.getCoordinator().getQueryOptions()
-                        .setEnableMemtableOnSinkNode(isEnableMemtableOnSinkNode);
             } else if (physicalSink instanceof PhysicalHiveTableSink) {
                 boolean emptyInsert = childIsEmptyRelation(physicalSink);
                 HMSExternalTable hiveExternalTable = (HMSExternalTable) targetTableIf;
-                insertExecutor = new HiveInsertExecutor(ctx, hiveExternalTable, label, planner,
-                        Optional.of(insertCtx.orElse((new HiveInsertCommandContext()))), emptyInsert);
+                return ExecutorFactory.from(
+                        planner,
+                        dataSink,
+                        physicalSink,
+                        () -> new HiveInsertExecutor(ctx, hiveExternalTable, label, planner,
+                                Optional.of(insertCtx.orElse((new HiveInsertCommandContext()))), emptyInsert)
+                );
                 // set hive query options
             } else if (physicalSink instanceof PhysicalIcebergTableSink) {
                 boolean emptyInsert = childIsEmptyRelation(physicalSink);
                 IcebergExternalTable icebergExternalTable = (IcebergExternalTable) targetTableIf;
-                insertExecutor = new IcebergInsertExecutor(ctx, icebergExternalTable, label, planner,
-                        Optional.of(insertCtx.orElse((new BaseExternalTableInsertCommandContext()))), emptyInsert);
+                return ExecutorFactory.from(
+                        planner,
+                        dataSink,
+                        physicalSink,
+                        () -> new IcebergInsertExecutor(ctx, icebergExternalTable, label, planner,
+                                Optional.of(insertCtx.orElse((new BaseExternalTableInsertCommandContext()))),
+                                emptyInsert
+                        )
+                );
             } else if (physicalSink instanceof PhysicalJdbcTableSink) {
                 boolean emptyInsert = childIsEmptyRelation(physicalSink);
                 List<Column> cols = ((PhysicalJdbcTableSink<?>) physicalSink).getCols();
@@ -263,46 +293,48 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                     }
                 }
                 JdbcExternalTable jdbcExternalTable = (JdbcExternalTable) targetTableIf;
-                insertExecutor = new JdbcInsertExecutor(ctx, jdbcExternalTable, label, planner,
-                        Optional.of(insertCtx.orElse((new JdbcInsertCommandContext()))), emptyInsert);
+                return ExecutorFactory.from(
+                        planner,
+                        dataSink,
+                        physicalSink,
+                        () -> new JdbcInsertExecutor(ctx, jdbcExternalTable, label, planner,
+                                Optional.of(insertCtx.orElse((new JdbcInsertCommandContext()))), emptyInsert)
+                );
             } else {
                 // TODO: support other table types
                 throw new AnalysisException("insert into command only support [olap, hive, iceberg, jdbc] table");
             }
-
-            return new BuildInsertExecutorResult(planner, insertExecutor, dataSink, physicalSink);
-        };
+        } catch (Throwable t) {
+            Throwables.propagateIfInstanceOf(t, RuntimeException.class);
+            throw new IllegalStateException(t.getMessage(), t);
+        }
     }
 
     private BuildInsertExecutorResult planInsertExecutor(
-            ConnectContext ctx, LogicalPlanAdapter logicalPlanAdapter,
-            TableIf targetTableIf, InsertExecutorBuilder insertExecutorBuilder) throws UserException {
-        AtomicReference<BuildInsertExecutorResult> buildResult = new AtomicReference<>();
-
-        Backend groupCommitBackend = null;
-        if (!ctx.isTxnModel() && ctx.isGroupCommit()) {
-            groupCommitBackend = Env.getCurrentEnv()
-                    .getGroupCommitManager()
-                    .selectBackendForGroupCommit(targetTableIf.getId(), ctx);
-        }
-
+            ConnectContext ctx, StmtExecutor stmtExecutor,
+            LogicalPlanAdapter logicalPlanAdapter, TableIf targetTableIf) throws Throwable {
         // we should compute group commit backend first,
         // then we can do distribute and assign backend to the instance in Nereids's DistributePlan
-        NereidsPlanner planner = new NereidsPlanner(ctx.getStatementContext()) {
+        StatementContext statementContext = ctx.getStatementContext();
+
+        AtomicReference<ExecutorFactory> executorFactoryRef = new AtomicReference<>();
+        NereidsPlanner planner = new NereidsPlanner(statementContext) {
             @Override
             protected void doDistribute(boolean canUseNereidsDistributePlanner) {
-                try {
-                    buildResult.set(insertExecutorBuilder.build(this));
-                    super.doDistribute(canUseNereidsDistributePlanner);
-                } catch (Throwable t) {
-                    Throwables.propagateIfInstanceOf(t, RuntimeException.class);
-                    throw new IllegalStateException(t.getMessage(), t);
-                }
+                // after generate PhysicalPlan, we can select InsertExecutorFactory
+                executorFactoryRef.set(
+                        selectInsertExecutorFactory(this, ctx, stmtExecutor, targetTableIf)
+                );
+                // after select factory, we can do distribute, because the DistributePlan not generate
+                super.doDistribute(canUseNereidsDistributePlanner);
             }
         };
-        planner.getCascadesContext().getStatementContext().setGroupCommitMergeBackend(groupCommitBackend);
+
+        // generate PhysicalPlan and DistributePlan
         planner.plan(logicalPlanAdapter, ctx.getSessionVariable().toThrift());
-        return buildResult.get();
+
+        // after generate DistributePlan, we can build NereidsSqlCoordinator and InsertExecutor
+        return executorFactoryRef.get().build();
     }
 
     private void runInternal(ConnectContext ctx, StmtExecutor executor) throws Exception {
@@ -343,6 +375,31 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
 
     private interface InsertExecutorBuilder {
         BuildInsertExecutorResult build(NereidsPlanner planner) throws Throwable;
+    }
+
+    private static class ExecutorFactory {
+        public final NereidsPlanner planner;
+        public final DataSink dataSink;
+        public final PhysicalSink<?> physicalSink;
+        public final Supplier<AbstractInsertExecutor> executorSupplier;
+
+        private ExecutorFactory(NereidsPlanner planner, DataSink dataSink, PhysicalSink<?> physicalSink,
+                Supplier<AbstractInsertExecutor> executorSupplier) {
+            this.planner = planner;
+            this.dataSink = dataSink;
+            this.physicalSink = physicalSink;
+            this.executorSupplier = executorSupplier;
+        }
+
+        public static ExecutorFactory from(
+                 NereidsPlanner planner, DataSink dataSink, PhysicalSink<?> physicalSink,
+                Supplier<AbstractInsertExecutor> executorSupplier) {
+            return new ExecutorFactory(planner, dataSink, physicalSink, executorSupplier);
+        }
+
+        public BuildInsertExecutorResult build() {
+            return new BuildInsertExecutorResult(planner, executorSupplier.get(), dataSink, physicalSink);
+        }
     }
 
     private static class BuildInsertExecutorResult {

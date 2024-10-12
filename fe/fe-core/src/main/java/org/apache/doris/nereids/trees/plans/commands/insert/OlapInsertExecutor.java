@@ -75,12 +75,15 @@ public class OlapInsertExecutor extends AbstractInsertExecutor {
     private static final Logger LOG = LogManager.getLogger(OlapInsertExecutor.class);
     protected TransactionStatus txnStatus = TransactionStatus.ABORTED;
 
+    protected OlapTable olapTable;
+
     /**
      * constructor
      */
     public OlapInsertExecutor(ConnectContext ctx, Table table,
             String labelName, NereidsPlanner planner, Optional<InsertCommandContext> insertCtx, boolean emptyInsert) {
         super(ctx, table, labelName, planner, insertCtx, emptyInsert);
+        this.olapTable = (OlapTable) table;
     }
 
     @Override
@@ -188,7 +191,17 @@ public class OlapInsertExecutor extends AbstractInsertExecutor {
     }
 
     @Override
-    protected void beforeExec() {
+    protected final void beforeExec() {
+        boolean isEnableMemtableOnSinkNode =
+                olapTable.getTableProperty().getUseSchemaLightChange()
+                        && getCoordinator().getQueryOptions().isEnableMemtableOnSinkNode();
+        getCoordinator().getQueryOptions()
+                .setEnableMemtableOnSinkNode(isEnableMemtableOnSinkNode);
+
+        doBeforeExec();
+    }
+
+    protected void doBeforeExec() {
         String queryId = DebugUtil.printId(ctx.queryId());
         LOG.info("start insert [{}] with query id {} and txn id {}", labelName, queryId, txnId);
     }
