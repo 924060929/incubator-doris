@@ -260,9 +260,7 @@ public class SqlCoordinatorContext {
         if (queryOptions.getExecutionTimeout() < 1) {
             LOG.info("try set timeout less than 1", new RuntimeException(""));
         }
-        queryOptions.setEnableScanNodeRunSerial(context.getSessionVariable().isEnableScanRunSerial());
         queryOptions.setFeProcessUuid(ExecuteEnv.getInstance().getProcessUUID());
-        queryOptions.setWaitFullBlockScheduleTimes(context.getSessionVariable().getWaitFullBlockScheduleTimes());
         queryOptions.setMysqlRowBinaryFormat(context.getCommand() == MysqlCommand.COM_STMT_EXECUTE);
 
         setOptionsFromUserProperty(context, queryOptions);
