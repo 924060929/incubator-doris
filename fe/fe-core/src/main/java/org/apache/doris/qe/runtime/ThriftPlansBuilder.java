@@ -30,7 +30,10 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
 import org.apache.doris.nereids.trees.plans.physical.TopnFilter;
+import org.apache.doris.planner.DataSink;
+import org.apache.doris.planner.DataStreamSink;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.MultiCastDataSink;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.planner.PlanFragment;
@@ -100,7 +103,6 @@ public class ThriftPlansBuilder {
             Map<Integer, TFileScanRangeParams> fileScanRangeParams = computeFileScanRangeParams(currentFragmentPlan);
             Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
-            List<TPlanFragmentDestination> destinations = destinationToThrift(currentFragmentPlan);
 
             for (int instanceNumInCurrentFragment = 0;
                     instanceNumInCurrentFragment < currentFragmentPlan.getInstanceJobs().size();
@@ -109,7 +111,7 @@ public class ThriftPlansBuilder {
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         exchangeSenderNum, fileScanRangeParams,
-                        workerProcessInstanceNum, destinations, coordinatorContext);
+                        workerProcessInstanceNum, coordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
                         currentFragmentParam, instanceJob, runtimeFiltersThriftBuilder,
@@ -232,23 +234,50 @@ public class ThriftPlansBuilder {
         return senderNum;
     }
 
-    private static List<TPlanFragmentDestination> destinationToThrift(PipelineDistributedPlan plan) {
-        List<AssignedJob> destinationJobs = plan.getDestinations();
-        List<TPlanFragmentDestination> destinations = Lists.newArrayListWithCapacity(destinationJobs.size());
-        for (int receiverId = 0; receiverId < destinationJobs.size(); receiverId++) {
-            AssignedJob destinationJob = destinationJobs.get(receiverId);
-            DistributedPlanWorker worker = destinationJob.getAssignedWorker();
-            String host = worker.host();
-            int port = worker.port();
-            int brpcPort = worker.brpcPort();
+    private static void setMultiCastDestinationThrift(PipelineDistributedPlan fragmentPlan) {
+        MultiCastDataSink multiCastDataSink = (MultiCastDataSink) fragmentPlan.getFragmentJob().getFragment().getSink();
+        List<List<TPlanFragmentDestination>> destinationList = multiCastDataSink.getDestinations();
 
-            TPlanFragmentDestination destination = new TPlanFragmentDestination();
-            destination.setServer(new TNetworkAddress(host, port));
-            destination.setBrpcServer(new TNetworkAddress(host, brpcPort));
-            destination.setFragmentInstanceId(destinationJob.instanceId());
-            destinations.add(destination);
+        List<DataStreamSink> dataStreamSinks = multiCastDataSink.getDataStreamSinks();
+        for (int i = 0; i < dataStreamSinks.size(); i++) {
+            DataStreamSink realSink = dataStreamSinks.get(i);
+            List<TPlanFragmentDestination> destinations = destinationList.get(i);
+            for (Entry<DataSink, List<AssignedJob>> kv : fragmentPlan.getDestinations().entrySet()) {
+                DataSink sink = kv.getKey();
+                if (sink == realSink) {
+                    List<AssignedJob> destInstances = kv.getValue();
+                    for (AssignedJob destInstance : destInstances) {
+                        destinations.add(instanceToDestination(destInstance));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private static List<TPlanFragmentDestination> nonMultiCastDestinationToThrift(PipelineDistributedPlan plan) {
+        Map<DataSink, List<AssignedJob>> destinationsMapping = plan.getDestinations();
+        List<TPlanFragmentDestination> destinations = Lists.newArrayList();
+        if (!destinationsMapping.isEmpty()) {
+            List<AssignedJob> destinationJobs = destinationsMapping.entrySet().iterator().next().getValue();
+            for (AssignedJob destinationJob : destinationJobs) {
+                destinations.add(instanceToDestination(destinationJob));
+            }
         }
         return destinations;
+    }
+
+    private static TPlanFragmentDestination instanceToDestination(AssignedJob instance) {
+        DistributedPlanWorker worker = instance.getAssignedWorker();
+        String host = worker.host();
+        int port = worker.port();
+        int brpcPort = worker.brpcPort();
+
+        TPlanFragmentDestination destination = new TPlanFragmentDestination();
+        destination.setServer(new TNetworkAddress(host, port));
+        destination.setBrpcServer(new TNetworkAddress(host, brpcPort));
+        destination.setFragmentInstanceId(instance.instanceId());
+        return destination;
     }
 
     private static TPipelineFragmentParams fragmentToThriftIfAbsent(
@@ -257,7 +286,7 @@ public class ThriftPlansBuilder {
             Map<Integer, Integer> exchangeSenderNum,
             Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
             Multiset<DistributedPlanWorker> workerProcessInstanceNum,
-            List<TPlanFragmentDestination> destinations, SqlCoordinatorContext coordinatorContext) {
+            SqlCoordinatorContext coordinatorContext) {
         DistributedPlanWorker worker = assignedJob.getAssignedWorker();
         return workerToFragmentParams.computeIfAbsent(worker, w -> {
             PlanFragment fragment = fragmentPlan.getFragmentJob().getFragment();
@@ -278,7 +307,15 @@ public class ThriftPlansBuilder {
 
             params.setNeedWaitExecutionTrigger(coordinatorContext.twoPhaseExecution);
             params.setPerExchNumSenders(exchangeSenderNum);
-            params.setDestinations(destinations);
+
+            List<TPlanFragmentDestination> nonMultiCastDestinations;
+            if (fragment.getSink() instanceof MultiCastDataSink) {
+                nonMultiCastDestinations = Lists.newArrayList();
+                setMultiCastDestinationThrift(fragmentPlan);
+            } else {
+                nonMultiCastDestinations = nonMultiCastDestinationToThrift(fragmentPlan);
+            }
+            params.setDestinations(nonMultiCastDestinations);
 
             int instanceNumInThisFragment = fragmentPlan.getInstanceJobs().size();
             params.setNumSenders(instanceNumInThisFragment);
@@ -467,24 +504,31 @@ public class ThriftPlansBuilder {
             return;
         }
         PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) inputPlans.iterator().next();
-        Set<AssignedJob> destinations = Sets.newLinkedHashSet(firstInputPlan.getDestinations());
+        PlanFragment receiverFragment = receivePlan.getFragmentJob().getFragment();
+        Map<DataSink, List<AssignedJob>> sinkToDestInstances = firstInputPlan.getDestinations();
+        for (Entry<DataSink, List<AssignedJob>> kv : sinkToDestInstances.entrySet()) {
+            DataSink senderSink = kv.getKey();
+            if (senderSink.getFragment() == receiverFragment) {
+                Set<AssignedJob> destinations = Sets.newLinkedHashSet(kv.getValue());
+                Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
+                List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
+                for (AssignedJob instanceJob : instanceJobs) {
+                    if (!destinations.contains(instanceJob)) {
+                        // the non-first-local-shuffle instances per host
+                        // and non-first-share-broadcast-hash-table instances per host
+                        // are not need receive data from other fragments, so we will skip it
+                        continue;
+                    }
 
-        Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
-        List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
-        for (AssignedJob instanceJob : instanceJobs) {
-            if (!destinations.contains(instanceJob)) {
-                // the non-first-local-shuffle instances per host
-                // and non-first-share-broadcast-hash-table instances per host
-                // are not need receive data from other fragments, so we will skip it
-                continue;
+                    AtomicInteger instanceCount = backendIdToInstanceCount.computeIfAbsent(
+                            instanceJob.getAssignedWorker().id(),
+                            (backendId) -> new AtomicInteger()
+                    );
+                    int instanceIdInThisBackend = instanceCount.getAndIncrement();
+                    computeFn.accept(instanceJob, instanceIdInThisBackend);
+                }
+                break;
             }
-
-            AtomicInteger instanceCount = backendIdToInstanceCount.computeIfAbsent(
-                    instanceJob.getAssignedWorker().id(),
-                    (backendId) -> new AtomicInteger()
-            );
-            int instanceIdInThisBackend = instanceCount.getAndIncrement();
-            computeFn.accept(instanceJob, instanceIdInThisBackend);
         }
     }
 

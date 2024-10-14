@@ -31,16 +31,20 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
 import org.apache.doris.nereids.util.Utils;
+import org.apache.doris.planner.DataSink;
+import org.apache.doris.planner.DataStreamSink;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.MultiCastDataSink;
 import org.apache.doris.planner.MultiCastPlanFragment;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 import org.apache.doris.thrift.TUniqueId;
 
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.SetMultimap;
 
 import java.util.Arrays;
 import java.util.List;
@@ -80,7 +84,7 @@ public class DistributePlanner {
             UnassignedJob fragmentJob = idToUnassignedJobs.get(fragmentId);
             List<AssignedJob> instanceJobs = idToAssignedJobs.get(fragmentId);
 
-            ListMultimap<ExchangeNode, DistributedPlan> exchangeNodeToChildren = ArrayListMultimap.create();
+            SetMultimap<ExchangeNode, DistributedPlan> exchangeNodeToChildren = LinkedHashMultimap.create();
             for (PlanFragment childFragment : fragment.getChildren()) {
                 if (childFragment instanceof MultiCastPlanFragment) {
                     for (ExchangeNode exchangeNode : ((MultiCastPlanFragment) childFragment).getDestNodeList()) {
@@ -88,7 +92,6 @@ public class DistributePlanner {
                             exchangeNodeToChildren.put(
                                     exchangeNode, idToDistributedPlans.get(childFragment.getFragmentId())
                             );
-                            break;
                         }
                     }
                 } else {
@@ -137,7 +140,19 @@ public class DistributePlanner {
         if (receiveSideIsBucketShuffleJoinSide) {
             receiverInstances = getDestinationsByBuckets(receiverPlan, receiverInstances);
         }
-        senderPlan.setDestinations(receiverInstances);
+
+        DataSink sink = senderPlan.getFragmentJob().getFragment().getSink();
+        if (sink instanceof MultiCastDataSink) {
+            MultiCastDataSink multiCastDataSink = (MultiCastDataSink) sink;
+            for (DataStreamSink realSink : multiCastDataSink.getDataStreamSinks()) {
+                if (realSink.getExchNodeId() == linkNode.getId()) {
+                    senderPlan.addDestinations(realSink, receiverInstances);
+                    break;
+                }
+            }
+        } else {
+            senderPlan.addDestinations(sink, receiverInstances);
+        }
     }
 
     private List<AssignedJob> getDestinationsByBuckets(

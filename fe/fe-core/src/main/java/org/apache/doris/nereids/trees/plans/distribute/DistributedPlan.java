@@ -21,7 +21,7 @@ import org.apache.doris.nereids.trees.AbstractTreeNode;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.planner.ExchangeNode;
 
-import com.google.common.collect.ListMultimap;
+import com.google.common.collect.SetMultimap;
 
 import java.util.List;
 import java.util.Objects;
@@ -30,9 +30,9 @@ import java.util.Objects;
 @lombok.Getter
 public abstract class DistributedPlan extends AbstractTreeNode<DistributedPlan> {
     protected final UnassignedJob fragmentJob;
-    protected final ListMultimap<ExchangeNode, DistributedPlan> inputs;
+    protected final SetMultimap<ExchangeNode, DistributedPlan> inputs;
 
-    public DistributedPlan(UnassignedJob fragmentJob, ListMultimap<ExchangeNode, DistributedPlan> inputs) {
+    public DistributedPlan(UnassignedJob fragmentJob, SetMultimap<ExchangeNode, DistributedPlan> inputs) {
         this.fragmentJob = Objects.requireNonNull(fragmentJob, "fragmentJob can not be null");
         this.inputs = Objects.requireNonNull(inputs, "inputs can not be null");
     }
@@ -41,7 +41,7 @@ public abstract class DistributedPlan extends AbstractTreeNode<DistributedPlan> 
         return fragmentJob;
     }
 
-    public ListMultimap<ExchangeNode, DistributedPlan> getInputs() {
+    public SetMultimap<ExchangeNode, DistributedPlan> getInputs() {
         return inputs;
     }
 

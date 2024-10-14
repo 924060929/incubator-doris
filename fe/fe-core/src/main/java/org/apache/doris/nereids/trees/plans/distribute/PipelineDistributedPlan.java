@@ -21,13 +21,15 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.util.Utils;
+import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.ExchangeNode;
 import org.apache.doris.thrift.TExplainLevel;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Maps;
+import com.google.common.collect.SetMultimap;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -36,29 +38,29 @@ import java.util.stream.Collectors;
 public class PipelineDistributedPlan extends DistributedPlan {
     protected final List<AssignedJob> instanceJobs;
     // current, we only support all instances of the same fragment reuse the same destination
-    private List<AssignedJob> destinations;
+    private Map<DataSink, List<AssignedJob>> destinations;
 
     public PipelineDistributedPlan(
             UnassignedJob fragmentJob,
             List<AssignedJob> instanceJobs,
-            ListMultimap<ExchangeNode, DistributedPlan> inputs) {
+            SetMultimap<ExchangeNode, DistributedPlan> inputs) {
         super(fragmentJob, inputs);
         this.instanceJobs = Utils.fastToImmutableList(
                 Objects.requireNonNull(instanceJobs, "instanceJobs can not be null")
         );
-        this.destinations = ImmutableList.of();
+        this.destinations = Maps.newLinkedHashMap();
     }
 
     public List<AssignedJob> getInstanceJobs() {
         return instanceJobs;
     }
 
-    public List<AssignedJob> getDestinations() {
+    public Map<DataSink, List<AssignedJob>> getDestinations() {
         return destinations;
     }
 
-    public void setDestinations(List<AssignedJob> destinations) {
-        this.destinations = destinations;
+    public void addDestinations(DataSink sink, List<AssignedJob> destinations) {
+        this.destinations.put(sink, destinations);
     }
 
     @Override
@@ -82,11 +84,19 @@ public class PipelineDistributedPlan extends DistributedPlan {
         );
 
         AtomicInteger bucketNum = new AtomicInteger(0);
-        String destinationStr = destinations.stream()
-                .map(destination -> "    "
-                        + "#" + bucketNum.getAndIncrement() + ": "
-                        + DebugUtil.printId(destination.instanceId()))
-                .collect(Collectors.joining(",\n"));
+        String destinationStr = destinations.entrySet()
+                    .stream()
+                    .map(kv -> {
+                        String str = kv.getValue()
+                                .stream()
+                                .map(destination -> "      "
+                                        + "#" + bucketNum.getAndIncrement() + ": "
+                                        + DebugUtil.printId(destination.instanceId()))
+                                .collect(Collectors.joining(",\n"));
+                        return "    Exchange " + kv.getKey().getExchNodeId().asInt()
+                                + ": [" + (str.isEmpty() ? "" : "\n" + str + "\n    ") + "]";
+                    })
+                    .collect(Collectors.joining(",\n"));
         return "PipelineDistributedPlan(\n"
                 + "  id: " + displayFragmentId + ",\n"
                 + "  parallel: " + instanceJobs.size() + ",\n"
