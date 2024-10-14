@@ -32,6 +32,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobB
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedScanBucketOlapTableJob;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.ExchangeNode;
+import org.apache.doris.planner.MultiCastPlanFragment;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 import org.apache.doris.thrift.TUniqueId;
@@ -81,10 +82,21 @@ public class DistributePlanner {
 
             ListMultimap<ExchangeNode, DistributedPlan> exchangeNodeToChildren = ArrayListMultimap.create();
             for (PlanFragment childFragment : fragment.getChildren()) {
-                exchangeNodeToChildren.put(
-                        childFragment.getDestNode(),
-                        idToDistributedPlans.get(childFragment.getFragmentId())
-                );
+                if (childFragment instanceof MultiCastPlanFragment) {
+                    for (ExchangeNode exchangeNode : ((MultiCastPlanFragment) childFragment).getDestNodeList()) {
+                        if (exchangeNode.getFragment() == fragment) {
+                            exchangeNodeToChildren.put(
+                                    exchangeNode, idToDistributedPlans.get(childFragment.getFragmentId())
+                            );
+                            break;
+                        }
+                    }
+                } else {
+                    exchangeNodeToChildren.put(
+                            childFragment.getDestNode(),
+                            idToDistributedPlans.get(childFragment.getFragmentId())
+                    );
+                }
             }
 
             idToDistributedPlans.put(fragmentId,

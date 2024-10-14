@@ -63,6 +63,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -461,10 +462,11 @@ public class ThriftPlansBuilder {
 
         // current only support all input plans have same destination with same order,
         // so we can get first input plan to compute shuffle index to instance id
-        PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) receivePlan.getInputs()
-                .values()
-                .iterator()
-                .next();
+        Collection<DistributedPlan> inputPlans = receivePlan.getInputs().values();
+        if (inputPlans.isEmpty()) {
+            return;
+        }
+        PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) inputPlans.iterator().next();
         Set<AssignedJob> destinations = Sets.newLinkedHashSet(firstInputPlan.getDestinations());
 
         Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();

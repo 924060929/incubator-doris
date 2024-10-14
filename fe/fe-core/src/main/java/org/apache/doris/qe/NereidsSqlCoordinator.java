@@ -308,9 +308,11 @@ public class NereidsSqlCoordinator extends Coordinator {
     @Override
     public List<FragmentInstanceInfo> getFragmentInstanceInfos() {
         List<QueryStatisticsItem.FragmentInstanceInfo> infos = Lists.newArrayList();
-        for (MultiFragmentsPipelineTask multiFragmentsPipelineTask : executionTask.getChildrenTasks().values()) {
-            for (SingleFragmentPipelineTask fragmentTask : multiFragmentsPipelineTask.getChildrenTasks().values()) {
-                infos.addAll(fragmentTask.buildFragmentInstanceInfo());
+        if (executionTask != null) {
+            for (MultiFragmentsPipelineTask multiFragmentsPipelineTask : executionTask.getChildrenTasks().values()) {
+                for (SingleFragmentPipelineTask fragmentTask : multiFragmentsPipelineTask.getChildrenTasks().values()) {
+                    infos.addAll(fragmentTask.buildFragmentInstanceInfo());
+                }
             }
         }
         infos.sort(Comparator.comparing(FragmentInstanceInfo::getFragmentId));
@@ -360,10 +362,12 @@ public class NereidsSqlCoordinator extends Coordinator {
     @Override
     public Map<String, Integer> getBeToInstancesNum() {
         Map<String, Integer> result = Maps.newLinkedHashMap();
-        for (MultiFragmentsPipelineTask beTasks : executionTask.getChildrenTasks().values()) {
-            TNetworkAddress brpcAddress = beTasks.getBackend().getBrpcAddress();
-            String brpcAddrString = brpcAddress.hostname.concat(":").concat("" + brpcAddress.port);
-            result.put(brpcAddrString, beTasks.getChildrenTasks().size());
+        if (executionTask != null) {
+            for (MultiFragmentsPipelineTask beTasks : executionTask.getChildrenTasks().values()) {
+                TNetworkAddress brpcAddress = beTasks.getBackend().getBrpcAddress();
+                String brpcAddrString = brpcAddress.hostname.concat(":").concat("" + brpcAddress.port);
+                result.put(brpcAddrString, beTasks.getChildrenTasks().size());
+            }
         }
         return result;
     }
