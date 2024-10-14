@@ -59,10 +59,10 @@ import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.system.Backend;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.sparkproject.guava.base.Throwables;
 
 import java.util.List;
 import java.util.Objects;
