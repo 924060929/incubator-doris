@@ -83,10 +83,10 @@ public class PipelineDistributedPlan extends DistributedPlan {
                 fragmentJob.getFragment().getExplainString(TExplainLevel.VERBOSE).trim(), "  "
         );
 
-        AtomicInteger bucketNum = new AtomicInteger(0);
         String destinationStr = destinations.entrySet()
                     .stream()
                     .map(kv -> {
+                        AtomicInteger bucketNum = new AtomicInteger(0);
                         String str = kv.getValue()
                                 .stream()
                                 .map(destination -> "      "
