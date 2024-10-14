@@ -27,7 +27,7 @@ import java.util.Map;
 
 public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask<?, ?>> {
     // LinkedHashMap: make sure the key set order is same as the input map
-    //                so that we can the runtime filter merge backend first
+    //                so that we can initial the runtime filter merge backend first
     private final Map<Id, C> childrenTasks = Maps.newLinkedHashMap();
 
     public ChildrenRuntimeTasks(Map<Id, C> childrenTasks) {
