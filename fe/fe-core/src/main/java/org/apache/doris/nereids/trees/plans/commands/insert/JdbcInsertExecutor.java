@@ -27,7 +27,6 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalSink;
 import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.qe.ConnectContext;
-import org.apache.doris.qe.Coordinator;
 import org.apache.doris.qe.QueryState;
 import org.apache.doris.transaction.TransactionStatus;
 import org.apache.doris.transaction.TransactionType;
