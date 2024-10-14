@@ -31,9 +31,7 @@ public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask<?, ?>> {
     private final Map<Id, C> childrenTasks = Maps.newLinkedHashMap();
 
     public ChildrenRuntimeTasks(Map<Id, C> childrenTasks) {
-        synchronized (this) {
-            this.childrenTasks.putAll(childrenTasks);
-        }
+        this.childrenTasks.putAll(childrenTasks);
     }
 
     public synchronized C get(Id id) {
