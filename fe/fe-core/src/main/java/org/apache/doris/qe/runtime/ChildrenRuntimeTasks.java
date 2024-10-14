@@ -34,15 +34,15 @@ public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask<?, ?>> {
         this.childrenTasks.putAll(childrenTasks);
     }
 
-    public synchronized C get(Id id) {
+    public C get(Id id) {
         return childrenTasks.get(id);
     }
 
-    public synchronized List<C> allTasks() {
+    public List<C> allTasks() {
         return Utils.fastToImmutableList(childrenTasks.values());
     }
 
-    public synchronized Map<Id, C> allTaskMap() {
+    public Map<Id, C> allTaskMap() {
         return ImmutableMap.copyOf(childrenTasks);
     }
 }
