@@ -26,21 +26,25 @@ import java.util.List;
 import java.util.Map;
 
 public class ChildrenRuntimeTasks<Id, C extends AbstractRuntimeTask<?, ?>> {
-    private final Map<Id, C> childrenTasks = Maps.newConcurrentMap();
+    // LinkedHashMap: make sure the key set order is same as the input map
+    //                so that we can the runtime filter merge backend first
+    private final Map<Id, C> childrenTasks = Maps.newLinkedHashMap();
 
     public ChildrenRuntimeTasks(Map<Id, C> childrenTasks) {
-        this.childrenTasks.putAll(childrenTasks);
+        synchronized (this) {
+            this.childrenTasks.putAll(childrenTasks);
+        }
     }
 
-    public C get(Id id) {
+    public synchronized C get(Id id) {
         return childrenTasks.get(id);
     }
 
-    public List<C> allTasks() {
+    public synchronized List<C> allTasks() {
         return Utils.fastToImmutableList(childrenTasks.values());
     }
 
-    public Map<Id, C> allTaskMap() {
+    public synchronized Map<Id, C> allTaskMap() {
         return ImmutableMap.copyOf(childrenTasks);
     }
 }
