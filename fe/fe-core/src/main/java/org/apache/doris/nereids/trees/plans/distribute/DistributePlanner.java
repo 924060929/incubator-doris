@@ -131,11 +131,10 @@ public class DistributePlanner {
             PipelineDistributedPlan senderPlan,
             ExchangeNode linkNode,
             boolean enableShareHashTableForBroadcastJoin) {
-        List<AssignedJob> receiverInstances = filterInstancesWhichCanReceiveDataFromRemote(
-                receiverPlan, enableShareHashTableForBroadcastJoin, linkNode);
-
         boolean receiveSideIsBucketShuffleJoinSide
                 = receiverPlan.getFragmentJob() instanceof UnassignedScanBucketOlapTableJob;
+        List<AssignedJob> receiverInstances = filterInstancesWhichCanReceiveDataFromRemote(
+                receiverPlan, enableShareHashTableForBroadcastJoin, linkNode, receiveSideIsBucketShuffleJoinSide);
         if (receiveSideIsBucketShuffleJoinSide) {
             receiverInstances = getDestinationsByBuckets(receiverPlan, receiverInstances);
         }
@@ -166,12 +165,14 @@ public class DistributePlanner {
     private List<AssignedJob> filterInstancesWhichCanReceiveDataFromRemote(
             PipelineDistributedPlan receiverPlan,
             boolean enableShareHashTableForBroadcastJoin,
-            ExchangeNode linkNode) {
+            ExchangeNode linkNode,
+            boolean receiveSideIsBucketShuffleJoinSide) {
         boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
                 .anyMatch(LocalShuffleAssignedJob.class::isInstance);
         if (useLocalShuffle) {
             return getFirstInstancePerShareScan(receiverPlan);
-        } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
+        } else if (!receiveSideIsBucketShuffleJoinSide
+                && enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else {
             return receiverPlan.getInstanceJobs();
