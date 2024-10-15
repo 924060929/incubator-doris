@@ -341,8 +341,11 @@ public class LoadBalanceScanWorkerSelector implements ScanWorkerSelector {
         if (extScanRange != null) {
             TFileScanRange fileScanRange = extScanRange.getFileScanRange();
             long size = 0;
-            for (TFileRangeDesc range : fileScanRange.getRanges()) {
-                size += range.getSize();
+            List<TFileRangeDesc> ranges = fileScanRange.getRanges();
+            if (ranges != null) {
+                for (TFileRangeDesc range : ranges) {
+                    size += range.getSize();
+                }
             }
             return size;
         }
