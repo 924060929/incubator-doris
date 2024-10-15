@@ -22,6 +22,7 @@ import org.apache.doris.planner.ScanNode;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
 
 import java.util.List;
 import java.util.Map;
@@ -35,7 +36,7 @@ public class DefaultScanSource extends ScanSource {
     public final Map<ScanNode, ScanRanges> scanNodeToScanRanges;
 
     public DefaultScanSource(Map<ScanNode, ScanRanges> scanNodeToScanRanges) {
-        this.scanNodeToScanRanges = scanNodeToScanRanges;
+        this.scanNodeToScanRanges = Maps.newLinkedHashMap(scanNodeToScanRanges);
     }
 
     public static DefaultScanSource empty() {

@@ -38,6 +38,7 @@ import org.apache.doris.planner.MultiCastDataSink;
 import org.apache.doris.planner.MultiCastPlanFragment;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
+import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.collect.ImmutableMap;
@@ -131,11 +132,10 @@ public class DistributePlanner {
             PipelineDistributedPlan senderPlan,
             ExchangeNode linkNode,
             boolean enableShareHashTableForBroadcastJoin) {
-        boolean receiveSideIsBucketShuffleJoinSide
-                = receiverPlan.getFragmentJob() instanceof UnassignedScanBucketOlapTableJob;
+
         List<AssignedJob> receiverInstances = filterInstancesWhichCanReceiveDataFromRemote(
-                receiverPlan, enableShareHashTableForBroadcastJoin, linkNode, receiveSideIsBucketShuffleJoinSide);
-        if (receiveSideIsBucketShuffleJoinSide) {
+                receiverPlan, enableShareHashTableForBroadcastJoin, linkNode);
+        if (linkNode.getPartitionType() == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
             receiverInstances = getDestinationsByBuckets(receiverPlan, receiverInstances);
         }
 
@@ -165,14 +165,12 @@ public class DistributePlanner {
     private List<AssignedJob> filterInstancesWhichCanReceiveDataFromRemote(
             PipelineDistributedPlan receiverPlan,
             boolean enableShareHashTableForBroadcastJoin,
-            ExchangeNode linkNode,
-            boolean receiveSideIsBucketShuffleJoinSide) {
+            ExchangeNode linkNode) {
         boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
                 .anyMatch(LocalShuffleAssignedJob.class::isInstance);
         if (useLocalShuffle) {
             return getFirstInstancePerShareScan(receiverPlan);
-        } else if (!receiveSideIsBucketShuffleJoinSide
-                && enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
+        } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else {
             return receiverPlan.getInstanceJobs();
