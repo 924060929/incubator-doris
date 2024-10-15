@@ -99,8 +99,10 @@ public class ThriftPlansBuilder {
         Multiset<DistributedPlanWorker> workerProcessInstanceNum = computeInstanceNumPerWorker(distributedPlans);
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker = Maps.newLinkedHashMap();
         int currentInstanceIndex = 0;
+        Map<Integer, TFileScanRangeParams> sharedFileScanRangeParams = Maps.newLinkedHashMap();
         for (PipelineDistributedPlan currentFragmentPlan : distributedPlans) {
-            Map<Integer, TFileScanRangeParams> fileScanRangeParams = computeFileScanRangeParams(currentFragmentPlan);
+            sharedFileScanRangeParams.putAll(computeFileScanRangeParams(currentFragmentPlan));
+
             Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
 
@@ -110,7 +112,7 @@ public class ThriftPlansBuilder {
                 AssignedJob instanceJob = currentFragmentPlan.getInstanceJobs().get(instanceNumInCurrentFragment);
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
-                        exchangeSenderNum, fileScanRangeParams,
+                        exchangeSenderNum, sharedFileScanRangeParams,
                         workerProcessInstanceNum, coordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(

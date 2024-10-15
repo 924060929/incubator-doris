@@ -145,6 +145,10 @@ public class NereidsSqlCoordinator extends Coordinator {
         return coordinatorContext.asQueryProcessor();
     }
 
+    public JobProcessor getJobProcessor() {
+        return coordinatorContext.getJobProcessor();
+    }
+
     public LoadProcessor asLoadProcessor() {
         return coordinatorContext.asLoadProcessor();
     }

@@ -193,7 +193,8 @@ public class SqlCoordinatorContext {
     public synchronized Status updateStatusIfOk(Status newStatus) {
         // If query is done, we will ignore their cancelled updates, and let the remote fragments to clean up async.
         Status originStatus = readCloneStatus();
-        if (coordinator.isEof() && newStatus.isCancelled()) {
+        if (coordinator.getJobProcessor() instanceof QueryProcessor && coordinator.isEof()
+                && newStatus.isCancelled()) {
             return originStatus;
         }
         // nothing to update

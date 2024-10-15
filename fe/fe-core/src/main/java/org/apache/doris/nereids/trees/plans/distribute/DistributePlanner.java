@@ -144,6 +144,7 @@ public class DistributePlanner {
         DataSink sink = senderPlan.getFragmentJob().getFragment().getSink();
         if (sink instanceof MultiCastDataSink) {
             MultiCastDataSink multiCastDataSink = (MultiCastDataSink) sink;
+            receiverPlan.getFragmentJob().getFragment().setOutputPartition(multiCastDataSink.getOutputPartition());
             for (DataStreamSink realSink : multiCastDataSink.getDataStreamSinks()) {
                 if (realSink.getExchNodeId() == linkNode.getId()) {
                     senderPlan.addDestinations(realSink, receiverInstances);
