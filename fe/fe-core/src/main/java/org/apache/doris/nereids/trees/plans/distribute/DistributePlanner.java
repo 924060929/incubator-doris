@@ -44,6 +44,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.SetMultimap;
 
 import java.util.Arrays;
@@ -51,8 +52,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /** DistributePlanner */
 public class DistributePlanner {
@@ -220,12 +219,10 @@ public class DistributePlanner {
     }
 
     private List<AssignedJob> getFirstInstancePerWorker(List<AssignedJob> instances) {
-        Map<DistributedPlanWorker, AssignedJob> firstInstancePerWorker = instances.stream()
-                .collect(Collectors.toMap(
-                        AssignedJob::getAssignedWorker,
-                        Function.identity(),
-                        (firstInstance, otherInstance) -> firstInstance)
-                );
+        Map<DistributedPlanWorker, AssignedJob> firstInstancePerWorker = Maps.newLinkedHashMap();
+        for (AssignedJob instance : instances) {
+            firstInstancePerWorker.putIfAbsent(instance.getAssignedWorker(), instance);
+        }
         return Utils.fastToImmutableList(firstInstancePerWorker.values());
     }
 }
