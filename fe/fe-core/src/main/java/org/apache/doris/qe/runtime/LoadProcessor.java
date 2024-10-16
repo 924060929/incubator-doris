@@ -182,7 +182,7 @@ public class LoadProcessor implements JobProcessor {
         // and returned_all_results_ is true.
         // (UpdateStatus() initiates cancellation, if it hasn't already been initiated)
         if (!status.ok()) {
-            if (coordinatorContext.isEof() && status.isCancelled()) {
+            if (coordinatorContext.isEos() && status.isCancelled()) {
                 LOG.warn("Query {} has returned all results, fragment_id={} instance_id={}, be={}"
                                 + " is reporting failed status {}",
                         DebugUtil.printId(queryId), params.getFragmentId(),

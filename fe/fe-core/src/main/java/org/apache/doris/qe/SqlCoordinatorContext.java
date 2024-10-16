@@ -170,8 +170,8 @@ public class SqlCoordinatorContext {
                 .ifPresent(profileAction);
     }
 
-    public boolean isEof() {
-        return coordinator.isEof();
+    public boolean isEos() {
+        return jobProcessor instanceof QueryProcessor && coordinator.isEos();
     }
 
     public void cancelSchedule(Status cancelReason) {
@@ -193,7 +193,7 @@ public class SqlCoordinatorContext {
     public synchronized Status updateStatusIfOk(Status newStatus) {
         // If query is done, we will ignore their cancelled updates, and let the remote fragments to clean up async.
         Status originStatus = readCloneStatus();
-        if (coordinator.getJobProcessor() instanceof QueryProcessor && coordinator.isEof()
+        if (coordinator.getJobProcessor() instanceof QueryProcessor && coordinator.isEos()
                 && newStatus.isCancelled()) {
             return originStatus;
         }

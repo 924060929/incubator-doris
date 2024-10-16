@@ -173,7 +173,7 @@ public class NereidsSqlCoordinator extends Coordinator {
         return coordinatorContext.asQueryProcessor().getNext();
     }
 
-    public boolean isEof() {
+    public boolean isEos() {
         return coordinatorContext.asQueryProcessor().isEos();
     }
 
