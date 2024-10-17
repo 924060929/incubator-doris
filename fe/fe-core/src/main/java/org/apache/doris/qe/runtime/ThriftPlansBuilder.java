@@ -56,11 +56,12 @@ import org.apache.doris.thrift.TScanRangeParams;
 import org.apache.doris.thrift.TTopnFilterDesc;
 
 import com.google.common.base.Suppliers;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.LinkedHashMultiset;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
-import com.google.common.collect.Sets;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -71,7 +72,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -103,15 +103,14 @@ public class ThriftPlansBuilder {
             sharedFileScanRangeParams.putAll(computeFileScanRangeParams(currentFragmentPlan));
 
             Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(currentFragmentPlan);
+            ListMultimap<DistributedPlanWorker, AssignedJob> instancesPerWorker
+                    = groupInstancePerWorker(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
 
-            for (int instanceNumInCurrentFragment = 0;
-                    instanceNumInCurrentFragment < currentFragmentPlan.getInstanceJobs().size();
-                    instanceNumInCurrentFragment++) {
-                AssignedJob instanceJob = currentFragmentPlan.getInstanceJobs().get(instanceNumInCurrentFragment);
+            for (AssignedJob instanceJob : currentFragmentPlan.getInstanceJobs()) {
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
-                        exchangeSenderNum, sharedFileScanRangeParams,
+                        instancesPerWorker, exchangeSenderNum, sharedFileScanRangeParams,
                         workerProcessInstanceNum, coordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
@@ -155,6 +154,15 @@ public class ThriftPlansBuilder {
             }
         }
         return fragmentsGroupByWorker;
+    }
+
+    private static ListMultimap<DistributedPlanWorker, AssignedJob>
+    groupInstancePerWorker(PipelineDistributedPlan fragmentPlan) {
+        ListMultimap<DistributedPlanWorker, AssignedJob> workerToInstances = ArrayListMultimap.create();
+        for (AssignedJob instanceJob : fragmentPlan.getInstanceJobs()) {
+            workerToInstances.put(instanceJob.getAssignedWorker(), instanceJob);
+        }
+        return workerToInstances;
     }
 
     private static void setRuntimePredicateIfNeed(SqlCoordinatorContext coordinatorContext) {
@@ -284,6 +292,7 @@ public class ThriftPlansBuilder {
     private static TPipelineFragmentParams fragmentToThriftIfAbsent(
             PipelineDistributedPlan fragmentPlan, AssignedJob assignedJob,
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToFragmentParams,
+            ListMultimap<DistributedPlanWorker, AssignedJob> instancesPerWorker,
             Map<Integer, Integer> exchangeSenderNum,
             Map<Integer, TFileScanRangeParams> fileScanRangeParamsMap,
             Multiset<DistributedPlanWorker> workerProcessInstanceNum,
@@ -352,10 +361,22 @@ public class ThriftPlansBuilder {
                 params.setNumBuckets(bucketNum);
             }
 
-            params.setBucketSeqToInstanceIdx(computeBucketIdToInstanceId(fragmentPlan));
-            params.setShuffleIdxToInstanceIdx(computeDestIdToInstanceId(fragmentPlan));
+            List<AssignedJob> instances = instancesPerWorker.get(worker);
+            Map<AssignedJob, Integer> instanceToIndex = instanceToIndex(instances);
+
+            params.setBucketSeqToInstanceIdx(computeBucketIdToInstanceId(fragmentPlan, w, instanceToIndex));
+            params.setShuffleIdxToInstanceIdx(computeDestIdToInstanceId(fragmentPlan, w, instanceToIndex));
             return params;
         });
+    }
+
+    private static Map<AssignedJob, Integer> instanceToIndex(List<AssignedJob> instances) {
+        Map<AssignedJob, Integer> instanceToIndex = Maps.newLinkedHashMap();
+        for (int instanceIndex = 0; instanceIndex < instances.size(); instanceIndex++) {
+            instanceToIndex.put(instances.get(instanceIndex), instanceIndex);
+        }
+
+        return instanceToIndex;
     }
 
     private static Map<Integer, TFileScanRangeParams> computeFileScanRangeParams(
@@ -464,7 +485,9 @@ public class ThriftPlansBuilder {
         return new PerNodeScanParams(perNodeScanRanges, perNodeSharedScans);
     }
 
-    private static Map<Integer, Integer> computeBucketIdToInstanceId(PipelineDistributedPlan receivePlan) {
+    private static Map<Integer, Integer> computeBucketIdToInstanceId(
+            PipelineDistributedPlan receivePlan, DistributedPlanWorker worker,
+            Map<AssignedJob, Integer> instanceToIndex) {
         List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
         if (instanceJobs.isEmpty() || !(instanceJobs.get(0).getScanSource() instanceof BucketScanSource)) {
             // bucket_seq_to_instance_id is optional, so we can return null to save memory
@@ -473,34 +496,41 @@ public class ThriftPlansBuilder {
 
         Map<Integer, Integer> bucketIdToInstanceId = Maps.newLinkedHashMap();
         for (AssignedJob instanceJob : instanceJobs) {
+            if (instanceJob.getAssignedWorker().id() != worker.id()) {
+                continue;
+            }
             if (instanceJob instanceof LocalShuffleAssignedJob
                     && ((LocalShuffleAssignedJob) instanceJob).receiveDataFromLocal) {
                 continue;
             }
+            Integer instanceIndex = instanceToIndex.get(instanceJob);
             BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
             for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
-                bucketIdToInstanceId.put(bucketIndex, instanceJob.indexInUnassignedJob());
+                bucketIdToInstanceId.put(bucketIndex, instanceIndex);
             }
         }
         return bucketIdToInstanceId;
     }
 
-    private static Map<Integer, Integer> computeDestIdToInstanceId(PipelineDistributedPlan receivePlan) {
+    private static Map<Integer, Integer> computeDestIdToInstanceId(
+            PipelineDistributedPlan receivePlan, DistributedPlanWorker worker,
+            Map<AssignedJob, Integer> instanceToIndex) {
         if (receivePlan.getInputs().isEmpty()) {
             // shuffle_idx_to_index_id is required
             return Maps.newLinkedHashMap();
         }
 
-        AtomicInteger receiveFromRemoteInstanceNum = new AtomicInteger();
         Map<Integer, Integer> destIdToInstanceId = Maps.newLinkedHashMap();
-        filterInstancesWhichReceiveDataFromRemote(receivePlan, (instanceJob, instanceIdInThisBackend) ->
-                destIdToInstanceId.put(receiveFromRemoteInstanceNum.getAndIncrement(), instanceIdInThisBackend)
+        filterInstancesWhichReceiveDataFromRemote(
+                receivePlan, worker,
+                (instanceJob, destId) -> destIdToInstanceId.put(destId, instanceToIndex.get(instanceJob))
         );
         return destIdToInstanceId;
     }
 
     private static void filterInstancesWhichReceiveDataFromRemote(
-            PipelineDistributedPlan receivePlan, BiConsumer<AssignedJob, Integer> computeFn) {
+            PipelineDistributedPlan receivePlan, DistributedPlanWorker filterWorker,
+            BiConsumer<AssignedJob, Integer> computeFn) {
 
         // current only support all input plans have same destination with same order,
         // so we can get first input plan to compute shuffle index to instance id
@@ -515,23 +545,11 @@ public class ThriftPlansBuilder {
         for (Entry<DataSink, List<AssignedJob>> kv : sinkToDestInstances.entrySet()) {
             DataSink senderSink = kv.getKey();
             if (senderSink.getExchNodeId().asInt() == linkNode.getId().asInt()) {
-                Set<AssignedJob> destinations = Sets.newLinkedHashSet(kv.getValue());
-                Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
-                List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
-                for (AssignedJob instanceJob : instanceJobs) {
-                    if (!destinations.contains(instanceJob)) {
-                        // the non-first-local-shuffle instances per host
-                        // and non-first-share-broadcast-hash-table instances per host
-                        // are not need receive data from other fragments, so we will skip it
-                        continue;
+                for (int destId = 0; destId < kv.getValue().size(); destId++) {
+                    AssignedJob assignedJob = kv.getValue().get(destId);
+                    if (assignedJob.getAssignedWorker().id() == filterWorker.id()) {
+                        computeFn.accept(assignedJob, destId);
                     }
-
-                    AtomicInteger instanceCount = backendIdToInstanceCount.computeIfAbsent(
-                            instanceJob.getAssignedWorker().id(),
-                            (backendId) -> new AtomicInteger()
-                    );
-                    int instanceIdInThisBackend = instanceCount.getAndIncrement();
-                    computeFn.accept(instanceJob, instanceIdInThisBackend);
                 }
                 break;
             }

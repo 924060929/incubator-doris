@@ -107,4 +107,9 @@ public class StaticAssignedJob implements AssignedJob {
         }
         return scanSourceString.toString();
     }
+
+    @Override
+    public int hashCode() {
+        return indexInUnassignedJob;
+    }
 }
