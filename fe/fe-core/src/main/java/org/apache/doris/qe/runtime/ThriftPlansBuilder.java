@@ -472,12 +472,16 @@ public class ThriftPlansBuilder {
         }
 
         Map<Integer, Integer> bucketIdToInstanceId = Maps.newLinkedHashMap();
-        filterInstancesWhichReceiveDataFromRemote(receivePlan, (instanceJob, instanceIdInThisBackend) -> {
-            BucketScanSource scanSource = (BucketScanSource) instanceJob.getScanSource();
-            for (Integer bucketIndex : scanSource.bucketIndexToScanNodeToTablets.keySet()) {
-                bucketIdToInstanceId.put(bucketIndex, instanceIdInThisBackend);
+        for (AssignedJob instanceJob : instanceJobs) {
+            if (instanceJob instanceof LocalShuffleAssignedJob
+                    && ((LocalShuffleAssignedJob) instanceJob).receiveDataFromLocal) {
+                continue;
             }
-        });
+            BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
+            for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
+                bucketIdToInstanceId.put(bucketIndex, instanceJob.indexInUnassignedJob());
+            }
+        }
         return bucketIdToInstanceId;
     }
 
