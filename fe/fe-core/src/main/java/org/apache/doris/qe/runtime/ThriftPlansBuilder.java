@@ -510,7 +510,7 @@ public class ThriftPlansBuilder {
         Map<DataSink, List<AssignedJob>> sinkToDestInstances = firstInputPlan.getDestinations();
         for (Entry<DataSink, List<AssignedJob>> kv : sinkToDestInstances.entrySet()) {
             DataSink senderSink = kv.getKey();
-            if (senderSink.getExchNodeId() == linkNode.getId()) {
+            if (senderSink.getExchNodeId().asInt() == linkNode.getId().asInt()) {
                 Set<AssignedJob> destinations = Sets.newLinkedHashSet(kv.getValue());
                 Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
                 List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
