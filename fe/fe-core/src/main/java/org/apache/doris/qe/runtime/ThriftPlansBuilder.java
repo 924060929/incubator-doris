@@ -157,7 +157,7 @@ public class ThriftPlansBuilder {
     }
 
     private static ListMultimap<DistributedPlanWorker, AssignedJob>
-    groupInstancePerWorker(PipelineDistributedPlan fragmentPlan) {
+            groupInstancePerWorker(PipelineDistributedPlan fragmentPlan) {
         ListMultimap<DistributedPlanWorker, AssignedJob> workerToInstances = ArrayListMultimap.create();
         for (AssignedJob instanceJob : fragmentPlan.getInstanceJobs()) {
             workerToInstances.put(instanceJob.getAssignedWorker(), instanceJob);
