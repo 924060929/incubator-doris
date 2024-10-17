@@ -66,7 +66,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -501,16 +500,17 @@ public class ThriftPlansBuilder {
 
         // current only support all input plans have same destination with same order,
         // so we can get first input plan to compute shuffle index to instance id
-        Collection<DistributedPlan> inputPlans = receivePlan.getInputs().values();
-        if (inputPlans.isEmpty()) {
+        Set<Entry<ExchangeNode, DistributedPlan>> exchangeToChildPlanSet = receivePlan.getInputs().entries();
+        if (exchangeToChildPlanSet.isEmpty()) {
             return;
         }
-        PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) inputPlans.iterator().next();
-        PlanFragment receiverFragment = receivePlan.getFragmentJob().getFragment();
+        Entry<ExchangeNode, DistributedPlan> exchangeToChildPlan = exchangeToChildPlanSet.iterator().next();
+        ExchangeNode linkNode = exchangeToChildPlan.getKey();
+        PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) exchangeToChildPlan.getValue();
         Map<DataSink, List<AssignedJob>> sinkToDestInstances = firstInputPlan.getDestinations();
         for (Entry<DataSink, List<AssignedJob>> kv : sinkToDestInstances.entrySet()) {
             DataSink senderSink = kv.getKey();
-            if (senderSink.getFragment() == receiverFragment) {
+            if (senderSink.getExchNodeId() == linkNode.getId()) {
                 Set<AssignedJob> destinations = Sets.newLinkedHashSet(kv.getValue());
                 Map<Long, AtomicInteger> backendIdToInstanceCount = Maps.newLinkedHashMap();
                 List<AssignedJob> instanceJobs = receivePlan.getInstanceJobs();
