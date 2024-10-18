@@ -80,8 +80,9 @@ public class DistributePlanner {
             FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
             ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
             FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
+            FragmentIdMapping<DistributedPlan> linkedPlans = linkPlans(distributedPlans);
             updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
-            return linkPlans(distributedPlans);
+            return linkedPlans;
         } catch (Throwable t) {
             LOG.error("Failed to build distribute plans.\nPlan:\n"
                     + planner.getOptimizedPlan().treeString(), t);
