@@ -58,7 +58,7 @@ import java.util.Objects;
 
 /** DistributePlanner */
 public class DistributePlanner {
-    public static final Logger LOG = LogManager.getLogger(DistributePlanner.class);
+    private static final Logger LOG = LogManager.getLogger(DistributePlanner.class);
     private final NereidsPlanner planner;
     private final CascadesContext cascadesContext;
     private final FragmentIdMapping<PlanFragment> idToFragments;
@@ -76,8 +76,8 @@ public class DistributePlanner {
             FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
             return linkPlans(distributedPlans);
         } catch (Throwable t) {
-            LOG.error("Failed to build distribute plans.\nPlan:\n" + planner
-                    .getOptimizedPlan().treeString(), t);
+            LOG.error("Failed to build distribute plans.\nPlan:\n"
+                    + planner.getOptimizedPlan().treeString(), t);
             throw t;
         }
     }
