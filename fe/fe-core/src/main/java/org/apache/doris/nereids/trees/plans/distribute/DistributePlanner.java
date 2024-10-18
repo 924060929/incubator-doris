@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute;
 
+import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
@@ -38,6 +39,8 @@ import org.apache.doris.planner.MultiCastDataSink;
 import org.apache.doris.planner.MultiCastPlanFragment;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
+import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TUniqueId;
 
@@ -55,6 +58,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 /** DistributePlanner */
 public class DistributePlanner {
@@ -75,6 +80,7 @@ public class DistributePlanner {
             FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
             ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
             FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
+            updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
             return linkPlans(distributedPlans);
         } catch (Throwable t) {
             LOG.error("Failed to build distribute plans.\nPlan:\n"
@@ -233,5 +239,12 @@ public class DistributePlanner {
             firstInstancePerWorker.putIfAbsent(instance.getAssignedWorker(), instance);
         }
         return Utils.fastToImmutableList(firstInstancePerWorker.values());
+    }
+
+    private void updateProfileIfPresent(Consumer<SummaryProfile> profileAction) {
+        Optional.ofNullable(ConnectContext.get())
+                .map(ConnectContext::getExecutor)
+                .map(StmtExecutor::getSummaryProfile)
+                .ifPresent(profileAction);
     }
 }

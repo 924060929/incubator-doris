@@ -94,10 +94,11 @@ public class NereidsSqlCoordinator extends Coordinator {
 
     @Override
     public void exec() throws Exception {
+        coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
+
         enqueue(coordinatorContext.connectContext);
 
         processTopSink(coordinatorContext, coordinatorContext.planner);
-        coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
 
         QeProcessorImpl.INSTANCE.registerInstances(coordinatorContext.queryId, coordinatorContext.instanceNum);
 
