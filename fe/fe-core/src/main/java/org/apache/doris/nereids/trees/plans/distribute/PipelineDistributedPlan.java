@@ -41,6 +41,7 @@ public class PipelineDistributedPlan extends DistributedPlan {
     // current, we only support all instances of the same fragment reuse the same destination
     private Map<DataSink, List<AssignedJob>> destinations;
 
+    /** constructor */
     public PipelineDistributedPlan(
             UnassignedJob fragmentJob,
             List<AssignedJob> instanceJobs,
