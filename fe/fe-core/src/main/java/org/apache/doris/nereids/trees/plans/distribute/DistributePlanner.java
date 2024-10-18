@@ -47,6 +47,8 @@ import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.SetMultimap;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Arrays;
 import java.util.List;
@@ -56,6 +58,7 @@ import java.util.Objects;
 
 /** DistributePlanner */
 public class DistributePlanner {
+    public static final Logger LOG = LogManager.getLogger(DistributePlanner.class);
     private final NereidsPlanner planner;
     private final CascadesContext cascadesContext;
     private final FragmentIdMapping<PlanFragment> idToFragments;
@@ -67,10 +70,16 @@ public class DistributePlanner {
     }
 
     public FragmentIdMapping<DistributedPlan> plan() {
-        FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
-        ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
-        FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
-        return linkPlans(distributedPlans);
+        try {
+            FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
+            ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
+            FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
+            return linkPlans(distributedPlans);
+        } catch (Throwable t) {
+            LOG.error("Failed to build distribute plans.\nPlan:\n" + planner
+                    .getOptimizedPlan().treeString(), t);
+            throw t;
+        }
     }
 
     private FragmentIdMapping<DistributedPlan> buildDistributePlans(
