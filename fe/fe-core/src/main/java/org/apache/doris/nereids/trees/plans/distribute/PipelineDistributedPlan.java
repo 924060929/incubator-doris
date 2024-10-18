@@ -19,6 +19,7 @@ package org.apache.doris.nereids.trees.plans.distribute;
 
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.DataSink;
@@ -45,6 +46,16 @@ public class PipelineDistributedPlan extends DistributedPlan {
             List<AssignedJob> instanceJobs,
             SetMultimap<ExchangeNode, DistributedPlan> inputs) {
         super(fragmentJob, inputs);
+
+        long localShuffleInstanceNum = instanceJobs.stream()
+                .filter(LocalShuffleAssignedJob.class::isInstance)
+                .count();
+        if (localShuffleInstanceNum != 0 && localShuffleInstanceNum != instanceJobs.size()) {
+            throw new IllegalStateException("LocalShuffleAssignedJob num is " + localShuffleInstanceNum
+                    + ", should be 0 or " + instanceJobs.size() + ", fragmentJob: " + fragmentJob
+                    + ", instances: " + instanceJobs);
+        }
+
         this.instanceJobs = Utils.fastToImmutableList(
                 Objects.requireNonNull(instanceJobs, "instanceJobs can not be null")
         );
