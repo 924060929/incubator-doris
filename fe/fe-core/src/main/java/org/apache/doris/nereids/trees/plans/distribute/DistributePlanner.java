@@ -69,6 +69,7 @@ public class DistributePlanner {
         this.idToFragments = FragmentIdMapping.buildFragmentMapping(fragments);
     }
 
+    /** plan */
     public FragmentIdMapping<DistributedPlan> plan() {
         try {
             FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
