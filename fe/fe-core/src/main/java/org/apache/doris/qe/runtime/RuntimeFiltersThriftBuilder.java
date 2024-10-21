@@ -98,22 +98,16 @@ public class RuntimeFiltersThriftBuilder {
                 for (RuntimeFilterTarget target : targets) {
                     targetParams.add(new TRuntimeFilterTargetParams(target.instanceId, target.address));
                 }
-                runtimeFilterParams.putToRidToTargetParam(
-                        rf.getFilterId().asInt(), targetParams
-                );
+                runtimeFilterParams.putToRidToTargetParam(rf.getFilterId().asInt(), targetParams);
             }
         }
         for (Map.Entry<RuntimeFilterId, Integer> entry : ridToBuilderNum.entrySet()) {
             boolean isBroadcastRuntimeFilter = broadcastRuntimeFilterIds.contains(entry.getKey().asInt());
             int builderNum = isBroadcastRuntimeFilter ? 1 : entry.getValue();
-            runtimeFilterParams.putToRuntimeFilterBuilderNum(
-                    entry.getKey().asInt(), builderNum
-            );
+            runtimeFilterParams.putToRuntimeFilterBuilderNum(entry.getKey().asInt(), builderNum);
         }
         for (RuntimeFilter rf : runtimeFilters) {
-            runtimeFilterParams.putToRidToRuntimeFilter(
-                    rf.getFilterId().asInt(), rf.toThrift()
-            );
+            runtimeFilterParams.putToRidToRuntimeFilter(rf.getFilterId().asInt(), rf.toThrift());
         }
     }
 
@@ -122,7 +116,7 @@ public class RuntimeFiltersThriftBuilder {
         PipelineDistributedPlan topMostPlan = distributedPlans.get(distributedPlans.size() - 1);
         AssignedJob mergeInstance = topMostPlan.getInstanceJobs().get(0);
         BackendWorker worker = (BackendWorker) mergeInstance.getAssignedWorker();
-        TNetworkAddress mergeAddress = new TNetworkAddress(worker.host(), worker.port());
+        TNetworkAddress mergeAddress = new TNetworkAddress(worker.host(), worker.brpcPort());
 
         List<RuntimeFilter> runtimeFilters = planner.getRuntimeFilters();
         Set<Integer> broadcastRuntimeFilterIds = runtimeFilters
@@ -144,7 +138,7 @@ public class RuntimeFiltersThriftBuilder {
                     Backend backend = backendWorker.getBackend();
                     targetFragments.add(new RuntimeFilterTarget(
                             instanceJob.instanceId(),
-                            new TNetworkAddress(backend.getHost(), backend.getBePort())
+                            new TNetworkAddress(backend.getHost(), backend.getBrpcPort())
                     ));
                 }
             }
