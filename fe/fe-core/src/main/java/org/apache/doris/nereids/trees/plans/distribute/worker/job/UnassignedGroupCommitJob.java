@@ -17,8 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
-import org.apache.doris.nereids.CascadesContext;
-import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorkerManager;
 import org.apache.doris.planner.ExchangeNode;
@@ -33,19 +32,17 @@ import java.util.List;
 
 /** UnassignedGroupCommitJob */
 public class UnassignedGroupCommitJob extends AbstractUnassignedJob {
-    public UnassignedGroupCommitJob(NereidsPlanner planner,
+    public UnassignedGroupCommitJob(StatementContext statementContext,
             PlanFragment fragment, List<ScanNode> scanNodes,
             ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob) {
-        super(planner, fragment, scanNodes, exchangeToChildJob);
+        super(statementContext, fragment, scanNodes, exchangeToChildJob);
     }
 
     @Override
     public List<AssignedJob> computeAssignedJobs(
             DistributedPlanWorkerManager workerManager, ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
-        CascadesContext cascadesContext = planner.getCascadesContext();
-        TUniqueId instanceId = cascadesContext.getConnectContext().nextInstanceId();
-        BackendWorker selectBackend = new BackendWorker(
-                cascadesContext.getStatementContext().getGroupCommitMergeBackend());
+        TUniqueId instanceId = statementContext.getConnectContext().nextInstanceId();
+        BackendWorker selectBackend = new BackendWorker(statementContext.getGroupCommitMergeBackend());
         return ImmutableList.of(
                 new StaticAssignedJob(
                         0, instanceId, this, selectBackend, DefaultScanSource.empty()

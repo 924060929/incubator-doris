@@ -17,7 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
-import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorkerManager;
 import org.apache.doris.planner.ExchangeNode;
@@ -33,8 +33,8 @@ import java.util.List;
 
 /** UnassignedQueryConstantJob */
 public class UnassignedQueryConstantJob extends AbstractUnassignedJob {
-    public UnassignedQueryConstantJob(NereidsPlanner planner, PlanFragment fragment) {
-        super(planner, fragment, ImmutableList.of(), ArrayListMultimap.create());
+    public UnassignedQueryConstantJob(StatementContext statementContext, PlanFragment fragment) {
+        super(statementContext, fragment, ImmutableList.of(), ArrayListMultimap.create());
     }
 
     @Override

@@ -22,7 +22,7 @@ import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.Tablet;
-import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorkerManager;
 import org.apache.doris.nereids.trees.plans.distribute.worker.ScanWorkerSelector;
@@ -59,10 +59,10 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
 
     /** UnassignedScanNativeTableJob */
     public UnassignedScanBucketOlapTableJob(
-            NereidsPlanner planner, PlanFragment fragment, List<OlapScanNode> olapScanNodes,
+            StatementContext statementContext, PlanFragment fragment, List<OlapScanNode> olapScanNodes,
             ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob,
             ScanWorkerSelector scanWorkerSelector) {
-        super(planner, fragment, (List) olapScanNodes, exchangeToChildJob);
+        super(statementContext, fragment, (List) olapScanNodes, exchangeToChildJob);
         this.scanWorkerSelector = Objects.requireNonNull(
                 scanWorkerSelector, "scanWorkerSelector cat not be null");
 
@@ -96,7 +96,7 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
         //    }
         // }
         return scanWorkerSelector.selectReplicaAndWorkerWithBucket(
-                this, planner.getCascadesContext().getConnectContext()
+                this, statementContext.getConnectContext()
         );
     }
 

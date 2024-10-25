@@ -17,7 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
-import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.trees.AbstractTreeNode;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.planner.ExchangeNode;
@@ -32,16 +32,16 @@ import java.util.Objects;
 /** AbstractUnassignedJob */
 public abstract class AbstractUnassignedJob
         extends AbstractTreeNode<UnassignedJob> implements UnassignedJob {
-    protected final NereidsPlanner planner;
+    protected final StatementContext statementContext;
     protected final PlanFragment fragment;
     protected final List<ScanNode> scanNodes;
     protected final ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob;
 
     /** AbstractUnassignedJob */
-    public AbstractUnassignedJob(NereidsPlanner planner, PlanFragment fragment,
+    public AbstractUnassignedJob(StatementContext statementContext, PlanFragment fragment,
             List<ScanNode> scanNodes, ListMultimap<ExchangeNode, UnassignedJob> exchangeToChildJob) {
         super(Utils.fastToImmutableList(exchangeToChildJob.values()));
-        this.planner = Objects.requireNonNull(planner, "planner can not be null");
+        this.statementContext = Objects.requireNonNull(statementContext, "statementContext can not be null");
         this.fragment = Objects.requireNonNull(fragment, "fragment can not be null");
         this.scanNodes = Utils.fastToImmutableList(
                 Objects.requireNonNull(scanNodes, "scanNodes can not be null")
@@ -51,8 +51,8 @@ public abstract class AbstractUnassignedJob
     }
 
     @Override
-    public NereidsPlanner getPlanner() {
-        return planner;
+    public StatementContext getStatementContext() {
+        return statementContext;
     }
 
     @Override

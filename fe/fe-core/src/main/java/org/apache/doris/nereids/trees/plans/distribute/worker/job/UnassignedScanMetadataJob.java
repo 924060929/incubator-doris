@@ -17,7 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.distribute.worker.job;
 
-import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorkerManager;
 import org.apache.doris.nereids.trees.plans.distribute.worker.ScanWorkerSelector;
@@ -39,9 +39,9 @@ public class UnassignedScanMetadataJob extends AbstractUnassignedScanJob {
     private final ScanWorkerSelector scanWorkerSelector;
 
     public UnassignedScanMetadataJob(
-            NereidsPlanner planner, PlanFragment fragment,
+            StatementContext statementContext, PlanFragment fragment,
             SchemaScanNode schemaScanNode, ScanWorkerSelector scanWorkerSelector) {
-        super(planner, fragment, ImmutableList.of(schemaScanNode), ArrayListMultimap.create());
+        super(statementContext, fragment, ImmutableList.of(schemaScanNode), ArrayListMultimap.create());
         this.scanWorkerSelector = Objects.requireNonNull(
                 scanWorkerSelector, "scanWorkerSelector cat not be null");
         this.schemaScanNode = schemaScanNode;
@@ -51,7 +51,7 @@ public class UnassignedScanMetadataJob extends AbstractUnassignedScanJob {
     protected Map<DistributedPlanWorker, UninstancedScanSource> multipleMachinesParallelization(
             DistributedPlanWorkerManager workerManager, ListMultimap<ExchangeNode, AssignedJob> inputJobs) {
         return scanWorkerSelector.selectReplicaAndWorkerWithoutBucket(
-                schemaScanNode, planner.getCascadesContext().getConnectContext()
+                schemaScanNode, statementContext.getConnectContext()
         );
     }
 

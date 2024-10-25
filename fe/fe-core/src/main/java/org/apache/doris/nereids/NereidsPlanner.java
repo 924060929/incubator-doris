@@ -471,7 +471,7 @@ public class NereidsPlanner extends Planner {
             return;
         }
 
-        distributedPlans = new DistributePlanner(this, fragments).plan();
+        distributedPlans = new DistributePlanner(statementContext, fragments).plan();
         if (statementContext.getConnectContext().getExecutor() != null) {
             statementContext.getConnectContext().getExecutor().getSummaryProfile().setNereidsDistributeTime();
         }

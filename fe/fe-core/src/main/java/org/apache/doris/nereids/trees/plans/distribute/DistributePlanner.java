@@ -18,8 +18,7 @@
 package org.apache.doris.nereids.trees.plans.distribute;
 
 import org.apache.doris.common.profile.SummaryProfile;
-import org.apache.doris.nereids.CascadesContext;
-import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DummyWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
@@ -64,28 +63,26 @@ import java.util.function.Consumer;
 /** DistributePlanner */
 public class DistributePlanner {
     private static final Logger LOG = LogManager.getLogger(DistributePlanner.class);
-    private final NereidsPlanner planner;
-    private final CascadesContext cascadesContext;
+    private final StatementContext statementContext;
     private final FragmentIdMapping<PlanFragment> idToFragments;
 
-    public DistributePlanner(NereidsPlanner planner, List<PlanFragment> fragments) {
-        this.planner = Objects.requireNonNull(planner, "planner can not be null");
-        this.cascadesContext = planner.getCascadesContext();
+    public DistributePlanner(StatementContext statementContext, List<PlanFragment> fragments) {
+        this.statementContext = Objects.requireNonNull(statementContext, "statementContext can not be null");
         this.idToFragments = FragmentIdMapping.buildFragmentMapping(fragments);
     }
 
     /** plan */
     public FragmentIdMapping<DistributedPlan> plan() {
         try {
-            FragmentIdMapping<UnassignedJob> fragmentJobs = UnassignedJobBuilder.buildJobs(planner, idToFragments);
+            FragmentIdMapping<UnassignedJob> fragmentJobs
+                    = UnassignedJobBuilder.buildJobs(statementContext, idToFragments);
             ListMultimap<PlanFragmentId, AssignedJob> instanceJobs = AssignedJobBuilder.buildJobs(fragmentJobs);
             FragmentIdMapping<DistributedPlan> distributedPlans = buildDistributePlans(fragmentJobs, instanceJobs);
             FragmentIdMapping<DistributedPlan> linkedPlans = linkPlans(distributedPlans);
             updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
             return linkedPlans;
         } catch (Throwable t) {
-            LOG.error("Failed to build distribute plans.\nPlan:\n"
-                    + planner.getOptimizedPlan().treeString(), t);
+            LOG.error("Failed to build distribute plans", t);
             throw t;
         }
     }
@@ -127,7 +124,7 @@ public class DistributePlanner {
     }
 
     private FragmentIdMapping<DistributedPlan> linkPlans(FragmentIdMapping<DistributedPlan> plans) {
-        boolean enableShareHashTableForBroadcastJoin = cascadesContext.getConnectContext()
+        boolean enableShareHashTableForBroadcastJoin = statementContext.getConnectContext()
                 .getSessionVariable()
                 .enableShareHashTableForBroadcastJoin;
         for (DistributedPlan receiverPlan : plans.values()) {
