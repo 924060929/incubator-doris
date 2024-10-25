@@ -17,7 +17,6 @@
 
 package org.apache.doris.qe.runtime;
 
-import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.BackendWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
@@ -112,13 +111,12 @@ public class RuntimeFiltersThriftBuilder {
     }
 
     public static RuntimeFiltersThriftBuilder compute(
-            NereidsPlanner planner, List<PipelineDistributedPlan> distributedPlans) {
+            List<RuntimeFilter> runtimeFilters, List<PipelineDistributedPlan> distributedPlans) {
         PipelineDistributedPlan topMostPlan = distributedPlans.get(distributedPlans.size() - 1);
         AssignedJob mergeInstance = topMostPlan.getInstanceJobs().get(0);
         BackendWorker worker = (BackendWorker) mergeInstance.getAssignedWorker();
         TNetworkAddress mergeAddress = new TNetworkAddress(worker.host(), worker.brpcPort());
 
-        List<RuntimeFilter> runtimeFilters = planner.getRuntimeFilters();
         Set<Integer> broadcastRuntimeFilterIds = runtimeFilters
                 .stream()
                 .filter(RuntimeFilter::isBroadcast)

@@ -736,6 +736,10 @@ public class NereidsPlanner extends Planner {
         return cascadesContext;
     }
 
+    public ConnectContext getConnectContext() {
+        return cascadesContext.getConnectContext();
+    }
+
     public static PhysicalProperties buildInitRequireProperties() {
         return PhysicalProperties.GATHER;
     }

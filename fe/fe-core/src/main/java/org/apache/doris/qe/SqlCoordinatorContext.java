@@ -17,6 +17,7 @@
 
 package org.apache.doris.qe;
 
+import org.apache.doris.analysis.DescriptorTable;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Status;
@@ -29,11 +30,10 @@ import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
-import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSource;
-import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
-import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanRanges;
-import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
+import org.apache.doris.nereids.trees.plans.physical.TopnFilter;
 import org.apache.doris.planner.DataSink;
+import org.apache.doris.planner.PlanFragment;
+import org.apache.doris.planner.RuntimeFilter;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.runtime.LoadProcessor;
 import org.apache.doris.qe.runtime.QueryProcessor;
@@ -48,6 +48,7 @@ import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TResourceLimit;
 import org.apache.doris.thrift.TUniqueId;
 
+import com.clearspring.analytics.util.Lists;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
@@ -72,74 +73,100 @@ public class SqlCoordinatorContext {
 
     // these are some constant parameters
     public final NereidsSqlCoordinator coordinator;
+    public final List<PlanFragment> fragments;
+    public final boolean isBlockQuery;
     public final DataSink dataSink;
     public final ExecutionProfile executionProfile;
     public final ConnectContext connectContext;
-    public final NereidsPlanner planner;
+    public final PipelineDistributedPlan topDistributedPlan;
+    public final List<PipelineDistributedPlan> distributedPlans;
     public final TUniqueId queryId;
     public final TQueryGlobals queryGlobals;
     public final TQueryOptions queryOptions;
     public final TDescriptorTable descriptorTable;
-    public final TNetworkAddress coordinatorAddress;
-    public final TNetworkAddress directConnectFrontendAddress;
-    public final long timeoutDeadline;
-    public final boolean twoPhaseExecution;
-    public final int instanceNum;
+    public final TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
+    // public final TNetworkAddress directConnectFrontendAddress;
+    public final List<RuntimeFilter> runtimeFilters;
+    public final List<TopnFilter> topnFilters;
+    public final List<ScanNode> scanNodes;
+    public final Supplier<Long> timeoutDeadline = Suppliers.memoize(this::computeTimeoutDeadline);
+    public final Supplier<Integer> instanceNum = Suppliers.memoize(this::computeInstanceNum);
     public final Supplier<Set<TUniqueId>> instanceIds = Suppliers.memoize(this::getInstanceIds);
     public final Supplier<Map<TNetworkAddress, Long>> backends = Suppliers.memoize(this::getBackends);
     public final Supplier<Integer> scanRangeNum = Suppliers.memoize(this::getScanRangeNum);
+    public final Supplier<TNetworkAddress> directConnectFrontendAddress
+            = Suppliers.memoize(this::computeDirectConnectCoordinator);
 
     // these are some mutable states
-    private volatile Status status;
-    private volatile Optional<QueryQueue> queryQueue;
-    private volatile Optional<QueueToken> queueToken;
+    private volatile Status status = new Status();
+    private volatile Optional<QueryQueue> queryQueue = Optional.empty();
+    private volatile Optional<QueueToken> queueToken = Optional.empty();
     private volatile List<TPipelineWorkloadGroup> workloadGroups = ImmutableList.of();
 
     // query or load processor
     private volatile JobProcessor jobProcessor;
 
-    private SqlCoordinatorContext(NereidsSqlCoordinator coordinator,
+    // for sql execution
+    private SqlCoordinatorContext(
+            NereidsSqlCoordinator coordinator,
             ConnectContext connectContext,
-            NereidsPlanner planner,
+            boolean isBlockQuery,
+            List<PipelineDistributedPlan> distributedPlans,
+            List<PlanFragment> fragments,
+            List<RuntimeFilter> runtimeFilters,
+            List<TopnFilter> topnFilters,
+            List<ScanNode> scanNodes,
             ExecutionProfile executionProfile,
             TQueryGlobals queryGlobals,
             TQueryOptions queryOptions,
-            TDescriptorTable descriptorTable,
-            TNetworkAddress coordinatorAddress,
-            TNetworkAddress directConnectFrontendAddress) {
+            TDescriptorTable descriptorTable) {
         this.connectContext = connectContext;
-        this.planner = planner;
+        this.isBlockQuery = isBlockQuery;
+        this.fragments = fragments;
+        this.distributedPlans = distributedPlans;
+        this.topDistributedPlan = distributedPlans.get(distributedPlans.size() - 1);
+        this.dataSink = topDistributedPlan.getFragmentJob().getFragment().getSink();
+        this.runtimeFilters = runtimeFilters == null ? Lists.newArrayList() : runtimeFilters;
+        this.topnFilters = topnFilters == null ? Lists.newArrayList() : topnFilters;
+        this.scanNodes = scanNodes;
         this.queryId = connectContext.queryId();
         this.executionProfile = executionProfile;
         this.queryGlobals = queryGlobals;
         this.queryOptions = queryOptions;
         this.descriptorTable = descriptorTable;
-        this.coordinatorAddress = coordinatorAddress;
-        this.directConnectFrontendAddress = directConnectFrontendAddress;
-
-        PipelineDistributedPlan topPlan = (PipelineDistributedPlan) planner.getDistributedPlans().last();
-        this.dataSink = topPlan.getFragmentJob().getFragment().getSink();
-
-        // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
-        // else use exec_plan_fragments directly.
-        // we choose #fragments > 1 because in some cases
-        // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
-        // For example: select * from numbers("number"="10") will generate ExchangeNode and
-        // TableValuedFunctionScanNode, we should ensure TableValuedFunctionScanNode does not
-        // send data until ExchangeNode is ready to receive.
-        this.twoPhaseExecution = planner.getDistributedPlans().size() > 1;
-        this.timeoutDeadline = System.currentTimeMillis() + queryOptions.getExecutionTimeout() * 1000L;
 
         this.coordinator = Objects.requireNonNull(coordinator, "coordinator can not be null");
-        this.status = new Status();
+    }
 
-        this.instanceNum = planner.getDistributedPlans().valueList()
-                .stream().map(plan -> ((PipelineDistributedPlan) plan).getInstanceJobs().size())
-                .reduce(Integer::sum)
-                .get();
+    // for broker load
+    private SqlCoordinatorContext(
+            NereidsSqlCoordinator coordinator,
+            long jobId,
+            List<PlanFragment> fragments,
+            List<PipelineDistributedPlan> distributedPlans,
+            List<ScanNode> scanNodes,
+            TUniqueId queryId,
+            TQueryOptions queryOptions,
+            TQueryGlobals queryGlobals,
+            TDescriptorTable descriptorTable,
+            ExecutionProfile executionProfile) {
+        this.coordinator = coordinator;
+        this.isBlockQuery = true;
+        this.fragments = fragments;
+        this.distributedPlans = distributedPlans;
+        this.topDistributedPlan = distributedPlans.get(distributedPlans.size() - 1);
+        this.dataSink = topDistributedPlan.getFragmentJob().getFragment().getSink();
+        this.scanNodes = scanNodes;
+        this.queryId = queryId;
+        this.queryOptions = queryOptions;
+        this.queryGlobals = queryGlobals;
+        this.descriptorTable = descriptorTable;
+        this.executionProfile = executionProfile;
 
-        this.queryQueue = Optional.empty();
-        this.queueToken = Optional.empty();
+        this.connectContext = ConnectContext.get();
+        this.runtimeFilters = ImmutableList.of();
+        this.topnFilters = ImmutableList.of();
+        this.jobProcessor = new LoadProcessor(this, jobId);
     }
 
     public void setQueueInfo(QueryQueue queryQueue, QueueToken queueToken) {
@@ -168,6 +195,17 @@ public class SqlCoordinatorContext {
                 .map(ConnectContext::getExecutor)
                 .map(StmtExecutor::getSummaryProfile)
                 .ifPresent(profileAction);
+    }
+
+    public boolean twoPhaseExecution() {
+        // If #fragments >=2, use twoPhaseExecution with exec_plan_fragments_prepare and exec_plan_fragments_start,
+        // else use exec_plan_fragments directly.
+        // we choose #fragments > 1 because in some cases
+        // we need ensure that A fragment is already prepared to receive data before B fragment sends data.
+        // For example: select * from numbers("number"="10") will generate ExchangeNode and
+        // TableValuedFunctionScanNode, we should ensure TableValuedFunctionScanNode does not
+        // send data until ExchangeNode is ready to receive.
+        return distributedPlans.size() > 1;
     }
 
     public boolean isEos() {
@@ -228,17 +266,11 @@ public class SqlCoordinatorContext {
         return (QueryProcessor) jobProcessor;
     }
 
-    public static SqlCoordinatorContext build(NereidsPlanner planner, NereidsSqlCoordinator coordinator) {
+    public static SqlCoordinatorContext buildForSql(NereidsPlanner planner, NereidsSqlCoordinator coordinator) {
         ConnectContext connectContext = planner.getCascadesContext().getConnectContext();
         TQueryOptions queryOptions = initQueryOptions(connectContext);
         TQueryGlobals queryGlobals = initQueryGlobals(connectContext);
         TDescriptorTable descriptorTable = planner.getDescTable().toThrift();
-        TNetworkAddress coordinatorAddress = new TNetworkAddress(Coordinator.localIP, Config.rpc_port);
-        String currentConnectedFEIp = connectContext.getCurrentConnectedFEIp();
-        TNetworkAddress directConnectFrontendAddress =
-                connectContext.isProxy() && !StringUtils.isBlank(currentConnectedFEIp)
-                        ? new TNetworkAddress(currentConnectedFEIp, Config.rpc_port)
-                        : coordinatorAddress;
 
         ExecutionProfile executionProfile = new ExecutionProfile(
                 connectContext.queryId,
@@ -248,9 +280,42 @@ public class SqlCoordinatorContext {
                         .collect(Collectors.toList())
         );
         return new SqlCoordinatorContext(
-                coordinator, connectContext, planner, executionProfile, queryGlobals, queryOptions, descriptorTable,
-                coordinatorAddress, directConnectFrontendAddress
+                coordinator, connectContext, planner.isBlockQuery(),
+                planner.getDistributedPlans().valueList(),
+                planner.getFragments(), planner.getRuntimeFilters(), planner.getTopnFilters(),
+                planner.getScanNodes(), executionProfile, queryGlobals, queryOptions, descriptorTable
         );
+    }
+
+    public static SqlCoordinatorContext buildForLoad(
+            NereidsSqlCoordinator coordinator,
+            long jobId, TUniqueId queryId,
+            List<PlanFragment> fragments,
+            List<PipelineDistributedPlan> distributedPlans,
+            List<ScanNode> scanNodes,
+            DescriptorTable descTable,
+            String timezone, boolean loadZeroTolerance,
+            boolean enableProfile) {
+        TQueryOptions queryOptions = new TQueryOptions();
+        queryOptions.setEnableProfile(enableProfile);
+        queryOptions.setBeExecVersion(Config.be_exec_version);
+
+        TQueryGlobals queryGlobals = new TQueryGlobals();
+        queryGlobals.setNowString(TimeUtils.getDatetimeFormatWithTimeZone().format(LocalDateTime.now()));
+        queryGlobals.setTimestampMs(System.currentTimeMillis());
+        queryGlobals.setTimeZone(timezone);
+        queryGlobals.setLoadZeroTolerance(loadZeroTolerance);
+
+        ExecutionProfile executionProfile = new ExecutionProfile(
+                queryId,
+                fragments.stream()
+                        .map(fragment -> fragment.getFragmentId().asInt())
+                        .collect(Collectors.toList())
+        );
+
+        return new SqlCoordinatorContext(coordinator, jobId, fragments, distributedPlans,
+                scanNodes, queryId, queryOptions, queryGlobals, descTable.toThrift(),
+                executionProfile);
     }
 
     private static TQueryOptions initQueryOptions(ConnectContext context) {
@@ -307,7 +372,7 @@ public class SqlCoordinatorContext {
 
     private Set<TUniqueId> getInstanceIds() {
         Set<TUniqueId> instanceIds = Sets.newLinkedHashSet();
-        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
+        for (DistributedPlan distributedPlan : distributedPlans) {
             PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
             List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
             for (AssignedJob instanceJob : instanceJobs) {
@@ -317,9 +382,21 @@ public class SqlCoordinatorContext {
         return instanceIds;
     }
 
+    private Integer computeInstanceNum() {
+        return distributedPlans
+                .stream()
+                .map(plan -> plan.getInstanceJobs().size())
+                .reduce(Integer::sum)
+                .get();
+    }
+
+    private long computeTimeoutDeadline() {
+        return System.currentTimeMillis() + queryOptions.getExecutionTimeout() * 1000L;
+    }
+
     private Map<TNetworkAddress, Long> getBackends() {
         Map<TNetworkAddress, Long> backends = Maps.newLinkedHashMap();
-        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
+        for (DistributedPlan distributedPlan : distributedPlans) {
             PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
             List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
             for (AssignedJob instanceJob : instanceJobs) {
@@ -330,52 +407,19 @@ public class SqlCoordinatorContext {
         return backends;
     }
 
-    private Set<ScanNode> getScanNodes() {
-        Set<ScanNode> scanNodes = Sets.newLinkedHashSet();
-
-        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
-            PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
-            List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
-            for (AssignedJob instanceJob : instanceJobs) {
-                ScanSource scanSource = instanceJob.getScanSource();
-                if (scanSource instanceof DefaultScanSource) {
-                    for (ScanNode scanNode : ((DefaultScanSource) scanSource).scanNodeToScanRanges.keySet()) {
-                        scanNodes.add(scanNode);
-                    }
-                } else {
-                    BucketScanSource bucketScanSource = (BucketScanSource) scanSource;
-                    for (Map<ScanNode, ScanRanges> scanNodeToRanges
-                            : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
-                        scanNodes.addAll(scanNodeToRanges.keySet());
-                    }
-                }
-            }
+    private TNetworkAddress computeDirectConnectCoordinator() {
+        if (connectContext != null && connectContext.isProxy()
+                && !StringUtils.isEmpty(connectContext.getCurrentConnectedFEIp())) {
+            return new TNetworkAddress(ConnectContext.get().getCurrentConnectedFEIp(), Config.rpc_port);
+        } else {
+            return coordinatorAddress;
         }
-        return scanNodes;
     }
 
     private int getScanRangeNum() {
         int scanRangeNum = 0;
-
-        for (DistributedPlan distributedPlan : planner.getDistributedPlans().valueList()) {
-            PipelineDistributedPlan pipelinePlan = (PipelineDistributedPlan) distributedPlan;
-            List<AssignedJob> instanceJobs = pipelinePlan.getInstanceJobs();
-            for (AssignedJob instanceJob : instanceJobs) {
-                ScanSource scanSource = instanceJob.getScanSource();
-                if (scanSource instanceof DefaultScanSource) {
-                    for (ScanRanges scanRanges : ((DefaultScanSource) scanSource).scanNodeToScanRanges.values()) {
-                        scanRangeNum += scanRanges.params.size();
-                    }
-                } else {
-                    BucketScanSource bucketScanSource = (BucketScanSource) scanSource;
-                    for (Map<ScanNode, ScanRanges> scanNodeToRanges
-                            : bucketScanSource.bucketIndexToScanNodeToTablets.values()) {
-                        for (ScanRanges scanRanges : scanNodeToRanges.values()) {
-                            scanRangeNum += scanRanges.params.size();
-                        }
-                    }
-                }
-            }
+        for (ScanNode scanNode : scanNodes) {
+            scanRangeNum += scanNode.getScanRangeNum();
         }
         return scanRangeNum;
     }

@@ -3373,11 +3373,11 @@ public class SessionVariable implements Serializable, Writable {
         }
         ConnectContext connectContext = ConnectContext.get();
         if (connectContext == null) {
-            return false;
+            return true;
         }
         StatementContext statementContext = connectContext.getStatementContext();
         if (statementContext == null) {
-            return false;
+            return true;
         }
         StatementBase parsedStatement = statementContext.getParsedStatement();
         if (!(parsedStatement instanceof LogicalPlanAdapter)) {

@@ -74,7 +74,7 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
         super(new ChildrenRuntimeTasks<>(fragmentTasks));
         this.coordinatorContext = Objects.requireNonNull(coordinatorContext, "coordinatorContext can not be null");
         this.backendServiceProxy = Objects.requireNonNull(backendServiceProxy, "backendServiceProxy can not be null");
-        this.timeoutDeadline = coordinatorContext.timeoutDeadline;
+        this.timeoutDeadline = coordinatorContext.timeoutDeadline.get();
 
         // flatten to fragment tasks to quickly index by BackendFragmentId, when receive the report message
         ImmutableMap.Builder<BackendFragmentId, SingleFragmentPipelineTask> backendFragmentTasks
@@ -95,7 +95,7 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
     public void execute() throws Exception {
         coordinatorContext.withLock(() -> {
             sendAndWaitPhaseOneRpc();
-            if (coordinatorContext.twoPhaseExecution) {
+            if (coordinatorContext.twoPhaseExecution()) {
                 sendAndWaitPhaseTwoRpc();
             }
             return null;
@@ -118,7 +118,7 @@ public class SqlPipelineTask extends AbstractRuntimeTask<Long, MultiFragmentsPip
             rpcs.add(new RpcInfo(
                     fragmentsTask,
                     DateTime.now().getMillis(),
-                    fragmentsTask.sendPhaseOneRpc(coordinatorContext.twoPhaseExecution))
+                    fragmentsTask.sendPhaseOneRpc(coordinatorContext.twoPhaseExecution()))
             );
         }
         Map<TNetworkAddress, List<Long>> rpcPhase1Latency = waitPipelineRpc(rpcs,

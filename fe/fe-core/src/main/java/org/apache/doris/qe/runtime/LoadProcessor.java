@@ -101,9 +101,7 @@ public class LoadProcessor implements JobProcessor {
         }
         this.latch = Optional.of(latch);
 
-        int topFragmentId = coordinatorContext.planner
-                .getDistributedPlans()
-                .last()
+        int topFragmentId = coordinatorContext.topDistributedPlan
                 .getFragmentJob()
                 .getFragment()
                 .getFragmentId()

@@ -20,7 +20,6 @@ package org.apache.doris.qe.runtime;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
-import org.apache.doris.nereids.trees.plans.distribute.DistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.PipelineDistributedPlan;
 import org.apache.doris.nereids.trees.plans.distribute.worker.DistributedPlanWorker;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJob;
@@ -67,10 +66,7 @@ public class QueryProcessor implements JobProcessor {
                 Objects.requireNonNull(runningReceivers, "runningReceivers can not be null")
         );
 
-        List<DistributedPlan> fragments = coordinatorContext.planner.getDistributedPlans().valueList();
-        this.limitRows = fragments.get(fragments.size() - 1)
-                .getFragmentJob()
-                .getFragment()
+        this.limitRows = coordinatorContext.fragments.get(coordinatorContext.fragments.size() - 1)
                 .getPlanRoot()
                 .getLimit();
 
@@ -78,10 +74,7 @@ public class QueryProcessor implements JobProcessor {
     }
 
     public static QueryProcessor build(SqlCoordinatorContext coordinatorContext) {
-        List<DistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
-        PipelineDistributedPlan topFragment =
-                (PipelineDistributedPlan) distributedPlans.get(distributedPlans.size() - 1);
-
+        PipelineDistributedPlan topFragment = coordinatorContext.topDistributedPlan;
         DataSink topDataSink = coordinatorContext.dataSink;
         Boolean enableParallelResultSink;
         if (topDataSink instanceof ResultSink) {
@@ -106,11 +99,8 @@ public class QueryProcessor implements JobProcessor {
                             topInstance.instanceId(),
                             topWorker.id(),
                             execBeAddr,
-                            coordinatorContext.timeoutDeadline,
-                            coordinatorContext.planner.getCascadesContext()
-                                    .getConnectContext()
-                                    .getSessionVariable()
-                                    .getMaxMsgSizeOfResultReceiver(),
+                            coordinatorContext.timeoutDeadline.get(),
+                            coordinatorContext.connectContext.getSessionVariable().getMaxMsgSizeOfResultReceiver(),
                             enableParallelResultSink
                     )
             );
@@ -167,8 +157,8 @@ public class QueryProcessor implements JobProcessor {
 
             // if this query is a block query do not cancel.
             boolean hasLimit = limitRows > 0;
-            if (!coordinatorContext.planner.isBlockQuery()
-                    && coordinatorContext.instanceNum > 1
+            if (!coordinatorContext.isBlockQuery
+                    && coordinatorContext.instanceNum.get() > 1
                     && hasLimit && numReceivedRows >= limitRows) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("no block query, return num >= limit rows, need cancel");

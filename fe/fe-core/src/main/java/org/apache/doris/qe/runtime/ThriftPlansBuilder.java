@@ -67,6 +67,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -79,21 +80,17 @@ public class ThriftPlansBuilder {
     private static final Logger LOG = LogManager.getLogger(ThriftPlansBuilder.class);
 
     public static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
-            SqlCoordinatorContext coordinatorContext) {
-        List<PipelineDistributedPlan> distributedPlans = coordinatorContext.planner.getDistributedPlans().valueList();
+            SqlCoordinatorContext sqlCoordinatorContext) {
+
+        List<PipelineDistributedPlan> distributedPlans = sqlCoordinatorContext.distributedPlans;
 
         // we should set runtime predicate first, then we can use heap sort and to thrift
-        setRuntimePredicateIfNeed(coordinatorContext);
+        setRuntimePredicateIfNeed(sqlCoordinatorContext.scanNodes);
 
-        return plansToThrift(distributedPlans, coordinatorContext);
-    }
-
-    private static Map<DistributedPlanWorker, TPipelineFragmentParamsList> plansToThrift(
-            List<PipelineDistributedPlan> distributedPlans, SqlCoordinatorContext coordinatorContext) {
-
-        RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder
-                = RuntimeFiltersThriftBuilder.compute(coordinatorContext.planner, distributedPlans);
-        Supplier<List<TTopnFilterDesc>> topNFilterThriftSupplier = topNFilterToThrift(coordinatorContext);
+        RuntimeFiltersThriftBuilder runtimeFiltersThriftBuilder = RuntimeFiltersThriftBuilder.compute(
+                sqlCoordinatorContext.runtimeFilters, distributedPlans);
+        Supplier<List<TTopnFilterDesc>> topNFilterThriftSupplier
+                = topNFilterToThrift(sqlCoordinatorContext.topnFilters);
 
         Multiset<DistributedPlanWorker> workerProcessInstanceNum = computeInstanceNumPerWorker(distributedPlans);
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> fragmentsGroupByWorker = Maps.newLinkedHashMap();
@@ -111,7 +108,7 @@ public class ThriftPlansBuilder {
                 TPipelineFragmentParams currentFragmentParam = fragmentToThriftIfAbsent(
                         currentFragmentPlan, instanceJob, workerToCurrentFragment,
                         instancesPerWorker, exchangeSenderNum, sharedFileScanRangeParams,
-                        workerProcessInstanceNum, coordinatorContext);
+                        workerProcessInstanceNum, sqlCoordinatorContext);
 
                 TPipelineInstanceParams instanceParam = instanceToThrift(
                         currentFragmentParam, instanceJob, runtimeFiltersThriftBuilder,
@@ -165,8 +162,8 @@ public class ThriftPlansBuilder {
         return workerToInstances;
     }
 
-    private static void setRuntimePredicateIfNeed(SqlCoordinatorContext coordinatorContext) {
-        for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+    private static void setRuntimePredicateIfNeed(Collection<ScanNode> scanNodes) {
+        for (ScanNode scanNode : scanNodes) {
             if (scanNode instanceof OlapScanNode) {
                 for (SortNode topnFilterSortNode : scanNode.getTopnFilterSortNodes()) {
                     topnFilterSortNode.setHasRuntimePredicate();
@@ -175,9 +172,8 @@ public class ThriftPlansBuilder {
         }
     }
 
-    private static Supplier<List<TTopnFilterDesc>> topNFilterToThrift(SqlCoordinatorContext coordinatorContext) {
+    private static Supplier<List<TTopnFilterDesc>> topNFilterToThrift(List<TopnFilter> topnFilters) {
         return Suppliers.memoize(() -> {
-            List<TopnFilter> topnFilters = coordinatorContext.planner.getTopnFilters();
             if (CollectionUtils.isEmpty(topnFilters)) {
                 return null;
             }
@@ -315,7 +311,7 @@ public class ThriftPlansBuilder {
             // Notice. load fragment has a small probability that FragmentNumOnHost is 0, for unknown reasons.
             params.setFragmentNumOnHost(workerProcessInstanceNum.count(worker));
 
-            params.setNeedWaitExecutionTrigger(coordinatorContext.twoPhaseExecution);
+            params.setNeedWaitExecutionTrigger(coordinatorContext.twoPhaseExecution());
             params.setPerExchNumSenders(exchangeSenderNum);
 
             List<TPlanFragmentDestination> nonMultiCastDestinations;
@@ -332,12 +328,14 @@ public class ThriftPlansBuilder {
             params.setTotalInstances(instanceNumInThisFragment);
 
             params.setCoord(coordinatorContext.coordinatorAddress);
-            params.setCurrentConnectFe(coordinatorContext.directConnectFrontendAddress);
+            params.setCurrentConnectFe(coordinatorContext.directConnectFrontendAddress.get());
             params.setQueryGlobals(coordinatorContext.queryGlobals);
             params.setQueryOptions(new TQueryOptions(coordinatorContext.queryOptions));
             long memLimit = coordinatorContext.queryOptions.getMemLimit();
             // update memory limit for colocate join
-            if (!connectContext.getSessionVariable().isDisableColocatePlan() && fragment.hasColocatePlanNode()) {
+            if (connectContext != null
+                    && !connectContext.getSessionVariable().isDisableColocatePlan()
+                    && fragment.hasColocatePlanNode()) {
                 int rate = Math.min(Config.query_colocate_join_memory_limit_penalty_factor, instanceNumInThisFragment);
                 memLimit = coordinatorContext.queryOptions.getMemLimit() / rate;
             }
@@ -364,6 +362,7 @@ public class ThriftPlansBuilder {
             List<AssignedJob> instances = instancesPerWorker.get(worker);
             Map<AssignedJob, Integer> instanceToIndex = instanceToIndex(instances);
 
+            // local shuffle params: bucket_seq_to_instance_idx and shuffle_idx_to_instance_idx
             params.setBucketSeqToInstanceIdx(computeBucketIdToInstanceId(fragmentPlan, w, instanceToIndex));
             params.setShuffleIdxToInstanceIdx(computeDestIdToInstanceId(fragmentPlan, w, instanceToIndex));
             return params;

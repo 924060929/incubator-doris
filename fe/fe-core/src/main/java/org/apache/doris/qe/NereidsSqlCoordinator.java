@@ -18,6 +18,7 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.analysis.Analyzer;
+import org.apache.doris.analysis.DescriptorTable;
 import org.apache.doris.analysis.StorageBackend;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FsBroker;
@@ -26,7 +27,6 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.profile.ExecutionProfile;
-import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
@@ -77,30 +77,39 @@ import java.util.Map;
 public class NereidsSqlCoordinator extends Coordinator {
     private static final Logger LOG = LogManager.getLogger(NereidsSqlCoordinator.class);
 
-    private final SqlCoordinatorContext coordinatorContext;
+    protected final SqlCoordinatorContext coordinatorContext;
 
-    private volatile SqlPipelineTask executionTask;
+    protected volatile SqlPipelineTask executionTask;
 
     public NereidsSqlCoordinator(ConnectContext context, Analyzer analyzer,
             NereidsPlanner planner, StatsErrorEstimator statsErrorEstimator) {
         super(context, analyzer, planner, statsErrorEstimator);
 
-        this.coordinatorContext = SqlCoordinatorContext.build(planner, this);
+        this.coordinatorContext = SqlCoordinatorContext.buildForSql(planner, this);
         this.coordinatorContext.setJobProcessor(buildJobProcessor(coordinatorContext));
 
         Preconditions.checkState(!planner.getFragments().isEmpty()
-                        && coordinatorContext.instanceNum > 0, "Fragment and Instance can not be empty˚");
+                        && coordinatorContext.instanceNum.get() > 0, "Fragment and Instance can not be empty˚");
+    }
+
+    public NereidsSqlCoordinator(Long jobId, TUniqueId queryId, DescriptorTable descTable,
+            List<PlanFragment> fragments, List<PipelineDistributedPlan> distributedPlans,
+            List<ScanNode> scanNodes, String timezone, boolean loadZeroTolerance,
+            boolean enableProfile) {
+        super(jobId, queryId, descTable, fragments, scanNodes, timezone, loadZeroTolerance, enableProfile);
+        this.coordinatorContext = SqlCoordinatorContext.buildForLoad(
+                this, jobId, queryId, fragments, distributedPlans, scanNodes,
+                descTable, timezone, loadZeroTolerance, enableProfile
+        );
     }
 
     @Override
     public void exec() throws Exception {
-        coordinatorContext.updateProfileIfPresent(SummaryProfile::setAssignFragmentTime);
-
         enqueue(coordinatorContext.connectContext);
 
-        processTopSink(coordinatorContext, coordinatorContext.planner);
+        processTopSink(coordinatorContext, coordinatorContext.topDistributedPlan);
 
-        QeProcessorImpl.INSTANCE.registerInstances(coordinatorContext.queryId, coordinatorContext.instanceNum);
+        QeProcessorImpl.INSTANCE.registerInstances(coordinatorContext.queryId, coordinatorContext.instanceNum.get());
 
         Map<DistributedPlanWorker, TPipelineFragmentParamsList> workerToFragments
                 = ThriftPlansBuilder.plansToThrift(coordinatorContext);
@@ -110,14 +119,14 @@ public class NereidsSqlCoordinator extends Coordinator {
 
     @Override
     public boolean isTimeout() {
-        return System.currentTimeMillis() > coordinatorContext.timeoutDeadline;
+        return System.currentTimeMillis() > coordinatorContext.timeoutDeadline.get();
     }
 
     @Override
     public void cancel(Status cancelReason) {
         coordinatorContext.getQueueToken().ifPresent(QueueToken::cancel);
 
-        for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+        for (ScanNode scanNode : coordinatorContext.scanNodes) {
             scanNode.stop();
         }
 
@@ -326,7 +335,7 @@ public class NereidsSqlCoordinator extends Coordinator {
 
     @Override
     public List<PlanFragment> getFragments() {
-        return coordinatorContext.planner.getFragments();
+        return coordinatorContext.fragments;
     }
 
     @Override
@@ -389,7 +398,7 @@ public class NereidsSqlCoordinator extends Coordinator {
         }
 
         try {
-            for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+            for (ScanNode scanNode : coordinatorContext.scanNodes) {
                 scanNode.stop();
             }
         } catch (Throwable t) {
@@ -401,9 +410,8 @@ public class NereidsSqlCoordinator extends Coordinator {
         coordinatorContext.withLock(() -> coordinatorContext.getJobProcessor().cancel(cancelReason));
     }
 
-    private void processTopSink(SqlCoordinatorContext coordinatorContext, NereidsPlanner nereidsPlanner)
-            throws AnalysisException {
-        PipelineDistributedPlan topPlan = (PipelineDistributedPlan) nereidsPlanner.getDistributedPlans().last();
+    protected void processTopSink(
+            SqlCoordinatorContext coordinatorContext, PipelineDistributedPlan topPlan) throws AnalysisException {
         setForArrowFlight(coordinatorContext, topPlan);
         setForBroker(coordinatorContext, topPlan);
     }
@@ -474,7 +482,7 @@ public class NereidsSqlCoordinator extends Coordinator {
             return false;
         }
         // a query with ScanNode need not queue only when all its scan node is SchemaScanNode
-        for (ScanNode scanNode : coordinatorContext.planner.getScanNodes()) {
+        for (ScanNode scanNode : coordinatorContext.scanNodes) {
             if (!(scanNode instanceof SchemaScanNode)) {
                 return true;
             }
