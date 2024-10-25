@@ -395,6 +395,10 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         return StmtType.INSERT;
     }
 
+    /**
+     * this factory is used to delay create the AbstractInsertExecutor until the DistributePlan is generated
+     * by NereidsPlanner
+     */
     private static class ExecutorFactory {
         public final NereidsPlanner planner;
         public final DataSink dataSink;
