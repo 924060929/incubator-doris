@@ -38,8 +38,10 @@ import org.apache.doris.nereids.glue.LogicalPlanAdapter;
 import org.apache.doris.nereids.memo.Group;
 import org.apache.doris.nereids.memo.GroupId;
 import org.apache.doris.nereids.properties.PhysicalProperties;
+import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.analysis.BindSink;
+import org.apache.doris.nereids.rules.implementation.LogicalOlapTableSinkToPhysicalOlapTableSink;
 import org.apache.doris.nereids.rules.rewrite.MergeProjects;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.plans.Explainable;
@@ -350,8 +352,6 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         // 3. NereidsPlanner use PhysicalPlan and the provided backend to generate DistributePlan
         // 4. ExecutorFactory use the DistributePlan to generate the NereidsSqlCoordinator and InsertExecutor
 
-        StatementContext statementContext = ctx.getStatementContext();
-
         AtomicReference<ExecutorFactory> executorFactoryRef = new AtomicReference<>();
         InsertByInlineTablePlanner planner = new InsertByInlineTablePlanner(ctx.getStatementContext()) {
             @Override
@@ -466,6 +466,8 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     }
 
     private static class InsertByInlineTablePlanner extends NereidsPlanner {
+        private static final Rule toPhysicalOlapTableSink = new LogicalOlapTableSinkToPhysicalOlapTableSink()
+                .build();
         private AtomicReference<Group> rootGroupRef = new AtomicReference<>();
 
         public InsertByInlineTablePlanner(StatementContext statementContext) {
@@ -527,6 +529,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         @Override
         protected void optimize() {
             DefaultPlanRewriter<Void> optimizer = new DefaultPlanRewriter<Void>() {
+
                 @Override
                 public Plan visitLogicalUnion(LogicalUnion logicalUnion, Void context) {
                     logicalUnion = (LogicalUnion) super.visitLogicalUnion(logicalUnion, context);
@@ -557,20 +560,9 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                         Void context) {
                     olapTableSink =
                             (LogicalOlapTableSink) super.visitLogicalOlapTableSink(olapTableSink, context);
-
-                    return new PhysicalOlapTableSink<>(
-                            olapTableSink.getDatabase(),
-                            olapTableSink.getTargetTable(),
-                            olapTableSink.getCols(),
-                            olapTableSink.getPartitionIds(),
-                            olapTableSink.getOutputExprs(),
-                            getCascadesContext().getConnectContext().getSessionVariable().isEnableSingleReplicaInsert(),
-                            olapTableSink.isPartialUpdate(),
-                            olapTableSink.getDmlCommandType(),
-                            Optional.empty(),
-                            olapTableSink.getLogicalProperties(),
-                            olapTableSink.child()
-                    );
+                    return toPhysicalOlapTableSink
+                            .transform(olapTableSink, getCascadesContext())
+                            .get(0);
                 }
             };
 
