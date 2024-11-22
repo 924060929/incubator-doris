@@ -273,34 +273,36 @@ public class NereidsParser {
 
     private <T> T parse(String sql, @Nullable LogicalPlanBuilder logicalPlanBuilder,
                         Function<DorisParser, ParserRuleContext> parseFunction) {
-        ParserRuleContext tree = toAst(sql, parseFunction);
+        CommonTokenStream tokenStream = parseAllTokens(sql);
+        ParserRuleContext tree = toAst(tokenStream, parseFunction);
         LogicalPlanBuilder realLogicalPlanBuilder = logicalPlanBuilder == null
-                    ? new LogicalPlanBuilder(getHintMap(sql, DorisParser::selectHint)) : logicalPlanBuilder;
+                    ? new LogicalPlanBuilder(getHintMap(sql, tokenStream, DorisParser::selectHint))
+                    : logicalPlanBuilder;
         return (T) realLogicalPlanBuilder.visit(tree);
     }
 
     public LogicalPlan parseForCreateView(String sql) {
-        ParserRuleContext tree = toAst(sql, DorisParser::singleStatement);
+        CommonTokenStream tokenStream = parseAllTokens(sql);
+        ParserRuleContext tree = toAst(tokenStream, DorisParser::singleStatement);
         LogicalPlanBuilder realLogicalPlanBuilder = new LogicalPlanBuilderForCreateView(
-                getHintMap(sql, DorisParser::selectHint));
+                getHintMap(sql, tokenStream, DorisParser::selectHint));
         return (LogicalPlan) realLogicalPlanBuilder.visit(tree);
     }
 
+    /** parseForSyncMv */
     public Optional<String> parseForSyncMv(String sql) {
-        ParserRuleContext tree = toAst(sql, DorisParser::singleStatement);
+        CommonTokenStream tokenStream = parseAllTokens(sql);
+        ParserRuleContext tree = toAst(tokenStream, DorisParser::singleStatement);
         LogicalPlanBuilderForSyncMv logicalPlanBuilderForSyncMv = new LogicalPlanBuilderForSyncMv(
-                getHintMap(sql, DorisParser::selectHint));
+                getHintMap(sql, tokenStream, DorisParser::selectHint));
         logicalPlanBuilderForSyncMv.visit(tree);
         return logicalPlanBuilderForSyncMv.getQuerySql();
     }
 
     /** get hint map */
-    public static Map<Integer, ParserRuleContext> getHintMap(String sql,
+    public static Map<Integer, ParserRuleContext> getHintMap(String sql, CommonTokenStream hintTokenStream,
                                                              Function<DorisParser, ParserRuleContext> parseFunction) {
         // parse hint first round
-        DorisLexer hintLexer = new DorisLexer(new CaseInsensitiveStream(CharStreams.fromString(sql)));
-        CommonTokenStream hintTokenStream = new CommonTokenStream(hintLexer);
-
         Map<Integer, ParserRuleContext> selectHintMap = Maps.newHashMap();
 
         Token hintToken = hintTokenStream.getTokenSource().nextToken();
@@ -318,10 +320,14 @@ public class NereidsParser {
         return selectHintMap;
     }
 
+    public static ParserRuleContext toAst(
+            String sql, Function<DorisParser, ParserRuleContext> parseFunction) {
+        return toAst(parseAllTokens(sql), parseFunction);
+    }
+
     /** toAst */
-    public static ParserRuleContext toAst(String sql, Function<DorisParser, ParserRuleContext> parseFunction) {
-        DorisLexer lexer = new DorisLexer(new CaseInsensitiveStream(CharStreams.fromString(sql)));
-        CommonTokenStream tokenStream = new CommonTokenStream(lexer);
+    public static ParserRuleContext toAst(
+            CommonTokenStream tokenStream, Function<DorisParser, ParserRuleContext> parseFunction) {
         DorisParser parser = new DorisParser(tokenStream);
 
         parser.addParseListener(POST_PROCESSOR);
@@ -352,9 +358,7 @@ public class NereidsParser {
      * will be normalized to: select \/*+SET_VAR(key=value)*\/ * , a, b from table
      */
     public static String removeCommentAndTrimBlank(String sql) {
-        DorisLexer lexer = new DorisLexer(new CaseInsensitiveStream(CharStreams.fromString(sql)));
-        CommonTokenStream tokenStream = new CommonTokenStream(lexer);
-        tokenStream.fill();
+        CommonTokenStream tokenStream = parseAllTokens(sql);
 
         // maybe add more space char
         StringBuilder newSql = new StringBuilder((int) (sql.length() * 1.2));
@@ -380,5 +384,12 @@ public class NereidsParser {
             }
         }
         return newSql.toString().trim();
+    }
+
+    private static CommonTokenStream parseAllTokens(String sql) {
+        DorisLexer lexer = new DorisLexer(new CaseInsensitiveStream(CharStreams.fromString(sql)));
+        CommonTokenStream tokenStream = new CommonTokenStream(lexer);
+        tokenStream.fill();
+        return tokenStream;
     }
 }
