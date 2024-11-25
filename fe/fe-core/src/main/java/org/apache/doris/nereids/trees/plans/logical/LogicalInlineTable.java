@@ -70,13 +70,13 @@ public class LogicalInlineTable extends LogicalLeaf implements BlockFuncDepsProp
 
     @Override
     public Plan withGroupExpression(Optional<GroupExpression> groupExpression) {
-        return null;
+        return new LogicalInlineTable(constantExprsList, groupExpression, Optional.of(getLogicalProperties()));
     }
 
     @Override
     public Plan withGroupExprLogicalPropChildren(Optional<GroupExpression> groupExpression,
             Optional<LogicalProperties> logicalProperties, List<Plan> children) {
-        return null;
+        return new LogicalInlineTable(constantExprsList, groupExpression, logicalProperties);
     }
 
     @Override
