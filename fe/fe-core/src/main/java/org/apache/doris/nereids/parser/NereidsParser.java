@@ -50,6 +50,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.BitSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -305,7 +306,8 @@ public class NereidsParser {
         // parse hint first round
         Map<Integer, ParserRuleContext> selectHintMap = Maps.newHashMap();
 
-        Token hintToken = hintTokenStream.getTokenSource().nextToken();
+        Iterator<Token> tokenIterator = hintTokenStream.getTokens().iterator();
+        Token hintToken = tokenIterator.hasNext() ? tokenIterator.next() : null;
         while (hintToken != null && hintToken.getType() != DorisLexer.EOF) {
             if (hintToken.getChannel() == 2 && sql.charAt(hintToken.getStartIndex() + 2) == '+') {
                 String hintSql = sql.substring(hintToken.getStartIndex() + 3, hintToken.getStopIndex() + 1);
@@ -315,7 +317,7 @@ public class NereidsParser {
                 ParserRuleContext hintContext = parseFunction.apply(hintParser);
                 selectHintMap.put(hintToken.getStartIndex(), hintContext);
             }
-            hintToken = hintTokenStream.getTokenSource().nextToken();
+            hintToken = tokenIterator.hasNext() ? tokenIterator.next() : null;
         }
         return selectHintMap;
     }
