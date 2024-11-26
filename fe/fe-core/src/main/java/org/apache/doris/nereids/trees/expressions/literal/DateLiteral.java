@@ -287,23 +287,23 @@ public class DateLiteral extends Literal {
 
     /** parseDateTime */
     public static Result<TemporalAccessor, AnalysisException> parseDateTime(String s) {
-        // fast parse '2022-01-01'
-        if ((s.length() == 10 || s.length() == 19) && s.charAt(4) == '-' && s.charAt(7) == '-') {
-            if (s.length() == 10) {
-                TemporalAccessor date = fastParseDate(s);
-                if (date != null) {
-                    return Result.ok(date);
-                }
-            } else if (s.charAt(10) == ' ' && s.charAt(13) == ':' && s.charAt(16) == ':') {
-                TemporalAccessor date = fastParseDateTime(s);
-                if (date != null) {
-                    return Result.ok(date);
-                }
-            }
-        }
-
         String originalString = s;
         try {
+            // fast parse '2022-01-01'
+            if ((s.length() == 10 || s.length() == 19) && s.charAt(4) == '-' && s.charAt(7) == '-') {
+                if (s.length() == 10) {
+                    TemporalAccessor date = fastParseDate(s);
+                    if (date != null) {
+                        return Result.ok(date);
+                    }
+                } else if (s.charAt(10) == ' ' && s.charAt(13) == ':' && s.charAt(16) == ':') {
+                    TemporalAccessor date = fastParseDateTime(s);
+                    if (date != null) {
+                        return Result.ok(date);
+                    }
+                }
+            }
+
             TemporalAccessor dateTime;
 
             // remove suffix/prefix ' '

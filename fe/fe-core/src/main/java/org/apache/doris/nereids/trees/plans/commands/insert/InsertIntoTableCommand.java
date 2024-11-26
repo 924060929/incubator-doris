@@ -497,7 +497,8 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                     logicalInlineTable =
                             (LogicalInlineTable) super.visitLogicalInlineTable(logicalInlineTable, context);
                     return new LogicalUnion(
-                            Qualifier.ALL, logicalInlineTable.getConstantExprsList(), ImmutableList.of()
+                            Qualifier.ALL, logicalInlineTable.getConstantExprsList().get(0),
+                            ImmutableList.of(), logicalInlineTable.getConstantExprsList(), false, ImmutableList.of()
                     );
                 }
             };
