@@ -38,6 +38,7 @@ import org.apache.doris.qe.ConnectContext;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -184,10 +185,20 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
             Set<Integer> assignedJoinBuckets
                     = ((BucketScanSource) assignJoinBuckets.get(i)).bucketIndexToScanNodeToTablets.keySet();
             LocalShuffleBucketJoinAssignedJob instance = new LocalShuffleBucketJoinAssignedJob(
-                    instances.size(), shareScanId, i > 0,
-                    context.nextInstanceId(), this, worker,
+                    instances.size(), shareScanId, context.nextInstanceId(),
+                    this, worker,
                     i == 0 ? shareScanSource : emptyShareScanSource,
                     Utils.fastToImmutableSet(assignedJoinBuckets)
+            );
+            instances.add(instance);
+        }
+
+        for (int i = assignJoinBuckets.size(); i < instanceNum; ++i) {
+            LocalShuffleBucketJoinAssignedJob instance = new LocalShuffleBucketJoinAssignedJob(
+                    instances.size(), shareScanId, context.nextInstanceId(),
+                    this, worker, emptyShareScanSource,
+                    // these instance not need to join, because no any bucket assign to it
+                    ImmutableSet.of()
             );
             instances.add(instance);
         }
@@ -256,7 +267,7 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
                 if (!mergedBucketsInSameWorkerInstance) {
                     fillUpInstance = new LocalShuffleBucketJoinAssignedJob(
                             newInstances.size(), shareScanIdGenerator.getAndIncrement(),
-                            false, context.nextInstanceId(), this, worker, scanSource,
+                            context.nextInstanceId(), this, worker, scanSource,
                             assignedJoinBuckets
                     );
                 }

@@ -26,6 +26,8 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBui
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAssignedJob;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleBucketJoinAssignedJob;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.ScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.StaticAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
@@ -184,7 +186,7 @@ public class DistributePlanner {
         boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
                 .anyMatch(LocalShuffleAssignedJob.class::isInstance);
         if (useLocalShuffle) {
-            return getFirstInstancePerShareScan(receiverPlan);
+            return getLocalShuffleRemoteReceiverJob(receiverPlan);
         } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else {
@@ -196,14 +198,26 @@ public class DistributePlanner {
             PipelineDistributedPlan plan, List<AssignedJob> unsorted, int bucketNum) {
         AssignedJob[] instances = new AssignedJob[bucketNum];
         for (AssignedJob instanceJob : unsorted) {
-            BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
-            for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
-                if (instances[bucketIndex] != null) {
-                    throw new IllegalStateException(
-                            "Multi instances scan same buckets: " + instances[bucketIndex] + " and " + instanceJob
-                    );
+            if (instanceJob instanceof LocalShuffleBucketJoinAssignedJob) {
+                LocalShuffleBucketJoinAssignedJob localShuffleJob = (LocalShuffleBucketJoinAssignedJob) instanceJob;
+                for (Integer bucketIndex : localShuffleJob.getAssignedJoinBucketIndexes()) {
+                    if (instances[bucketIndex] != null) {
+                        throw new IllegalStateException(
+                                "Multi instances scan same buckets: " + instances[bucketIndex] + " and " + instanceJob
+                        );
+                    }
+                    instances[bucketIndex] = instanceJob;
                 }
-                instances[bucketIndex] = instanceJob;
+            } else {
+                BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
+                for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
+                    if (instances[bucketIndex] != null) {
+                        throw new IllegalStateException(
+                                "Multi instances scan same buckets: " + instances[bucketIndex] + " and " + instanceJob
+                        );
+                    }
+                    instances[bucketIndex] = instanceJob;
+                }
             }
         }
 
@@ -221,12 +235,19 @@ public class DistributePlanner {
         return Arrays.asList(instances);
     }
 
-    private List<AssignedJob> getFirstInstancePerShareScan(PipelineDistributedPlan plan) {
+    private List<AssignedJob> getLocalShuffleRemoteReceiverJob(PipelineDistributedPlan plan) {
         List<AssignedJob> canReceiveDataFromRemote = Lists.newArrayListWithCapacity(plan.getInstanceJobs().size());
         for (AssignedJob instanceJob : plan.getInstanceJobs()) {
             LocalShuffleAssignedJob localShuffleJob = (LocalShuffleAssignedJob) instanceJob;
-            if (!localShuffleJob.receiveDataFromLocal) {
-                canReceiveDataFromRemote.add(localShuffleJob);
+            if (localShuffleJob instanceof LocalShuffleBucketJoinAssignedJob) {
+                LocalShuffleBucketJoinAssignedJob bucketJob = (LocalShuffleBucketJoinAssignedJob) localShuffleJob;
+                if (!bucketJob.getAssignedJoinBucketIndexes().isEmpty()) {
+                    canReceiveDataFromRemote.add(localShuffleJob);
+                }
+            } else {
+                if (!instanceJob.getScanSource().isEmpty()) {
+                    canReceiveDataFromRemote.add(localShuffleJob);
+                }
             }
         }
         return canReceiveDataFromRemote;

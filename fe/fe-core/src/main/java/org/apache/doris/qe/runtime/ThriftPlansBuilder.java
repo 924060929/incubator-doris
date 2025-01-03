@@ -427,7 +427,7 @@ public class ThriftPlansBuilder {
             TPipelineInstanceParams instanceParams) {
 
         boolean isLocalShuffle = instance instanceof LocalShuffleAssignedJob;
-        if (isLocalShuffle && ((LocalShuffleAssignedJob) instance).receiveDataFromLocal) {
+        if (isLocalShuffle && instance.getScanSource().isEmpty()) {
             // save thrift rpc message size, don't need perNodeScanRanges,
             // but the perNodeScanRanges is required rpc field
             instanceParams.setPerNodeScanRanges(Maps.newLinkedHashMap());

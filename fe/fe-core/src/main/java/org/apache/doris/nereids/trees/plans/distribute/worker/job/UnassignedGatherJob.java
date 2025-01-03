@@ -54,14 +54,15 @@ public class UnassignedGatherJob extends AbstractUnassignedJob {
 
             DefaultScanSource shareScan = new DefaultScanSource(ImmutableMap.of());
             LocalShuffleAssignedJob receiveDataFromRemote = new LocalShuffleAssignedJob(
-                    0, 0, false,
-                    connectContext.nextInstanceId(), this, selectedWorker, shareScan);
+                    0, 0, connectContext.nextInstanceId(),
+                    this, selectedWorker, shareScan
+            );
 
             instances.add(receiveDataFromRemote);
             for (int i = 1; i < expectInstanceNum; ++i) {
                 LocalShuffleAssignedJob receiveDataFromLocal = new LocalShuffleAssignedJob(
-                        i, 0, true,
-                        connectContext.nextInstanceId(), this, selectedWorker, shareScan);
+                        i, 0, connectContext.nextInstanceId(), this, selectedWorker, shareScan
+                );
                 instances.add(receiveDataFromLocal);
             }
             return instances.build();

@@ -90,11 +90,6 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
         }
 
         // TODO: check nested loop join do right outer / semi / anti join
-        PlanNode leftMostNode = findLeftmostNode(fragment.getPlanRoot()).second;
-        // when we use nested loop join do right outer / semi / anti join, the instance must be 1.
-        if (leftMostNode.getNumInstances() == 1) {
-            expectInstanceNum = 1;
-        }
         return expectInstanceNum;
     }
 
@@ -153,14 +148,12 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
 
             DefaultScanSource shareScanSource = new DefaultScanSource(ImmutableMap.of());
 
-            boolean receiveDataFromLocal = false;
             for (Integer indexInFragment : indexesInFragment) {
                 LocalShuffleAssignedJob instance = new LocalShuffleAssignedJob(
-                        indexInFragment, shareScanId, receiveDataFromLocal, connectContext.nextInstanceId(),
+                        indexInFragment, shareScanId, connectContext.nextInstanceId(),
                         this, worker, shareScanSource
                 );
                 instances.add(instance);
-                receiveDataFromLocal = true;
             }
             shareScanId++;
         }
@@ -182,7 +175,7 @@ public class UnassignedShuffleJob extends AbstractUnassignedJob {
     private Pair<PlanNode, PlanNode> findLeftmostNode(PlanNode plan) {
         PlanNode childPlan = plan;
         PlanNode fatherPlan = null;
-        while (childPlan.getChildren().size() != 0 && !(childPlan instanceof ExchangeNode)) {
+        while (!childPlan.getChildren().isEmpty() && !(childPlan instanceof ExchangeNode)) {
             fatherPlan = childPlan;
             childPlan = childPlan.getChild(0);
         }
