@@ -137,6 +137,16 @@ public class DistributePlanner {
                         link.getKey(),
                         enableShareHashTableForBroadcastJoin
                 );
+                for (Entry<DataSink, List<AssignedJob>> kv :
+                        ((PipelineDistributedPlan) link.getValue()).getDestinations().entrySet()) {
+                    if (kv.getValue().isEmpty()) {
+                        int sourceFragmentId = link.getValue().getFragmentJob().getFragment().getFragmentId().asInt();
+                        String msg = "Invalid plan which exchange not contains receiver, "
+                                + "exchange id: " + kv.getKey().getExchNodeId().asInt()
+                                + ", source fragmentId: " + sourceFragmentId;
+                        throw new IllegalStateException(msg);
+                    }
+                }
             }
         }
         return plans;
@@ -236,18 +246,20 @@ public class DistributePlanner {
 
     private List<AssignedJob> getLocalShuffleRemoteReceiverJob(PipelineDistributedPlan plan) {
         List<AssignedJob> canReceiveDataFromRemote = Lists.newArrayListWithCapacity(plan.getInstanceJobs().size());
+        boolean isFirst = true;
         for (AssignedJob instanceJob : plan.getInstanceJobs()) {
             LocalShuffleAssignedJob localShuffleJob = (LocalShuffleAssignedJob) instanceJob;
             if (localShuffleJob instanceof LocalShuffleBucketJoinAssignedJob) {
                 LocalShuffleBucketJoinAssignedJob bucketJob = (LocalShuffleBucketJoinAssignedJob) localShuffleJob;
-                if (!bucketJob.getAssignedJoinBucketIndexes().isEmpty()) {
+                if (!bucketJob.getAssignedJoinBucketIndexes().isEmpty() || isFirst) {
                     canReceiveDataFromRemote.add(localShuffleJob);
                 }
             } else {
-                if (!instanceJob.getScanSource().isEmpty()) {
+                if (!instanceJob.getScanSource().isEmpty() || isFirst) {
                     canReceiveDataFromRemote.add(localShuffleJob);
                 }
             }
+            isFirst = false;
         }
         return canReceiveDataFromRemote;
     }
