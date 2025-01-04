@@ -192,14 +192,14 @@ public class DistributePlanner {
             PipelineDistributedPlan receiverPlan,
             boolean enableShareHashTableForBroadcastJoin,
             ExchangeNode linkNode) {
+        if (linkNode.isSerialOperator()) {
+            return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
+        }
+
         boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
                 .anyMatch(LocalShuffleAssignedJob.class::isInstance);
         if (useLocalShuffle) {
-            if (linkNode.isSerialOperator()) {
-                return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
-            } else {
-                return receiverPlan.getInstanceJobs();
-            }
+            return getLocalShuffleRemoteReceiverJob(receiverPlan);
         } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else {
@@ -246,6 +246,26 @@ public class DistributePlanner {
             }
         }
         return Arrays.asList(instances);
+    }
+
+    private List<AssignedJob> getLocalShuffleRemoteReceiverJob(PipelineDistributedPlan plan) {
+        List<AssignedJob> canReceiveDataFromRemote = Lists.newArrayListWithCapacity(plan.getInstanceJobs().size());
+        boolean isFirst = true;
+        for (AssignedJob instanceJob : plan.getInstanceJobs()) {
+            LocalShuffleAssignedJob localShuffleJob = (LocalShuffleAssignedJob) instanceJob;
+            if (localShuffleJob instanceof LocalShuffleBucketJoinAssignedJob) {
+                LocalShuffleBucketJoinAssignedJob bucketJob = (LocalShuffleBucketJoinAssignedJob) localShuffleJob;
+                if (isFirst || !bucketJob.getAssignedJoinBucketIndexes().isEmpty()) {
+                    canReceiveDataFromRemote.add(localShuffleJob);
+                }
+            } else {
+                if (isFirst || !instanceJob.getScanSource().isEmpty()) {
+                    canReceiveDataFromRemote.add(localShuffleJob);
+                }
+            }
+            isFirst = false;
+        }
+        return canReceiveDataFromRemote;
     }
 
     private List<AssignedJob> getFirstInstancePerWorker(List<AssignedJob> instances) {
