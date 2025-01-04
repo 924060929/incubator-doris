@@ -251,11 +251,11 @@ public class DistributePlanner {
             LocalShuffleAssignedJob localShuffleJob = (LocalShuffleAssignedJob) instanceJob;
             if (localShuffleJob instanceof LocalShuffleBucketJoinAssignedJob) {
                 LocalShuffleBucketJoinAssignedJob bucketJob = (LocalShuffleBucketJoinAssignedJob) localShuffleJob;
-                if (!bucketJob.getAssignedJoinBucketIndexes().isEmpty() || isFirst) {
+                if (isFirst || !bucketJob.getAssignedJoinBucketIndexes().isEmpty()) {
                     canReceiveDataFromRemote.add(localShuffleJob);
                 }
             } else {
-                if (!instanceJob.getScanSource().isEmpty() || isFirst) {
+                if (isFirst || !instanceJob.getScanSource().isEmpty()) {
                     canReceiveDataFromRemote.add(localShuffleJob);
                 }
             }
