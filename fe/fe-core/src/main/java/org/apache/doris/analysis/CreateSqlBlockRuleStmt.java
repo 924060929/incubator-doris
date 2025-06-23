@@ -30,6 +30,8 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.collect.ImmutableSortedSet;
 import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
 
@@ -91,9 +93,16 @@ public class CreateSqlBlockRuleStmt extends DdlStmt implements NotFallbackInPars
 
     private static final String NAME_TYPE = "SQL BLOCK RULE NAME";
 
-    public static final ImmutableSet<String> PROPERTIES_SET = new ImmutableSet.Builder<String>().add(SQL_PROPERTY)
-            .add(SQL_HASH_PROPERTY).add(GLOBAL_PROPERTY).add(ENABLE_PROPERTY).add(SCANNED_PARTITION_NUM)
-            .add(SCANNED_TABLET_NUM).add(SCANNED_CARDINALITY).build();
+    public static final ImmutableSet<String> PROPERTIES_SET = ImmutableSortedSet
+            .orderedBy(String.CASE_INSENSITIVE_ORDER)
+            .add(SQL_PROPERTY)
+            .add(SQL_HASH_PROPERTY)
+            .add(GLOBAL_PROPERTY)
+            .add(ENABLE_PROPERTY)
+            .add(SCANNED_PARTITION_NUM)
+            .add(SCANNED_TABLET_NUM)
+            .add(SCANNED_CARDINALITY)
+            .build();
 
     public CreateSqlBlockRuleStmt(String ruleName, Map<String, String> properties) {
         this.ifNotExists = false;
@@ -104,7 +113,9 @@ public class CreateSqlBlockRuleStmt extends DdlStmt implements NotFallbackInPars
     public CreateSqlBlockRuleStmt(boolean ifNotExists, String ruleName, Map<String, String> properties) {
         this.ifNotExists = ifNotExists;
         this.ruleName = ruleName;
-        this.properties = properties;
+        this.properties = ImmutableSortedMap.<String, String>orderedBy(String.CASE_INSENSITIVE_ORDER)
+                .putAll(properties)
+                .build();
     }
 
     @Override

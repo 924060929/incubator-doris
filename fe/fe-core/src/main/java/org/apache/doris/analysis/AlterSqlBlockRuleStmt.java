@@ -28,6 +28,7 @@ import org.apache.doris.common.util.Util;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 
+import com.google.common.collect.ImmutableSortedMap;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.Map;
@@ -56,7 +57,9 @@ public class AlterSqlBlockRuleStmt extends DdlStmt implements NotFallbackInParse
 
     public AlterSqlBlockRuleStmt(String ruleName, Map<String, String> properties) {
         this.ruleName = ruleName;
-        this.properties = properties;
+        this.properties = ImmutableSortedMap.<String, String>orderedBy(String.CASE_INSENSITIVE_ORDER)
+                .putAll(properties)
+                .build();
     }
 
     @Override

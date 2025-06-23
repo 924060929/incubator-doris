@@ -272,4 +272,8 @@ suite("test_sql_block_rule", "nonConcurrent") {
         """
     }
 
+    sql("CREATE SQL_BLOCK_RULE if not exists test_rule_create_kk\n" +
+            " PROPERTIES(\"SqL\"=\"select * from tbl\", \"glObaL\"= \"true\", \"enaBle\"= \"true\")", false)
+
+    sql "drop SQL_BLOCK_RULE if exists test_rule_create_kk;"
 }

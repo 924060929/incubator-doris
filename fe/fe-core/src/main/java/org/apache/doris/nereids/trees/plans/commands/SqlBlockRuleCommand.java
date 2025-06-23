@@ -29,6 +29,8 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.collect.ImmutableSortedSet;
 
 import java.util.Map;
 import java.util.Optional;
@@ -55,9 +57,16 @@ public abstract class SqlBlockRuleCommand extends Command implements ForwardWith
 
     public static final String STRING_NOT_SET = SqlBlockUtil.STRING_DEFAULT;
 
-    private static final ImmutableSet<String> PROPERTIES_SET = new ImmutableSet.Builder<String>().add(SQL_PROPERTY)
-                        .add(SQL_HASH_PROPERTY).add(GLOBAL_PROPERTY).add(ENABLE_PROPERTY).add(SCANNED_PARTITION_NUM)
-                        .add(SCANNED_TABLET_NUM).add(SCANNED_CARDINALITY).build();
+    private static final ImmutableSet<String> PROPERTIES_SET = ImmutableSortedSet
+            .orderedBy(String.CASE_INSENSITIVE_ORDER)
+            .add(SQL_PROPERTY)
+            .add(SQL_HASH_PROPERTY)
+            .add(GLOBAL_PROPERTY)
+            .add(ENABLE_PROPERTY)
+            .add(SCANNED_PARTITION_NUM)
+            .add(SCANNED_TABLET_NUM)
+            .add(SCANNED_CARDINALITY)
+            .build();
 
     protected final String ruleName;
 
@@ -85,7 +94,9 @@ public abstract class SqlBlockRuleCommand extends Command implements ForwardWith
     public SqlBlockRuleCommand(String ruleName, Map<String, String> properties, PlanType planType) {
         super(planType);
         this.ruleName = ruleName;
-        this.properties = properties;
+        this.properties = ImmutableSortedMap.<String, String>orderedBy(String.CASE_INSENSITIVE_ORDER)
+                .putAll(properties)
+                .build();
     }
 
     private static void checkCommonProperties(Map<String, String> properties) throws UserException {
