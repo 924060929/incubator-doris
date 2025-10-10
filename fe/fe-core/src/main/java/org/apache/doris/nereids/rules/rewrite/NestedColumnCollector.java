@@ -67,21 +67,21 @@ public class NestedColumnCollector implements CustomRewriter {
 
         AccessPathCollector collector = new AccessPathCollector();
         List<Pair<SlotReference, List<String>>> slotToAccessPaths = collector.collectInPlan(plan, statementContext);
-        Map<Integer, Pair<DataType, ColumnAccessPaths>> mergedAccessPaths
+        Map<Integer, Pair<DataType, ColumnAccessPaths>> slotToResult
                 = pruneDataTypeAndMergeAccessPaths(slotToAccessPaths);
-        for (Entry<Integer, Pair<DataType, ColumnAccessPaths>> kv : mergedAccessPaths.entrySet()) {
+        for (Entry<Integer, Pair<DataType, ColumnAccessPaths>> kv : slotToResult.entrySet()) {
             Integer slotId = kv.getKey();
-            Pair<DataType, ColumnAccessPaths> prunedTypeAndMergedAccessPaths = kv.getValue();
-            statementContext.setSlotIdToPrunedTypeAndAccessPaths(
-                    slotId, prunedTypeAndMergedAccessPaths.first, prunedTypeAndMergedAccessPaths.second);
+            DataType prunedDataType = kv.getValue().first;
+            ColumnAccessPaths mergedAccessPaths = kv.getValue().second;
+            statementContext.setSlotIdToPrunedTypeAndAccessPaths(slotId, prunedDataType, mergedAccessPaths);
         }
         return plan;
     }
 
     private static Map<Integer, Pair<DataType, ColumnAccessPaths>> pruneDataTypeAndMergeAccessPaths(
             List<Pair<SlotReference, List<String>>> slotToAccessPaths) {
-        Map<Integer, Pair<DataType, ColumnAccessPaths>> result = new TreeMap<>();
-        Map<SlotReference, DataTypeAccessTree> slotIdToDataTypeTree = new TreeMap<>();
+        Map<Integer, Pair<DataType, ColumnAccessPaths>> result = new LinkedHashMap<>();
+        Map<SlotReference, DataTypeAccessTree> slotIdToDataTypeTree = new LinkedHashMap<>();
 
         // first: merge and set access
         for (Pair<SlotReference, List<String>> kv : slotToAccessPaths) {
