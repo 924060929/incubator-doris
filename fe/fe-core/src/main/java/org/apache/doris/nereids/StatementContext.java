@@ -55,6 +55,7 @@ import org.apache.doris.nereids.trees.plans.RelationId;
 import org.apache.doris.nereids.trees.plans.TableId;
 import org.apache.doris.nereids.trees.plans.logical.LogicalCTEConsumer;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
+import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.util.RelationUtil;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.OriginStatement;
@@ -63,6 +64,7 @@ import org.apache.doris.qe.ShortCircuitQueryContext;
 import org.apache.doris.qe.cache.CacheAnalyzer;
 import org.apache.doris.statistics.Statistics;
 import org.apache.doris.system.Backend;
+import org.apache.doris.thrift.ColumnAccessPaths;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
@@ -274,6 +276,10 @@ public class StatementContext implements Closeable {
     private final Set<List<String>> materializationRewrittenSuccessSet = new HashSet<>();
 
     private boolean isInsert = false;
+
+    private boolean hasNestedColumns;
+
+    private Map<Integer, Pair<DataType, ColumnAccessPaths>> slotIdToPrunedTypeAndAccessPaths = new HashMap<>();
 
     public StatementContext() {
         this(ConnectContext.get(), null, 0);
@@ -993,5 +999,22 @@ public class StatementContext implements Closeable {
 
     public boolean isInsert() {
         return isInsert;
+    }
+
+    public boolean hasNestedColumns() {
+        return hasNestedColumns;
+    }
+
+    public void setHasNestedColumns(boolean hasNestedColumns) {
+        this.hasNestedColumns = hasNestedColumns;
+    }
+
+    public void setSlotIdToPrunedTypeAndAccessPaths(
+            int slotId, DataType prunedDataType, ColumnAccessPaths columnAccessPaths) {
+        this.slotIdToPrunedTypeAndAccessPaths.put(slotId, Pair.of(prunedDataType, columnAccessPaths));
+    }
+
+    public Optional<Pair<DataType, ColumnAccessPaths>> getPrunedTypeAndAccessPaths(SlotReference slotReference) {
+        return Optional.ofNullable(this.slotIdToPrunedTypeAndAccessPaths.get(slotReference.getExprId().asInt()));
     }
 }

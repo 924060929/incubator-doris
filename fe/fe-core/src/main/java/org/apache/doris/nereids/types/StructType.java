@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * Struct type in Nereids.
  */
 @Developing
-public class StructType extends DataType implements ComplexDataType {
+public class StructType extends DataType implements ComplexDataType, NestedColumnPrunable {
 
     public static final StructType SYSTEM_DEFAULT = new StructType();
 

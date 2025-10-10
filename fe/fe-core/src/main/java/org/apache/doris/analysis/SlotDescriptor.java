@@ -24,6 +24,7 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.ColumnStats;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Type;
+import org.apache.doris.thrift.TColumnAccessPaths;
 import org.apache.doris.thrift.TSlotDescriptor;
 
 import com.google.common.base.MoreObjects;
@@ -75,6 +76,7 @@ public class SlotDescriptor {
     private boolean needMaterialize = true;
     private boolean isAutoInc = false;
     private Expr virtualColumn = null;
+    private TColumnAccessPaths accessPaths;
 
     public SlotDescriptor(SlotId id, TupleDescriptor parent) {
 
@@ -127,6 +129,14 @@ public class SlotDescriptor {
 
     public List<String> getSubColLables() {
         return this.subColPath;
+    }
+
+    public TColumnAccessPaths getAccessPaths() {
+        return accessPaths;
+    }
+
+    public void setAccessPaths(TColumnAccessPaths accessPaths) {
+        this.accessPaths = accessPaths;
     }
 
     public TupleDescriptor getParent() {
