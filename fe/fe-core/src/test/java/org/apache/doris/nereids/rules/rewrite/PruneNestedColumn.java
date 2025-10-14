@@ -54,6 +54,23 @@ public class PruneNestedColumn extends TestWithFeService {
                 + "properties ('replication_num'='1')");
 
         connectContext.getSessionVariable().setDisableNereidsRules(RuleType.PRUNE_EMPTY_PARTITION.name());
+        connectContext.getSessionVariable().enableNereidsTimeout = false;
+    }
+
+    @Test
+    public void testPruneArrayLambda() throws Exception {
+        // map_values(struct_element(s, 'data').*)[0].a
+        assertColumn("select struct_element(array_map(x -> map_values(x)[0], struct_element(s, 'data'))[0], 'a') from tbl",
+                "struct<data:array<map<int,struct<a:int>>>>",
+                ImmutableList.of(path("s", "data", "*", "VALUES", "a")),
+                ImmutableList.of()
+        );
+
+        assertColumn("select array_map((x, y) -> struct_element(map_values(x)[0], 'a') + struct_element(map_values(y)[0], 'b'), struct_element(s, 'data'), struct_element(s, 'data')) from tbl",
+                "struct<data:array<map<int,struct<a:int,b:double>>>>",
+                ImmutableList.of(path("s", "data", "*", "VALUES", "a"), path("s", "data", "*", "VALUES", "b")),
+                ImmutableList.of()
+        );
     }
 
     @Test

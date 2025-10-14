@@ -22,31 +22,16 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.jobs.JobContext;
-import org.apache.doris.nereids.trees.expressions.Alias;
-import org.apache.doris.nereids.trees.expressions.Cast;
-import org.apache.doris.nereids.trees.expressions.Expression;
+import org.apache.doris.nereids.rules.rewrite.AccessPathCollector.AccessPathIsPredicate;
 import org.apache.doris.nereids.trees.expressions.Slot;
-import org.apache.doris.nereids.trees.expressions.SlotReference;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.ArrayMap;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.ElementAt;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.MapContainsKey;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.MapContainsValue;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.MapKeys;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.MapValues;
-import org.apache.doris.nereids.trees.expressions.functions.scalar.StructElement;
-import org.apache.doris.nereids.trees.expressions.literal.Literal;
-import org.apache.doris.nereids.trees.expressions.visitor.DefaultExpressionVisitor;
 import org.apache.doris.nereids.trees.plans.Plan;
-import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.visitor.CustomRewriter;
 import org.apache.doris.nereids.types.ArrayType;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.MapType;
-import org.apache.doris.nereids.types.NestedColumnPrunable;
 import org.apache.doris.nereids.types.NullType;
 import org.apache.doris.nereids.types.StructField;
 import org.apache.doris.nereids.types.StructType;
-import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.thrift.TAccessPathType;
 import org.apache.doris.thrift.TColumnAccessPaths;
 import org.apache.doris.thrift.TColumnNameAccessPath;
@@ -59,14 +44,26 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 
-/** NestedColumnCollector */
-public class NestedColumnCollector implements CustomRewriter {
+/**
+ * <li> 1. prune the data type of struct/map
+ *
+ * <p> for example, column s is a struct&lt;id: int, value: double&gt;,
+ *     and `select struct(s, 'id') from tbl` will return the data type: `struct&lt;id: int&gt;`
+ * </p>
+ * </li>
+ *
+ * <li> 2. collect the access paths
+ * <p> for example, select struct(s, 'id'), struct(s, 'data') from tbl` will collect the access path:
+ *     [s.id, s.data]
+ * </p>
+ * </li>
+ */
+public class NestedColumnPruner implements CustomRewriter {
     @Override
     public Plan rewriteRoot(Plan plan, JobContext jobContext) {
         StatementContext statementContext = jobContext.getCascadesContext().getStatementContext();
@@ -99,8 +96,8 @@ public class NestedColumnCollector implements CustomRewriter {
 
         // first: build access data type tree
         for (AccessPathIsPredicate accessPathIsPredicate : slotToAccessPaths) {
-            Slot slot = accessPathIsPredicate.slot;
-            List<String> path = accessPathIsPredicate.path;
+            Slot slot = accessPathIsPredicate.getSlot();
+            List<String> path = accessPathIsPredicate.getPath();
 
             DataTypeAccessTree allAccessTree = slotIdToAllAccessTree.computeIfAbsent(
                     slot, i -> DataTypeAccessTree.ofRoot(slot)
@@ -171,168 +168,6 @@ public class NestedColumnCollector implements CustomRewriter {
         }
 
         return result;
-    }
-
-    private class AccessPathCollector extends DefaultExpressionVisitor<Void, CollectorContext> {
-        private List<AccessPathIsPredicate> slotToAccessPaths = new ArrayList<>();
-
-        public List<AccessPathIsPredicate> collectInPlan(
-                Plan plan, StatementContext statementContext) {
-            boolean bottomFilter = plan instanceof LogicalFilter && plan.child(0).arity() == 0;
-            for (Expression expression : plan.getExpressions()) {
-                expression.accept(this, new CollectorContext(statementContext, bottomFilter));
-            }
-            for (Plan child : plan.children()) {
-                collectInPlan(child, statementContext);
-            }
-            return slotToAccessPaths;
-        }
-
-        private Void continueCollectAccessPath(Expression expr, CollectorContext context) {
-            return expr.accept(this, context);
-        }
-
-        @Override
-        public Void visit(Expression expr, CollectorContext context) {
-            for (Expression child : expr.children()) {
-                child.accept(this, new CollectorContext(context.statementContext, context.bottomFilter));
-            }
-            return null;
-        }
-
-        @Override
-        public Void visitSlotReference(SlotReference slotReference, CollectorContext context) {
-            DataType dataType = slotReference.getDataType();
-            if (dataType instanceof NestedColumnPrunable) {
-                context.accessPathBuilder.addPrefix(slotReference.getName());
-                ImmutableList<String> path = Utils.fastToImmutableList(context.accessPathBuilder.accessPath);
-                slotToAccessPaths.add(new AccessPathIsPredicate(slotReference, path, context.bottomFilter));
-            }
-            return null;
-        }
-
-        @Override
-        public Void visitAlias(Alias alias, CollectorContext context) {
-            return alias.child(0).accept(this, context);
-        }
-
-        @Override
-        public Void visitCast(Cast cast, CollectorContext context) {
-            return cast.child(0).accept(this, context);
-        }
-
-        // array element at
-        @Override
-        public Void visitElementAt(ElementAt elementAt, CollectorContext context) {
-            List<Expression> arguments = elementAt.getArguments();
-            Expression first = arguments.get(0);
-            if (first.getDataType().isArrayType() || first.getDataType().isMapType()
-                    || first.getDataType().isVariantType()) {
-                context.accessPathBuilder.addPrefix("*");
-                continueCollectAccessPath(first, context);
-
-                for (int i = 1; i < arguments.size(); i++) {
-                    visit(arguments.get(i), context);
-                }
-                return null;
-            } else {
-                return visit(elementAt, context);
-            }
-        }
-
-        // struct element_at
-        @Override
-        public Void visitStructElement(StructElement structElement, CollectorContext context) {
-            List<Expression> arguments = structElement.getArguments();
-            Expression struct = arguments.get(0);
-            Expression fieldName = arguments.get(1);
-            DataType fieldType = fieldName.getDataType();
-
-            if (fieldName.isLiteral() && (fieldType.isIntegerLikeType() || fieldType.isStringLikeType())) {
-                context.accessPathBuilder.addPrefix(((Literal) fieldName).getStringValue());
-                return continueCollectAccessPath(struct, context);
-            }
-
-            for (Expression argument : arguments) {
-                visit(argument, context);
-            }
-            return null;
-        }
-
-        @Override
-        public Void visitMapKeys(MapKeys mapKeys, CollectorContext context) {
-            context.accessPathBuilder.addPrefix("KEYS");
-            return continueCollectAccessPath(mapKeys.getArgument(0), context);
-        }
-
-        @Override
-        public Void visitMapValues(MapValues mapValues, CollectorContext context) {
-            LinkedList<String> suffixPath = context.accessPathBuilder.accessPath;
-            if (!suffixPath.isEmpty() && suffixPath.get(0).equals("*")) {
-                CollectorContext removeStarContext
-                        = new CollectorContext(context.statementContext, context.bottomFilter);
-                removeStarContext.accessPathBuilder.accessPath.addAll(suffixPath.subList(1, suffixPath.size()));
-                removeStarContext.accessPathBuilder.addPrefix("VALUES");
-                return continueCollectAccessPath(mapValues.getArgument(0), removeStarContext);
-            }
-            context.accessPathBuilder.addPrefix("VALUES");
-            return continueCollectAccessPath(mapValues.getArgument(0), context);
-        }
-
-        @Override
-        public Void visitMapContainsKey(MapContainsKey mapContainsKey, CollectorContext context) {
-            context.accessPathBuilder.addPrefix("KEYS");
-            return continueCollectAccessPath(mapContainsKey.getArgument(0), context);
-        }
-
-        @Override
-        public Void visitMapContainsValue(MapContainsValue mapContainsValue, CollectorContext context) {
-            context.accessPathBuilder.addPrefix("VALUES");
-            return continueCollectAccessPath(mapContainsValue.getArgument(0), context);
-        }
-
-        @Override
-        public Void visitArrayMap(ArrayMap arrayMap, CollectorContext context) {
-            // Lambda lambda = (Lambda) arrayMap.getArgument(0);
-            // Expression array = arrayMap.getArgument(1);
-
-            // String arrayName = lambda.getLambdaArgumentName(0);
-            return super.visitArrayMap(arrayMap, context);
-        }
-    }
-
-    private static class CollectorContext {
-        private StatementContext statementContext;
-        private AccessPathBuilder accessPathBuilder;
-        private boolean bottomFilter;
-
-        public CollectorContext(StatementContext statementContext, boolean bottomFilter) {
-            this.statementContext = statementContext;
-            this.accessPathBuilder = new AccessPathBuilder();
-            this.bottomFilter = bottomFilter;
-        }
-    }
-
-    private static class AccessPathBuilder {
-        private LinkedList<String> accessPath;
-
-        public AccessPathBuilder() {
-            accessPath = new LinkedList<>();
-        }
-
-        public AccessPathBuilder addPrefix(String prefix) {
-            accessPath.addFirst(prefix);
-            return this;
-        }
-
-        public List<String> toStringList() {
-            return new ArrayList<>(accessPath);
-        }
-
-        @Override
-        public String toString() {
-            return String.join(".", accessPath);
-        }
     }
 
     private static class DataTypeAccessTree {
@@ -486,35 +321,6 @@ public class NestedColumnCollector implements CustomRewriter {
             } else {
                 throw new AnalysisException("unsupported data type: " + dataType);
             }
-        }
-    }
-
-    private static class AccessPathIsPredicate {
-        private final Slot slot;
-        private final List<String> path;
-        private final boolean isPredicate;
-
-        public AccessPathIsPredicate(Slot slot, List<String> path, boolean isPredicate) {
-            this.slot = slot;
-            this.path = path;
-            this.isPredicate = isPredicate;
-        }
-
-        public Slot getSlot() {
-            return slot;
-        }
-
-        public List<String> getPath() {
-            return path;
-        }
-
-        public boolean isPredicate() {
-            return isPredicate;
-        }
-
-        @Override
-        public String toString() {
-            return slot.getName() + ": " + String.join(".", path) + ", " + isPredicate;
         }
     }
 }
