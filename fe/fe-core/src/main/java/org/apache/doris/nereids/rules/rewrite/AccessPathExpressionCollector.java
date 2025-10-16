@@ -18,13 +18,12 @@
 package org.apache.doris.nereids.rules.rewrite;
 
 import org.apache.doris.nereids.StatementContext;
-import org.apache.doris.nereids.rules.rewrite.AccessPathCollector.CollectorContext;
+import org.apache.doris.nereids.rules.rewrite.AccessPathExpressionCollector.CollectorContext;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.ArrayItemReference;
 import org.apache.doris.nereids.trees.expressions.ArrayItemReference.ArrayItemSlot;
 import org.apache.doris.nereids.trees.expressions.Cast;
 import org.apache.doris.nereids.trees.expressions.Expression;
-import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ArrayCount;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ArrayExists;
@@ -48,39 +47,38 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.MapValues;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.StructElement;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import org.apache.doris.nereids.trees.expressions.visitor.DefaultExpressionVisitor;
-import org.apache.doris.nereids.trees.plans.Plan;
-import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.NestedColumnPrunable;
 import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 
-import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Stack;
 
 /**
  * collect the access path, for example: `select struct_element(s, 'data')` has access path: ['s', 'data']
  */
-public class AccessPathCollector extends DefaultExpressionVisitor<Void, CollectorContext> {
-    private List<AccessPathIsPredicate> slotToAccessPaths = new ArrayList<>();
+public class AccessPathExpressionCollector extends DefaultExpressionVisitor<Void, CollectorContext> {
+    private StatementContext statementContext;
+    private boolean bottomPredicate;
+    private Multimap<Integer, CollectAccessPathResult> slotToAccessPaths;
     private Stack<Map<String, Expression>> nameToLambdaArguments = new Stack<>();
 
-    /** collectInPlan */
-    public List<AccessPathIsPredicate> collectInPlan(
-            Plan plan, StatementContext statementContext) {
-        boolean bottomFilter = plan instanceof LogicalFilter && plan.child(0).arity() == 0;
-        for (Expression expression : plan.getExpressions()) {
-            expression.accept(this, new CollectorContext(statementContext, bottomFilter));
-        }
-        for (Plan child : plan.children()) {
-            collectInPlan(child, statementContext);
-        }
-        return slotToAccessPaths;
+    public AccessPathExpressionCollector(
+            StatementContext statementContext, Multimap<Integer, CollectAccessPathResult> slotToAccessPaths, boolean bottomPredicate) {
+        this.statementContext = statementContext;
+        this.slotToAccessPaths = slotToAccessPaths;
+        this.bottomPredicate = bottomPredicate;
+    }
+
+    public void collect(Expression expression) {
+        expression.accept(this, new CollectorContext(statementContext, bottomPredicate));
     }
 
     private Void continueCollectAccessPath(Expression expr, CollectorContext context) {
@@ -101,7 +99,8 @@ public class AccessPathCollector extends DefaultExpressionVisitor<Void, Collecto
         if (dataType instanceof NestedColumnPrunable) {
             context.accessPathBuilder.addPrefix(slotReference.getName());
             ImmutableList<String> path = Utils.fastToImmutableList(context.accessPathBuilder.accessPath);
-            slotToAccessPaths.add(new AccessPathIsPredicate(slotReference, path, context.bottomFilter));
+            int slotId = slotReference.getExprId().asInt();
+            slotToAccessPaths.put(slotId, new CollectAccessPathResult(path, context.bottomFilter));
         }
         return null;
     }
@@ -134,8 +133,7 @@ public class AccessPathCollector extends DefaultExpressionVisitor<Void, Collecto
     public Void visitElementAt(ElementAt elementAt, CollectorContext context) {
         List<Expression> arguments = elementAt.getArguments();
         Expression first = arguments.get(0);
-        if (first.getDataType().isArrayType() || first.getDataType().isMapType()
-                || first.getDataType().isVariantType()) {
+        if (first.getDataType().isArrayType() || first.getDataType().isMapType()) {
             context.accessPathBuilder.addPrefix("*");
             continueCollectAccessPath(first, context);
 
@@ -406,19 +404,13 @@ public class AccessPathCollector extends DefaultExpressionVisitor<Void, Collecto
     }
 
     /** AccessPathIsPredicate */
-    public static class AccessPathIsPredicate {
-        private final Slot slot;
+    public static class CollectAccessPathResult {
         private final List<String> path;
         private final boolean isPredicate;
 
-        public AccessPathIsPredicate(Slot slot, List<String> path, boolean isPredicate) {
-            this.slot = slot;
+        public CollectAccessPathResult(List<String> path, boolean isPredicate) {
             this.path = path;
             this.isPredicate = isPredicate;
-        }
-
-        public Slot getSlot() {
-            return slot;
         }
 
         public List<String> getPath() {
@@ -431,7 +423,21 @@ public class AccessPathCollector extends DefaultExpressionVisitor<Void, Collecto
 
         @Override
         public String toString() {
-            return slot.getName() + ": " + String.join(".", path) + ", " + isPredicate;
+            return String.join(".", path) + ", " + isPredicate;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            CollectAccessPathResult that = (CollectAccessPathResult) o;
+            return isPredicate == that.isPredicate && Objects.equals(path, that.path);
+        }
+
+        @Override
+        public int hashCode() {
+            return path.hashCode();
         }
     }
 }

@@ -22,7 +22,7 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.jobs.JobContext;
-import org.apache.doris.nereids.rules.rewrite.AccessPathCollector.AccessPathIsPredicate;
+import org.apache.doris.nereids.rules.rewrite.AccessPathExpressionCollector.CollectAccessPathResult;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.visitor.CustomRewriter;
@@ -63,7 +63,7 @@ import java.util.Optional;
  * </p>
  * </li>
  */
-public class NestedColumnPruner implements CustomRewriter {
+public class NestedColumnPruning implements CustomRewriter {
     @Override
     public Plan rewriteRoot(Plan plan, JobContext jobContext) {
         StatementContext statementContext = jobContext.getCascadesContext().getStatementContext();
@@ -71,8 +71,8 @@ public class NestedColumnPruner implements CustomRewriter {
         //     return plan;
         // }
 
-        AccessPathCollector collector = new AccessPathCollector();
-        List<AccessPathIsPredicate> slotToAccessPaths = collector.collectInPlan(plan, statementContext);
+        AccessPathPlanCollector collector = new AccessPathPlanCollector();
+        Map<Slot, List<CollectAccessPathResult>> slotToAccessPaths = collector.collect(plan, statementContext);
         Map<Integer, AccessPathInfo> slotToResult = pruneDataType(slotToAccessPaths);
         for (Entry<Integer, AccessPathInfo> kv : slotToResult.entrySet()) {
             Integer slotId = kv.getKey();
@@ -81,7 +81,8 @@ public class NestedColumnPruner implements CustomRewriter {
         return plan;
     }
 
-    private static Map<Integer, AccessPathInfo> pruneDataType(List<AccessPathIsPredicate> slotToAccessPaths) {
+    private static Map<Integer, AccessPathInfo> pruneDataType(
+            Map<Slot, List<CollectAccessPathResult>> slotToAccessPaths) {
         Map<Integer, AccessPathInfo> result = new LinkedHashMap<>();
         Map<Slot, DataTypeAccessTree> slotIdToAllAccessTree = new LinkedHashMap<>();
         Map<Slot, DataTypeAccessTree> slotIdToPredicateAccessTree = new LinkedHashMap<>();
@@ -95,22 +96,24 @@ public class NestedColumnPruner implements CustomRewriter {
                 Comparator.naturalOrder(), pathComparator);
 
         // first: build access data type tree
-        for (AccessPathIsPredicate accessPathIsPredicate : slotToAccessPaths) {
-            Slot slot = accessPathIsPredicate.getSlot();
-            List<String> path = accessPathIsPredicate.getPath();
-
-            DataTypeAccessTree allAccessTree = slotIdToAllAccessTree.computeIfAbsent(
-                    slot, i -> DataTypeAccessTree.ofRoot(slot)
-            );
-            allAccessTree.setAccessByPath(path, 0);
-            allAccessPaths.put(slot.getExprId().asInt(), path);
-
-            if (accessPathIsPredicate.isPredicate()) {
-                DataTypeAccessTree predicateAccessTree = slotIdToPredicateAccessTree.computeIfAbsent(
+        for (Entry<Slot, List<CollectAccessPathResult>> kv : slotToAccessPaths.entrySet()) {
+            Slot slot = kv.getKey();
+            List<CollectAccessPathResult> collectAccessPathResults = kv.getValue();
+            for (CollectAccessPathResult collectAccessPathResult : collectAccessPathResults) {
+                List<String> path = collectAccessPathResult.getPath();
+                DataTypeAccessTree allAccessTree = slotIdToAllAccessTree.computeIfAbsent(
                         slot, i -> DataTypeAccessTree.ofRoot(slot)
                 );
-                predicateAccessTree.setAccessByPath(path, 0);
-                predicateAccessPaths.put(slot.getExprId().asInt(), path);
+                allAccessTree.setAccessByPath(path, 0);
+                allAccessPaths.put(slot.getExprId().asInt(), path);
+
+                if (collectAccessPathResult.isPredicate()) {
+                    DataTypeAccessTree predicateAccessTree = slotIdToPredicateAccessTree.computeIfAbsent(
+                            slot, i -> DataTypeAccessTree.ofRoot(slot)
+                    );
+                    predicateAccessTree.setAccessByPath(path, 0);
+                    predicateAccessPaths.put(slot.getExprId().asInt(), path);
+                }
             }
         }
 

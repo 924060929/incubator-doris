@@ -36,7 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
 
-public class PruneNestedColumn extends TestWithFeService {
+public class PruneNestedColumnTest extends TestWithFeService {
     @BeforeAll
     public void createTable() throws Exception {
         createDatabase("test");
@@ -221,6 +221,36 @@ public class PruneNestedColumn extends TestWithFeService {
                 "struct<city:text,data:array<map<int,struct<a:int,b:double>>>>",
                 ImmutableList.of(path("s", "data"), path("s", "city")),
                 ImmutableList.of(path("s", "data"), path("s", "city"))
+        );
+    }
+
+    @Test
+    public void testCte() throws Throwable {
+        assertColumn("with t as (select id, s from tbl) select struct_element(t1.s, 'city') from t t1 join t t2 on t1.id = t2.id",
+                "struct<city:text,data:array<map<int,struct<a:int,b:double>>>>",
+                ImmutableList.of(path("s")),
+                ImmutableList.of()
+        );
+
+        assertColumn("with t as (select id, struct_element(s, 'city') as c from tbl) select t1.c from t t1 join t t2 on t1.id = t2.id",
+                "struct<city:text>",
+                ImmutableList.of(path("s", "city")),
+                ImmutableList.of()
+        );
+    }
+
+    @Test
+    public void testUnion() throws Throwable {
+        assertColumn("select struct_element(s, 'city') from (select s from tbl union all select null)a",
+                "struct<city:text,data:array<map<int,struct<a:int,b:double>>>>",
+                ImmutableList.of(path("s")),
+                ImmutableList.of()
+        );
+
+        assertColumn("select * from (select struct_element(s, 'city') from tbl union all select null)a",
+                "struct<city:text>",
+                ImmutableList.of(path("s", "city")),
+                ImmutableList.of()
         );
     }
 
