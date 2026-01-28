@@ -99,7 +99,7 @@ public class PlanPostProcessors {
             }
             builder.add(new RuntimeFilterV2Generator());
         }
-        builder.add(new AddLocalExchange());
+        // builder.add(new AddLocalExchange());
         builder.add(new Validator());
         return builder.build();
     }
