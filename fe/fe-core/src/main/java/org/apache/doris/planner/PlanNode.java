@@ -32,6 +32,9 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.common.TreeNode;
 import org.apache.doris.common.UserException;
 import org.apache.doris.datasource.iceberg.source.IcebergScanNode;
+import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeType;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 import org.apache.doris.planner.normalize.Normalizer;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.thrift.TAccessPathType;
@@ -912,5 +915,44 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
             mergeDisplayAccessPaths.add(StringUtils.join(mergedPath, "."));
         }
         return StringUtils.join(mergeDisplayAccessPaths, ", ");
+    }
+
+    public LocalExchangeType deriveOutputLocalExchangeType(
+            PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        return LocalExchangeType.NOOP;
+    }
+
+    public LocalExchangeType enforceChildrenLocalExchangeType(
+            PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        List<LocalExchangeTypeRequire> requireForChildren
+                = getChildrenRequiredLocalExchangeTypes(parent, parentRequire);
+        boolean changed = false;
+        ArrayList<PlanNode> enforceChildren = Lists.newArrayList();
+        for (int i = 0; i < children.size(); i++) {
+            PlanNode child = children.get(i);
+            LocalExchangeTypeRequire require = requireForChildren.get(i);
+            if (child instanceof ExchangeNode) {
+
+            }
+            LocalExchangeType childOutput = child.enforceChildrenLocalExchangeType(translatorContext, this, require);
+            if (!require.satisfy(childOutput)) {
+                PlanNodeId planNodeId = translatorContext.nextPlanNodeId();
+                enforceChildren.add(new LocalExchangeNode(planNodeId, child));
+                changed = true;
+            }
+        }
+        if (changed) {
+            this.children = enforceChildren;
+        }
+        return deriveOutputLocalExchangeType(translatorContext, parent, parentRequire);
+    }
+
+    public List<LocalExchangeTypeRequire> getChildrenRequiredLocalExchangeTypes(
+            PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        List<LocalExchangeTypeRequire> require = new ArrayList<>(children.size());
+        for (int i = 0; i < children.size(); i++) {
+            require.add(LocalExchangeTypeRequire.noRequire());
+        }
+        return require;
     }
 }

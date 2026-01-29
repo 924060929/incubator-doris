@@ -20,7 +20,6 @@
 
 package org.apache.doris.planner;
 
-import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TPlanNode;
 
 import java.util.Collections;
@@ -29,7 +28,7 @@ import java.util.Collections;
 public class LocalExchangeNode extends PlanNode {
     public static final String EXCHANGE_NODE = "LOCAL-EXCHANGE";
 
-    private TPartitionType partitionType;
+    private LocalExchangeType exchangeType;
 
     /**
      * use for Nereids only.
@@ -48,14 +47,70 @@ public class LocalExchangeNode extends PlanNode {
 
     }
 
+    /** LocalExchangeTypeRequire */
+    public interface LocalExchangeTypeRequire {
+        boolean satisfy(LocalExchangeType provide);
+
+        static NoRequire noRequire() {
+            return NoRequire.INSTANCE;
+        }
+
+        static RequireHash requireHash() {
+            return RequireHash.INSTANCE;
+        }
+
+        static RequireSpecific requireSpecific(LocalExchangeType require) {
+            return new RequireSpecific(require);
+        }
+    }
+
+    /** NoRequire */
+    public static class NoRequire implements LocalExchangeTypeRequire {
+        public static final NoRequire INSTANCE = new NoRequire();
+
+        @Override
+        public boolean satisfy(LocalExchangeType provide) {
+            return true;
+        }
+    }
+
+    /** RequireHash */
+    public static class RequireHash implements LocalExchangeTypeRequire {
+        public static final RequireHash INSTANCE = new RequireHash();
+
+        @Override
+        public boolean satisfy(LocalExchangeType provide) {
+            switch (provide) {
+                case EXECUTION_HASH_SHUFFLE:
+                case BUCKET_HASH_SHUFFLE:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    public static class RequireSpecific implements LocalExchangeTypeRequire {
+        LocalExchangeType requireType;
+
+        public RequireSpecific(LocalExchangeType requireType) {
+            this.requireType = requireType;
+        }
+
+        @Override
+        public boolean satisfy(LocalExchangeType provide) {
+            return requireType == provide;
+        }
+    }
+
     public enum LocalExchangeType {
         NOOP,
-        HASH_SHUFFLE,
+        EXECUTION_HASH_SHUFFLE,
         BUCKET_HASH_SHUFFLE,
         PASSTHROUGH,
         ADAPTIVE_PASSTHROUGH,
         BROADCAST,
         PASS_TO_ONE,
-        LOCAL_MERGE_SORT
+        LOCAL_MERGE_SORT;
     }
 }
