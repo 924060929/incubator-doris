@@ -78,7 +78,6 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalLazyMaterializeFile
 import org.apache.doris.nereids.trees.plans.physical.PhysicalLazyMaterializeOlapScan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalLazyMaterializeTVFScan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalLimit;
-import org.apache.doris.nereids.trees.plans.physical.PhysicalLocalDistribute;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalNestedLoopJoin;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalPartitionTopN;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalProject;
@@ -95,7 +94,6 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalStorageLayerAggrega
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTopN;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalUnion;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalWindow;
-import org.apache.doris.planner.PhysicalLocalDistribute2;
 
 /**
  * Base class for the processing of logical and physical plan.
@@ -444,14 +442,6 @@ public abstract class PlanVisitor<R, C> implements CommandVisitor<R, C>, Relatio
     // *******************************
 
     public R visitPhysicalDistribute(PhysicalDistribute<? extends Plan> distribute, C context) {
-        return visit(distribute, context);
-    }
-
-    public R visitPhysicalLocalDistribute(PhysicalLocalDistribute<? extends Plan> distribute, C context) {
-        return visit(distribute, context);
-    }
-
-    public R visitPhysicalLocalDistribute2(PhysicalLocalDistribute2<? extends Plan> distribute, C context) {
         return visit(distribute, context);
     }
 }
