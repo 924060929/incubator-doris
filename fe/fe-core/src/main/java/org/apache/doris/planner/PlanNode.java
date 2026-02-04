@@ -142,7 +142,8 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
 
     protected int nereidsId = -1;
 
-    private List<List<Expr>> childrenDistributeExprLists = new ArrayList<>();
+    protected List<List<Expr>> childrenDistributeExprLists = new ArrayList<>();
+    protected List<Expr> distributeExprLists = new ArrayList<>();
 
     protected PlanNode(PlanNodeId id, List<TupleId> tupleIds, String planNodeName) {
         this.id = id;
@@ -917,42 +918,55 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         return StringUtils.join(mergeDisplayAccessPaths, ", ");
     }
 
-    public LocalExchangeType deriveOutputLocalExchangeType(
+    public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
             PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        return LocalExchangeType.NOOP;
-    }
-
-    public LocalExchangeType enforceChildrenLocalExchangeType(
-            PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        List<LocalExchangeTypeRequire> requireForChildren
-                = getChildrenRequiredLocalExchangeTypes(parent, parentRequire);
-        boolean changed = false;
-        ArrayList<PlanNode> enforceChildren = Lists.newArrayList();
+        ArrayList<PlanNode> newChildren = Lists.newArrayList();
         for (int i = 0; i < children.size(); i++) {
             PlanNode child = children.get(i);
-            LocalExchangeTypeRequire require = requireForChildren.get(i);
-            if (child instanceof ExchangeNode) {
-
-            }
-            LocalExchangeType childOutput = child.enforceChildrenLocalExchangeType(translatorContext, this, require);
-            if (!require.satisfy(childOutput)) {
-                PlanNodeId planNodeId = translatorContext.nextPlanNodeId();
-                enforceChildren.add(new LocalExchangeNode(planNodeId, child));
-                changed = true;
-            }
+            Pair<PlanNode, LocalExchangeType> childOutput
+                    = child.enforceAndDeriveLocalExchange(translatorContext, parent, parentRequire);
+            newChildren.add(childOutput.first);
         }
-        if (changed) {
-            this.children = enforceChildren;
-        }
-        return deriveOutputLocalExchangeType(translatorContext, parent, parentRequire);
+        this.children = newChildren;
+        return Pair.of(this, LocalExchangeType.NOOP);
     }
 
-    public List<LocalExchangeTypeRequire> getChildrenRequiredLocalExchangeTypes(
-            PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        List<LocalExchangeTypeRequire> require = new ArrayList<>(children.size());
-        for (int i = 0; i < children.size(); i++) {
-            require.add(LocalExchangeTypeRequire.noRequire());
+    protected Pair<PlanNode, LocalExchangeType> enforceChild(
+            PlanTranslatorContext translatorContext, LocalExchangeTypeRequire requireChild, PlanNode originChild) {
+        Pair<PlanNode, LocalExchangeType> childOutput
+                = originChild.enforceAndDeriveLocalExchange(translatorContext, this, requireChild);
+        if (!requireChild.satisfy(childOutput.second)) {
+            LocalExchangeType preferType = requireChild.preferType();
+            return Pair.of(
+                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first, preferType),
+                    preferType
+            );
+        } else {
+            return childOutput;
         }
-        return require;
+    }
+
+    protected List<Expr> getChildDistributeExprList(int childIndex) {
+        if ((childrenDistributeExprLists == null || childrenDistributeExprLists.size() <= childIndex)) {
+            return null;
+        } else {
+            return childrenDistributeExprLists.get(childIndex);
+        }
+    }
+
+    public List<List<Expr>> getChildrenDistributeExprLists() {
+        return childrenDistributeExprLists;
+    }
+
+    public List<Expr> getDistributeExprLists() {
+        return distributeExprLists;
+    }
+
+    public void setDistributeExprLists(List<Expr> distributeExprLists) {
+        if (distributeExprLists == null) {
+            this.distributeExprLists = Collections.emptyList();
+        } else {
+            this.distributeExprLists = distributeExprLists;
+        }
     }
 }

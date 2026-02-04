@@ -20,9 +20,14 @@
 
 package org.apache.doris.planner;
 
+import org.apache.doris.analysis.Expr;
+import org.apache.doris.analysis.TupleDescriptor;
+import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TPlanNode;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 /** LocalExchangeNode */
 public class LocalExchangeNode extends PlanNode {
@@ -33,13 +38,36 @@ public class LocalExchangeNode extends PlanNode {
     /**
      * use for Nereids only.
      */
-    public LocalExchangeNode(PlanNodeId id, PlanNode inputNode) {
+    public LocalExchangeNode(PlanNodeId id, PlanNode inputNode, LocalExchangeType exchangeType) {
         super(id, inputNode, EXCHANGE_NODE);
         this.offset = 0;
         this.limit = -1;
         this.conjuncts = Collections.emptyList();
         this.children.add(inputNode);
-        // TupleDescriptor outputTupleDesc = inputNode.getOutputTupleDesc();
+        this.exchangeType = exchangeType;
+        this.fragment = inputNode.getFragment();
+
+        List<Expr> distributeExprs = inputNode.getDistributeExprLists();
+        boolean isHashShuffle = (exchangeType == LocalExchangeType.BUCKET_HASH_SHUFFLE
+                || exchangeType == LocalExchangeType.EXECUTION_HASH_SHUFFLE);
+        if (isHashShuffle && distributeExprs != null && !distributeExprs.isEmpty()) {
+            setDistributeExprLists(distributeExprs);
+            List<List<Expr>> distributeExprsList = new ArrayList<>();
+            distributeExprsList.add(distributeExprs);
+            setChildrenDistributeExprLists(distributeExprsList);
+        }
+        TupleDescriptor outputTupleDesc = inputNode.getOutputTupleDesc();
+        updateTupleIds(outputTupleDesc);
+    }
+
+    public void updateTupleIds(TupleDescriptor outputTupleDesc) {
+        if (outputTupleDesc != null) {
+            clearTupleIds();
+            tupleIds.add(outputTupleDesc.getId());
+        } else {
+            clearTupleIds();
+            tupleIds.addAll(getChild(0).getOutputTupleIds());
+        }
     }
 
     @Override
@@ -47,9 +75,20 @@ public class LocalExchangeNode extends PlanNode {
 
     }
 
+    @Override
+    public String getNodeExplainString(String prefix, TExplainLevel detailLevel) {
+        return prefix + "type: " + exchangeType.name() + "\n";
+    }
+
     /** LocalExchangeTypeRequire */
     public interface LocalExchangeTypeRequire {
         boolean satisfy(LocalExchangeType provide);
+
+        LocalExchangeType preferType();
+
+        default LocalExchangeTypeRequire autoHash() {
+            return RequireHash.INSTANCE;
+        }
 
         static NoRequire noRequire() {
             return NoRequire.INSTANCE;
@@ -59,8 +98,37 @@ public class LocalExchangeNode extends PlanNode {
             return RequireHash.INSTANCE;
         }
 
+        static RequireSpecific requirePassthrough() {
+            return requireSpecific(LocalExchangeType.PASSTHROUGH);
+        }
+
+        static RequireSpecific requirePassToOne() {
+            return requireSpecific(LocalExchangeType.PASS_TO_ONE);
+        }
+
+        static RequireSpecific requireBroadcast() {
+            return requireSpecific(LocalExchangeType.BROADCAST);
+        }
+
+        static RequireSpecific requireAdaptivePassthrough() {
+            return requireSpecific(LocalExchangeType.ADAPTIVE_PASSTHROUGH);
+        }
+
+        static RequireSpecific requireBucketHash() {
+            return requireSpecific(LocalExchangeType.BUCKET_HASH_SHUFFLE);
+        }
+
+        static RequireSpecific requireExecutionHash() {
+            return requireSpecific(LocalExchangeType.EXECUTION_HASH_SHUFFLE);
+        }
+
         static RequireSpecific requireSpecific(LocalExchangeType require) {
             return new RequireSpecific(require);
+        }
+
+        default LocalExchangeType noopTo(LocalExchangeType defaultType) {
+            LocalExchangeType preferType = preferType();
+            return (preferType == LocalExchangeType.NOOP) ? defaultType : preferType;
         }
     }
 
@@ -71,6 +139,11 @@ public class LocalExchangeNode extends PlanNode {
         @Override
         public boolean satisfy(LocalExchangeType provide) {
             return true;
+        }
+
+        @Override
+        public LocalExchangeType preferType() {
+            return LocalExchangeType.NOOP;
         }
     }
 
@@ -88,6 +161,16 @@ public class LocalExchangeNode extends PlanNode {
                     return false;
             }
         }
+
+        @Override
+        public LocalExchangeType preferType() {
+            return LocalExchangeType.EXECUTION_HASH_SHUFFLE;
+        }
+
+        @Override
+        public LocalExchangeTypeRequire autoHash() {
+            return LocalExchangeTypeRequire.requireSpecific(LocalExchangeType.EXECUTION_HASH_SHUFFLE);
+        }
     }
 
     public static class RequireSpecific implements LocalExchangeTypeRequire {
@@ -100,6 +183,20 @@ public class LocalExchangeNode extends PlanNode {
         @Override
         public boolean satisfy(LocalExchangeType provide) {
             return requireType == provide;
+        }
+
+        @Override
+        public LocalExchangeType preferType() {
+            return requireType;
+        }
+
+        @Override
+        public LocalExchangeTypeRequire autoHash() {
+            if (requireType == LocalExchangeType.EXECUTION_HASH_SHUFFLE
+                    || requireType == LocalExchangeType.BUCKET_HASH_SHUFFLE) {
+                return this;
+            }
+            return new RequireSpecific(LocalExchangeType.EXECUTION_HASH_SHUFFLE);
         }
     }
 

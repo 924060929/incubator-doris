@@ -17,7 +17,9 @@
 
 package org.apache.doris.planner;
 
+import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeType;
 import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 
 import java.util.List;
@@ -26,9 +28,40 @@ import java.util.List;
 public class AddLocalExchange {
     public void addLocalExchange(List<PlanFragment> fragments, PlanTranslatorContext context) {
         for (PlanFragment fragment : fragments) {
-            fragment.getPlanRoot().enforceChildrenLocalExchangeType(
-                    context, null, LocalExchangeTypeRequire.noRequire()
-            );
+            DataSink sink = fragment.getSink();
+            LocalExchangeTypeRequire require = sink == null
+                    ? LocalExchangeTypeRequire.noRequire() : sink.getLocalExchangeTypeRequire();
+            PlanNode root = fragment.getPlanRoot();
+            Pair<PlanNode, LocalExchangeType> output = root
+                    .enforceAndDeriveLocalExchange(context, null, require);
+            if (output.first != root) {
+                fragment.setPlanRoot(output.first);
+            }
+        }
+    }
+
+    public static boolean isColocated(PlanNode plan) {
+        if (plan instanceof AggregationNode) {
+            return ((AggregationNode) plan).isColocate() && isColocated(plan.getChild(0));
+        } else if (plan instanceof OlapScanNode) {
+            return true;
+        } else if (plan instanceof SelectNode) {
+            return isColocated(plan.getChild(0));
+        } else if (plan instanceof HashJoinNode) {
+            return ((HashJoinNode) plan).isColocate()
+                    && (isColocated(plan.getChild(0)) || isColocated(plan.getChild(1)));
+        } else if (plan instanceof SetOperationNode) {
+            if (!((SetOperationNode) plan).isColocate()) {
+                return false;
+            }
+            for (PlanNode child : plan.getChildren()) {
+                if (isColocated(child)) {
+                    return true;
+                }
+            }
+            return false;
+        } else {
+            return false;
         }
     }
 }

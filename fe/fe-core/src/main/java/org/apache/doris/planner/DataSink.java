@@ -27,6 +27,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.datasource.hive.HMSExternalTable;
 import org.apache.doris.datasource.iceberg.IcebergExternalTable;
 import org.apache.doris.datasource.odbc.sink.OdbcTableSink;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 import org.apache.doris.thrift.TDataSink;
 import org.apache.doris.thrift.TExplainLevel;
 
@@ -85,5 +86,9 @@ public abstract class DataSink {
 
     public void setMerge(boolean merge) {
         isMerge = merge;
+    }
+
+    public LocalExchangeTypeRequire getLocalExchangeTypeRequire() {
+        return LocalExchangeTypeRequire.noRequire();
     }
 }
