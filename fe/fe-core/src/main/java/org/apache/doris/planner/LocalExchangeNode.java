@@ -169,7 +169,7 @@ public class LocalExchangeNode extends PlanNode {
 
         @Override
         public LocalExchangeTypeRequire autoHash() {
-            return LocalExchangeTypeRequire.requireSpecific(LocalExchangeType.EXECUTION_HASH_SHUFFLE);
+            return this;
         }
     }
 

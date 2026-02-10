@@ -1287,6 +1287,13 @@ struct TExchangeNode {
   4: optional Partitions.TPartitionType partition_type
 }
 
+struct TLocalExchangeNode {
+  1: required Types.TTupleId input_row_tuple
+  2: required list<Exprs.TExpr> distribution_exprs
+  3: required Partitions.TLocalPartitionType partition_type
+  4: required map<i32, i32> shuffle_id_to_instance_id
+}
+
 struct TOlapRewriteNode {
     1: required list<Exprs.TExpr> columns
     2: required list<Types.TColumnType> column_types
