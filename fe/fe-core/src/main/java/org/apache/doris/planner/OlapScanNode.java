@@ -57,6 +57,8 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
 import org.apache.doris.nereids.trees.plans.ScoreRangeInfo;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeType;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 import org.apache.doris.planner.normalize.Normalizer;
 import org.apache.doris.planner.normalize.PartitionRangePredicateNormalizer;
 import org.apache.doris.qe.ConnectContext;
@@ -1053,6 +1055,9 @@ public class OlapScanNode extends ScanNode {
         if (isPointQuery()) {
             output.append(prefix).append("SHORT-CIRCUIT\n");
         }
+        if (fragment.useSerialSource(ConnectContext.get())) {
+            output.append(prefix).append("POOLING-SCAN\n");
+        }
 
         printNestedColumns(output, prefix, getTupleDesc());
 
@@ -1408,5 +1413,12 @@ public class OlapScanNode extends ScanNode {
             return olapTable.getCatalogId();
         }
         return super.getCatalogId();
+    }
+
+    @Override
+    public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
+            PlanTranslatorContext translatorContext, PlanNode parent,
+            LocalExchangeTypeRequire parentRequire) {
+        return super.enforceAndDeriveLocalExchange(translatorContext, parent, parentRequire);
     }
 }

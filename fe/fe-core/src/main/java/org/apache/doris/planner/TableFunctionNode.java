@@ -23,6 +23,10 @@ import org.apache.doris.analysis.ExprToThriftVisitor;
 import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.ToSqlParams;
 import org.apache.doris.analysis.TupleId;
+import org.apache.doris.common.Pair;
+import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeType;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPlanNodeType;
@@ -119,5 +123,14 @@ public class TableFunctionNode extends PlanNode {
         for (SlotId slotId : outputSlotIds) {
             msg.table_function_node.addToOutputSlotIds(slotId.asInt());
         }
+    }
+
+    @Override
+    public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
+            PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        Pair<PlanNode, LocalExchangeType> enforceResult = enforceChild(
+                translatorContext, LocalExchangeTypeRequire.requirePassthrough(), children.get(0));
+        children = Lists.newArrayList(enforceResult.first);
+        return Pair.of(this, LocalExchangeType.PASSTHROUGH);
     }
 }

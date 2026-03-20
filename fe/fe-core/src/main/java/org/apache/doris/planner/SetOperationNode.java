@@ -22,6 +22,11 @@ import org.apache.doris.analysis.ExprToSqlVisitor;
 import org.apache.doris.analysis.ExprToThriftVisitor;
 import org.apache.doris.analysis.ToSqlParams;
 import org.apache.doris.analysis.TupleId;
+import org.apache.doris.common.Pair;
+import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeType;
+import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
+import org.apache.doris.planner.LocalExchangeNode.NoRequire;
 import org.apache.doris.thrift.TExceptNode;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TExpr;
@@ -37,6 +42,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -192,5 +198,72 @@ public abstract class SetOperationNode extends PlanNode {
 
     public boolean isBucketShuffle() {
         return distributionMode.equals(DistributionMode.BUCKET_SHUFFLE);
+    }
+
+    public boolean isColocate() {
+        return isColocate;
+    }
+
+    @Override
+    public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
+            PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        if (this instanceof UnionNode) {
+            ArrayList<PlanNode> newChildren = Lists.newArrayList();
+            NoRequire requireChild = LocalExchangeTypeRequire.noRequire();
+            for (int i = 0; i < children.size(); i++) {
+                PlanNode child = children.get(i);
+                Pair<PlanNode, LocalExchangeType> childOutput
+                        = deriveAndEnforceChildLocalExchange(translatorContext, child, requireChild, i);
+                if (!requireChild.satisfy(childOutput.second)) {
+                    LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
+                            requireChild, translatorContext, this, childOutput.first);
+                    LocalExchangeNode localExchangeNode
+                            = new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
+                                    preferType, getChildDistributeExprList(i));
+                    newChildren.add(localExchangeNode);
+                } else {
+                    newChildren.add(childOutput.first);
+                }
+            }
+
+            this.children = newChildren;
+            return Pair.of(this, LocalExchangeType.NOOP);
+        } else {
+            LocalExchangeTypeRequire requireChild;
+            LocalExchangeType outputType;
+            if (AddLocalExchange.isColocated(this)) {
+                requireChild = LocalExchangeTypeRequire.requireBucketHash();
+                outputType = LocalExchangeType.BUCKET_HASH_SHUFFLE;
+            } else {
+                requireChild = parentRequire.autoRequireHash();
+                outputType = AddLocalExchange.resolveExchangeType(
+                        requireChild, translatorContext, this, children.isEmpty() ? null : children.get(0));
+            }
+
+            ArrayList<PlanNode> newChildren = Lists.newArrayList();
+            for (int i = 0; i < children.size(); i++) {
+                PlanNode child = children.get(i);
+                Pair<PlanNode, LocalExchangeType> childOutput
+                        = deriveAndEnforceChildLocalExchange(translatorContext, child, requireChild, i);
+                if (!requireChild.satisfy(childOutput.second)) {
+                    LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
+                            requireChild, translatorContext, this, childOutput.first);
+                    LocalExchangeNode localExchangeNode
+                            = new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
+                                    preferType, getChildDistributeExprList(i));
+                    newChildren.add(localExchangeNode);
+                } else {
+                    newChildren.add(childOutput.first);
+                }
+            }
+
+            this.children = newChildren;
+            return Pair.of(this, outputType);
+        }
+    }
+
+    @Override
+    protected boolean shouldResetSerialFlagForChild(int childIndex) {
+        return true;
     }
 }
