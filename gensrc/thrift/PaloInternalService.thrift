@@ -472,6 +472,8 @@ struct TQueryOptions {
   // session variable `spill_repartition_max_depth` in FE. Default is 8.
   209: optional i32 spill_repartition_max_depth = 8
 
+  // enable plan local exchange node in fe
+  210: optional bool enable_local_shuffle_planner;
 
   // For cloud, to control if the content would be written into file cache
   // In write path, to control if the content would be written into file cache.
