@@ -278,8 +278,6 @@ private:
                                                 RuntimeState* state, Block* output_block,
                                                 bool* eos) const;
 
-    const TJoinDistributionType::type _join_distribution;
-
     std::shared_ptr<HashJoinBuildSinkOperatorX> _inner_sink_operator;
     std::shared_ptr<HashJoinProbeOperatorX> _inner_probe_operator;
 

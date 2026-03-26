@@ -142,7 +142,7 @@ public:
                              SourceInfo&& source_info) = 0;
     virtual Status sink(RuntimeState* state, Block* in_block, bool eos, Profile&& profile,
                         SinkInfo& sink_info) = 0;
-    virtual ExchangeType get_type() const = 0;
+    virtual TLocalPartitionType::type get_type() const = 0;
     // Called if a local exchanger source operator are closed. Free the unused data block in data_queue.
     virtual void close(SourceInfo&& source_info) = 0;
     // Called if all local exchanger source operators are closed. We free the memory in

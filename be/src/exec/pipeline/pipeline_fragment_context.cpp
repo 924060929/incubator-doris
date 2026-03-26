@@ -751,7 +751,7 @@ Status PipelineFragmentContext::_create_tree_helper(
         *root = op;
     }
     /**
-     * `ExchangeType::HASH_SHUFFLE` should be used if an operator is followed by a shuffled operator (shuffled hash join, union operator followed by co-located operators).
+     * `TLocalPartitionType::HASH_SHUFFLE` should be used if an operator is followed by a shuffled operator (shuffled hash join, union operator followed by co-located operators).
      *
      * For plan:
      * LocalExchange(id=0) -> Aggregation(id=1) -> ShuffledHashJoin(id=2)
@@ -771,7 +771,7 @@ Status PipelineFragmentContext::_create_tree_helper(
                                              : op->is_shuffled_operator())) &&
              Pipeline::is_hash_exchange(required_data_distribution.distribution_type)) ||
             (followed_by_shuffled_operator &&
-             required_data_distribution.distribution_type == ExchangeType::NOOP);
+             required_data_distribution.distribution_type == TLocalPartitionType::NOOP);
 
     current_require_bucket_distribution =
             ((require_bucket_distribution ||
@@ -779,7 +779,7 @@ Status PipelineFragmentContext::_create_tree_helper(
                                              : op->is_colocated_operator())) &&
              Pipeline::is_hash_exchange(required_data_distribution.distribution_type)) ||
             (require_bucket_distribution &&
-             required_data_distribution.distribution_type == ExchangeType::NOOP);
+             required_data_distribution.distribution_type == TLocalPartitionType::NOOP);
 
     if (num_children == 0) {
         _use_serial_source = op->is_serial_operator();

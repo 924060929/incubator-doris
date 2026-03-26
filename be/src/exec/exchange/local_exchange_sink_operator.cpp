@@ -51,10 +51,10 @@ Status LocalExchangeSinkOperatorX::init(RuntimeState* state, TLocalPartitionType
         _shuffle_idx_to_instance_idx = shuffle_idx_to_instance_idx;
         if (state->query_options().__isset.enable_new_shuffle_hash_method &&
             state->query_options().enable_new_shuffle_hash_method) {
-            _partitioner = std::make_unique<vectorized::Crc32CHashPartitioner>(_num_partitions);
+            _partitioner = std::make_unique<Crc32CHashPartitioner>(_num_partitions);
         } else {
             _partitioner = std::make_unique<
-                    vectorized::Crc32HashPartitioner<vectorized::ShuffleChannelIds>>(
+                    Crc32HashPartitioner<ShuffleChannelIds>>(
                     _num_partitions);
         }
         RETURN_IF_ERROR(_partitioner->init(_texprs));
@@ -87,17 +87,17 @@ Status LocalExchangeSinkOperatorX::init_partitioner(RuntimeState* state) {
         _type == TLocalPartitionType::LOCAL_EXECUTION_HASH_SHUFFLE) {
         if (state->query_options().__isset.enable_new_shuffle_hash_method &&
             state->query_options().enable_new_shuffle_hash_method) {
-            _partitioner = std::make_unique<vectorized::Crc32CHashPartitioner>(_num_partitions);
+            _partitioner = std::make_unique<Crc32CHashPartitioner>(_num_partitions);
         } else {
             _partitioner = std::make_unique<
-                    vectorized::Crc32HashPartitioner<vectorized::ShuffleChannelIds>>(
+                    Crc32HashPartitioner<ShuffleChannelIds>>(
                     _num_partitions);
         }
         RETURN_IF_ERROR(_partitioner->init(_texprs));
     } else if (_type == TLocalPartitionType::BUCKET_HASH_SHUFFLE) {
         DCHECK_GT(_num_partitions, 0);
         _partitioner =
-                std::make_unique<vectorized::Crc32HashPartitioner<vectorized::ShuffleChannelIds>>(
+                std::make_unique<Crc32HashPartitioner<ShuffleChannelIds>>(
                         _num_partitions);
         RETURN_IF_ERROR(_partitioner->init(_texprs));
     }
