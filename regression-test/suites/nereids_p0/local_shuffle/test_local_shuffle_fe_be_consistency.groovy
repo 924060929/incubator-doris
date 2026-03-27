@@ -80,6 +80,28 @@ suite("test_local_shuffle_fe_be_consistency") {
     //  enableFePlanner=true  → enable_local_shuffle_planner=true  (FE plans exchanges)
     //  enableFePlanner=false → enable_local_shuffle_planner=false (BE plans natively)
     // ============================================================
+    // Poll until the profile for queryId is stable (two consecutive reads match).
+    // The query ID appears in the header early, but operator metrics are written asynchronously
+    // after the query finishes. A stable profile means writing is complete.
+    def waitForProfile = { String queryId ->
+        def maxAttempts = 30
+        def sleepMs = 300
+        String prev = ""
+        for (int i = 0; i < maxAttempts; i++) {
+            Thread.sleep(sleepMs)
+            try {
+                def text = getProfile(queryId)
+                if (text.contains(queryId) && text == prev) {
+                    return text  // stable across two consecutive reads → complete
+                }
+                prev = text
+            } catch (Exception ignored) {
+                prev = ""
+            }
+        }
+        return getProfile(queryId)
+    }
+
     def runAndGetSinkCounts = { String testSql, boolean enableFePlanner ->
         sql "set enable_profile=true"
         sql "set enable_local_shuffle_planner=${enableFePlanner}"
@@ -90,10 +112,7 @@ suite("test_local_shuffle_fe_be_consistency") {
         def queryIdResult = sql "select last_query_id()"
         def queryId = queryIdResult[0][0].toString()
 
-        // Wait for profile to be fully collected
-        Thread.sleep(1500)
-
-        def profileText = getProfile(queryId)
+        def profileText = waitForProfile(queryId)
         def counts = extractSinkExchangeCounts(profileText)
         logger.info("enable_local_shuffle_planner=${enableFePlanner}, query_id=${queryId}, LE sink counts=${counts}")
         return [queryId: queryId, counts: counts, profile: profileText]
