@@ -668,14 +668,10 @@ Status PipelineFragmentContext::_build_pipelines(ObjectPool* pool, const Descrip
 
 Status PipelineFragmentContext::_create_deferred_local_exchangers() {
     for (auto& info : _deferred_exchangers) {
-        // Mirror _inherit_pipeline_properties() from the native _add_local_exchange_impl path:
-        // the upstream (SINK) pipeline should run with _num_instances tasks, not the
-        // serial-scan parallelism (_parallel_instances=1 for pooling scan).  At this point
-        // all operators have been added, so this is the final task-count assignment and
-        // cannot be overridden by a later add_operator call.
-        if (info.upstream_pipe->num_tasks() < _num_instances) {
-            info.upstream_pipe->set_num_tasks(_num_instances);
-        }
+        // upstream_pipe->num_tasks() is already the correct sender count:
+        // _create_tree_helper sets it via add_operator (serial operators call set_num_tasks with
+        // _parallel_instances, non-serial operators leave it at the value inherited from
+        // add_pipeline).  No adjustment is needed here.
         const int sender_count = info.upstream_pipe->num_tasks();
         switch (info.partition_type) {
         case TLocalPartitionType::LOCAL_EXECUTION_HASH_SHUFFLE:
