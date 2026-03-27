@@ -331,38 +331,13 @@ public class HashJoinNode extends JoinNodeBase {
             outputType = LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE;
         }
 
-        PlanNode probeSide = children.get(0);
-        Pair<PlanNode, LocalExchangeType> probeSideOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, probeSide, probeSideRequire, 0);
-        if (!probeSideRequire.satisfy(probeSideOutput.second)) {
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    probeSideRequire, translatorContext, this, probeSideOutput.first);
-            probeSide = new LocalExchangeNode(
-                    translatorContext.nextPlanNodeId(), probeSideOutput.first, preferType,
-                    getChildDistributeExprList(0)
-            );
-        } else {
-            probeSide = probeSideOutput.first;
-        }
-
-        PlanNode buildSide = children.get(1);
-        Pair<PlanNode, LocalExchangeType> buildSideOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, buildSide, buildSideRequire, 1);
-        if (!buildSideRequire.satisfy(buildSideOutput.second)) {
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    buildSideRequire, translatorContext, this, buildSideOutput.first);
-            buildSide = new LocalExchangeNode(
-                    translatorContext.nextPlanNodeId(), buildSideOutput.first, preferType,
-                    getChildDistributeExprList(1)
-            );
-        } else {
-            buildSide = buildSideOutput.first;
-        }
-
-        this.children = Lists.newArrayList(probeSide, buildSide);
-
+        Pair<PlanNode, LocalExchangeType> probeResult = enforceChildExchange(
+                translatorContext, probeSideRequire, children.get(0), 0);
+        Pair<PlanNode, LocalExchangeType> buildResult = enforceChildExchange(
+                translatorContext, buildSideRequire, children.get(1), 1);
+        this.children = Lists.newArrayList(probeResult.first, buildResult.first);
         if (outputType == null) {
-            outputType = probeSideOutput.second;
+            outputType = probeResult.second;
         }
         return Pair.of(this, outputType);
     }

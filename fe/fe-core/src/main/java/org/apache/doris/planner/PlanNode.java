@@ -1017,6 +1017,38 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         return child.enforceAndDeriveLocalExchange(translatorContext, this, requireChild);
     }
 
+    /**
+     * Enforces a local exchange requirement on a single child without the serial-ancestor
+     * check or heavy-ops bottleneck avoidance that {@link #enforceChild} applies.
+     * Use for nodes whose children's distribution requirements must be satisfied regardless
+     * of serial ancestors in the same pipeline (joins, set operations, etc.).
+     *
+     * @return (resultNode, childOutputType) — resultNode may be a new LocalExchangeNode wrapper
+     *         if an exchange was inserted; childOutputType is the child's reported output
+     *         distribution before any inserted exchange (useful for deriving the parent's output).
+     */
+    protected Pair<PlanNode, LocalExchangeType> enforceChildExchange(
+            PlanTranslatorContext translatorContext, LocalExchangeTypeRequire require,
+            PlanNode child, int childIndex) {
+        Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
+                translatorContext, child, require, childIndex);
+        if (!require.satisfy(childOutput.second)) {
+            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
+                    require, translatorContext, this, childOutput.first);
+            return Pair.of(
+                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
+                            preferType, getChildDistributeExprList(childIndex)),
+                    childOutput.second);
+        }
+        return childOutput;
+    }
+
+    /**
+     * Whether the child at {@code childIndex} starts a new pipeline context, causing
+     * its serial-ancestor flag to be reset to {@code false} rather than inherited from this node.
+     * Override to return {@code true} for pipeline-splitting nodes (LocalExchangeNode) and nodes
+     * whose children run in an independent pipeline segment (SortNode above analytic, etc.).
+     */
     protected boolean shouldResetSerialFlagForChild(int childIndex) {
         return false;
     }

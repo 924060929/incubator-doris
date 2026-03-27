@@ -207,34 +207,10 @@ public class NestedLoopJoinNode extends JoinNodeBase {
             outputType = LocalExchangeType.ADAPTIVE_PASSTHROUGH;
         }
 
-        PlanNode probeSide = children.get(0);
-        Pair<PlanNode, LocalExchangeType> probeSideOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, probeSide, probeSideRequire, 0);
-        if (!probeSideRequire.satisfy(probeSideOutput.second)) {
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    probeSideRequire, translatorContext, this, probeSideOutput.first);
-            probeSide = new LocalExchangeNode(
-                    translatorContext.nextPlanNodeId(), probeSideOutput.first, preferType,
-                    getChildDistributeExprList(0)
-            );
-        } else {
-            probeSide = probeSideOutput.first;
-        }
-
-        PlanNode buildSide = children.get(1);
-        Pair<PlanNode, LocalExchangeType> buildSideOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, buildSide, buildSideRequire, 1);
-        if (!buildSideRequire.satisfy(buildSideOutput.second)) {
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    buildSideRequire, translatorContext, this, buildSideOutput.first);
-            buildSide = new LocalExchangeNode(
-                    translatorContext.nextPlanNodeId(), buildSideOutput.first, preferType,
-                    getChildDistributeExprList(1)
-            );
-        } else {
-            buildSide = buildSideOutput.first;
-        }
-
+        PlanNode probeSide = enforceChildExchange(
+                translatorContext, probeSideRequire, children.get(0), 0).first;
+        PlanNode buildSide = enforceChildExchange(
+                translatorContext, buildSideRequire, children.get(1), 1).first;
         this.children = Lists.newArrayList(probeSide, buildSide);
         return Pair.of(this, outputType);
     }

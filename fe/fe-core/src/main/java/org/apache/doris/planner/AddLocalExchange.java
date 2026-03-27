@@ -103,21 +103,7 @@ public class AddLocalExchange {
 
     private static boolean shouldUseLocalExecutionHash(
             PlanTranslatorContext translatorContext, PlanNode parent, PlanNode child) {
-        PlanFragment fragment = null;
-        if (parent != null) {
-            fragment = parent.getFragment();
-        }
-        if (fragment == null && child != null) {
-            fragment = child.getFragment();
-        }
-
-        if (fragment != null && fragment.useSerialSource(translatorContext.getConnectContext())) {
-            return true;
-        }
-        if (child instanceof ScanNode) {
-            return true;
-        }
-        // For FE-planned intra-fragment hash exchanges, always prefer LOCAL_EXECUTION_HASH_SHUFFLE.
+        // Always prefer LOCAL_EXECUTION_HASH_SHUFFLE for FE-planned intra-fragment hash exchanges.
         // GLOBAL_EXECUTION_HASH_SHUFFLE requires shuffle_idx_to_instance_idx which may be empty
         // for fragments with non-hash sinks (UNPARTITIONED/MERGE). LOCAL_HASH is always safe
         // since it partitions by local instance count without needing external shuffle maps.

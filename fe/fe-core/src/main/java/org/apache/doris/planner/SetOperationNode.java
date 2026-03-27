@@ -206,69 +206,36 @@ public abstract class SetOperationNode extends PlanNode {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        LocalExchangeTypeRequire requireChild;
+        LocalExchangeType outputType;
+        PlanNode firstChild = children.isEmpty() ? null : children.get(0);
         if (this instanceof UnionNode) {
-            ArrayList<PlanNode> newChildren = Lists.newArrayList();
             // Propagate parent's hash requirement to children when parent requires hash distribution.
             // Matches BE's UnionSinkOperatorX which returns GLOBAL_HASH(_distribute_exprs) whenever
             // _followed_by_shuffled_operator=true, regardless of whether _distribute_exprs is empty.
             boolean canPropagateHash = parentRequire.preferType().isHashShuffle();
-            LocalExchangeTypeRequire requireChild = canPropagateHash
-                    ? parentRequire : LocalExchangeTypeRequire.noRequire();
-            LocalExchangeType outputType = canPropagateHash
-                    ? AddLocalExchange.resolveExchangeType(requireChild, translatorContext, this,
-                            children.isEmpty() ? null : children.get(0))
+            requireChild = canPropagateHash ? parentRequire : LocalExchangeTypeRequire.noRequire();
+            outputType = canPropagateHash
+                    ? AddLocalExchange.resolveExchangeType(requireChild, translatorContext, this, firstChild)
                     : LocalExchangeType.NOOP;
-
-            for (int i = 0; i < children.size(); i++) {
-                PlanNode child = children.get(i);
-                Pair<PlanNode, LocalExchangeType> childOutput
-                        = deriveAndEnforceChildLocalExchange(translatorContext, child, requireChild, i);
-                if (!requireChild.satisfy(childOutput.second)) {
-                    LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                            requireChild, translatorContext, this, childOutput.first);
-                    LocalExchangeNode localExchangeNode
-                            = new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                                    preferType, getChildDistributeExprList(i));
-                    newChildren.add(localExchangeNode);
-                } else {
-                    newChildren.add(childOutput.first);
-                }
-            }
-
-            this.children = newChildren;
-            return Pair.of(this, outputType);
         } else {
-            LocalExchangeTypeRequire requireChild;
-            LocalExchangeType outputType;
+            // Intersect / Except
             if (AddLocalExchange.isColocated(this)) {
                 requireChild = LocalExchangeTypeRequire.requireBucketHash();
                 outputType = LocalExchangeType.BUCKET_HASH_SHUFFLE;
             } else {
                 requireChild = parentRequire.autoRequireHash();
                 outputType = AddLocalExchange.resolveExchangeType(
-                        requireChild, translatorContext, this, children.isEmpty() ? null : children.get(0));
+                        requireChild, translatorContext, this, firstChild);
             }
-
-            ArrayList<PlanNode> newChildren = Lists.newArrayList();
-            for (int i = 0; i < children.size(); i++) {
-                PlanNode child = children.get(i);
-                Pair<PlanNode, LocalExchangeType> childOutput
-                        = deriveAndEnforceChildLocalExchange(translatorContext, child, requireChild, i);
-                if (!requireChild.satisfy(childOutput.second)) {
-                    LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                            requireChild, translatorContext, this, childOutput.first);
-                    LocalExchangeNode localExchangeNode
-                            = new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                                    preferType, getChildDistributeExprList(i));
-                    newChildren.add(localExchangeNode);
-                } else {
-                    newChildren.add(childOutput.first);
-                }
-            }
-
-            this.children = newChildren;
-            return Pair.of(this, outputType);
         }
+
+        ArrayList<PlanNode> newChildren = Lists.newArrayList();
+        for (int i = 0; i < children.size(); i++) {
+            newChildren.add(enforceChildExchange(translatorContext, requireChild, children.get(i), i).first);
+        }
+        this.children = newChildren;
+        return Pair.of(this, outputType);
     }
 
     @Override
