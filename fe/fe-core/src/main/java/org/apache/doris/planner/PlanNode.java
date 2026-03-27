@@ -984,6 +984,18 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
                 return childOutput;
             }
             List<Expr> distributeExprs = childIndex >= 0 ? getChildDistributeExprList(childIndex) : null;
+            // Heavy ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp:1013-1025):
+            // When upstream has 1 task (serial/pooling scan) and exchange is heavy (hash shuffle,
+            // bucket hash, adaptive passthrough), insert PASSTHROUGH fan-out first to avoid
+            // single-task bottleneck on the heavy exchange sink.
+            if (preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
+                PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
+                        childOutput.first, LocalExchangeType.PASSTHROUGH, null);
+                return Pair.of(
+                        new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
+                                preferType, distributeExprs),
+                        preferType);
+            }
             return Pair.of(
                     new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
                             preferType, distributeExprs),

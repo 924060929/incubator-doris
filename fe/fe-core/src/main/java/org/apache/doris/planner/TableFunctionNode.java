@@ -128,9 +128,20 @@ public class TableFunctionNode extends PlanNode {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
             PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
+        // Mirrors BE TableFunctionOperatorX::required_data_distribution() which always
+        // returns PASSTHROUGH, regardless of child's serial status.
+        //
+        // Conceptual model: TableFunction requires PASSTHROUGH input but outputs
+        // "unknown distribution" (NOOP). This means downstream operators (e.g. Sort)
+        // must independently evaluate their own requirements against NOOP, naturally
+        // triggering exchange insertion when they require PASSTHROUGH.
+        //
+        // In BE, need_to_local_exchange() Step 4 treats non-hash exchanges (PASSTHROUGH)
+        // as always needing insertion, so "PASSTHROUGH doesn't satisfy PASSTHROUGH" —
+        // which is equivalent to our FE model of require=PASSTHROUGH, output=NOOP.
         Pair<PlanNode, LocalExchangeType> enforceResult = enforceChild(
                 translatorContext, LocalExchangeTypeRequire.requirePassthrough(), children.get(0));
         children = Lists.newArrayList(enforceResult.first);
-        return Pair.of(this, LocalExchangeType.PASSTHROUGH);
+        return Pair.of(this, LocalExchangeType.NOOP);
     }
 }

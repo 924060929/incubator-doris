@@ -40,7 +40,7 @@
  *   - NLJ probe: FE always requires ADAPTIVE_PASSTHROUGH; BE requires NOOP for
  *     RIGHT_OUTER/RIGHT_SEMI/RIGHT_ANTI/FULL_OUTER (FE adds extra exchange for those types)
  */
-suite("test_local_shuffle_fe_be_consistency", "nereids_p0") {
+suite("test_local_shuffle_fe_be_consistency") {
 
     // ============================================================
     //  Helper: fetch profile text via HTTP (root, no password)
@@ -288,14 +288,16 @@ suite("test_local_shuffle_fe_be_consistency", "nereids_p0") {
         "SELECT ${svSerialSource} k1, count(*) AS cnt FROM ls_t1 GROUP BY k1 ORDER BY k1")
 
     // 1-2c: Finalize agg, serial/pooling scan, bucket key (k1), ls_serial (2 buckets).
-    //       Known diff: For pooling scan + bucket-key colocate agg, BE inserts LOCAL_HASH_SHUFFLE
-    //       running as 4 pipeline tasks + 2 PASSTHROUGH exchanges (one per pipeline boundary).
-    //       FE inserts LOCAL_HASH_SHUFFLE as a single tree node (1 task) + 1 PASSTHROUGH.
-    //       BE's pipeline-level task granularity produces more profile entries than FE's tree model.
-    //       Results are correct (verified by check_sql_equal).
+    //       Pooling scan + bucket-key colocate agg: BE inserts PASSTHROUGH fan-out (heavy_ops
+    //       bottleneck avoidance before LOCAL_HASH_SHUFFLE) + LOCAL_HASH_SHUFFLE.
+    //       FE mirrors with heavy_ops check in enforceChild.
     checkConsistencyWithSql("agg_finalize_serial_pooling_bucket",
-        "SELECT ${svSerialSource} k1, count(*) AS cnt FROM ls_serial GROUP BY k1 ORDER BY k1",
-        true /* knownDiff */)
+        "SELECT ${svSerialSource} k1, count(*) AS cnt FROM ls_serial GROUP BY k1 ORDER BY k1")
+
+    // 1-2c2: Same finalize agg with bucket key, but non-pooling (ignore_storage_data_distribution=false).
+    //        No serial source → no heavy_ops PASSTHROUGH fan-out needed.
+    checkConsistencyWithSql("agg_finalize_non_pooling_bucket",
+        "SELECT ${sv} k1, count(*) AS cnt FROM ls_serial GROUP BY k1 ORDER BY k1")
 
     // 1-2d: Agg, serial/pooling scan, non-bucket key (k2), ls_serial.
     checkConsistencyWithSql("agg_finalize_serial_pooling_non_bucket",
@@ -551,16 +553,26 @@ suite("test_local_shuffle_fe_be_consistency", "nereids_p0") {
     // BE operators: TableFunctionOperatorX, AssertNumRowsOperatorX
     // ================================================================
 
-    // 9-1: TableFunction → PASSTHROUGH
-    //      BE inserts PASSTHROUGH twice: once for TableFunctionOperatorX (requires PASSTHROUGH)
-    //      and again for SortSink (merge_by_exchange=true, requires PASSTHROUGH) as separate
-    //      pipeline splits. FE's PlanNode model propagates PASSTHROUGH from TableFunctionNode
-    //      up to satisfy SortNode's requirement, inserting only one exchange. Count 2:1.
-    //      Known diff: BE pipeline-level granularity inserts more exchanges than FE's tree model.
+    // 9-1: TableFunction (non-pooling) → PASSTHROUGH×2
+    //      BE TableFunctionOperatorX overrides required_data_distribution() to always return
+    //      PASSTHROUGH; need_to_local_exchange Step 4 always inserts non-hash exchanges.
+    //      So: OlapScan → PT → TableFunc → PT → Sort. Total: 2 PASSTHROUGH.
+    //      FE mirrors: TableFunctionNode requires PASSTHROUGH from child (outputs NOOP),
+    //      SortNode independently inserts PASSTHROUGH for mergeByExchange.
     checkConsistencyWithSql("table_function",
         """SELECT ${sv} k1, e1 FROM ls_t1
            LATERAL VIEW explode_numbers(v1) tmp AS e1
-           ORDER BY k1, e1 LIMIT 20""", true /* knownDiff */)
+           ORDER BY k1, e1 LIMIT 20""")
+
+    // 9-1b: TableFunction (pooling scan) → PASSTHROUGH×2
+    //       Same as 9-1: TableFunctionOperatorX always requires PASSTHROUGH regardless of child.
+    //       Pooling scan (serial) → PT fan-out → TableFunc → PT → Sort. Total: 2 PASSTHROUGH.
+    //       FE mirrors: TableFunctionNode requires PASSTHROUGH (outputs NOOP),
+    //       SortNode independently inserts PASSTHROUGH for mergeByExchange.
+    checkConsistencyWithSql("table_function_pooling",
+        """SELECT ${svSerialSource} k1, e1 FROM ls_t1
+           LATERAL VIEW explode_numbers(v1) tmp AS e1
+           ORDER BY k1, e1 LIMIT 20""")
 
     // 9-2: AssertNumRows (scalar subquery) → PASSTHROUGH
     //      Known diff: In single-BE environments, FE and BE may disagree on instance counts

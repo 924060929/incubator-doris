@@ -21,6 +21,7 @@
 package org.apache.doris.planner;
 
 import org.apache.doris.analysis.Expr;
+import org.apache.doris.analysis.ExprToThriftVisitor;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TExpr;
@@ -91,7 +92,7 @@ public class LocalExchangeNode extends PlanNode {
         if (exchangeType.isHashShuffle()) {
             List<TExpr> thriftDistributeExprLists = new ArrayList<>();
             for (Expr expr : distributeExprLists()) {
-                thriftDistributeExprLists.add(expr.treeToThrift());
+                thriftDistributeExprLists.add(ExprToThriftVisitor.treeToThrift(expr));
             }
             msg.local_exchange_node.setDistributeExprLists(thriftDistributeExprLists);
         }
@@ -255,6 +256,23 @@ public class LocalExchangeNode extends PlanNode {
                 case GLOBAL_EXECUTION_HASH_SHUFFLE:
                 case LOCAL_EXECUTION_HASH_SHUFFLE:
                 case BUCKET_HASH_SHUFFLE:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Mirrors BE Pipeline::heavy_operations_on_the_sink():
+        // HASH_SHUFFLE, BUCKET_HASH_SHUFFLE, and ADAPTIVE_PASSTHROUGH perform
+        // heavy computation on the sink side. When the upstream pipeline has only
+        // 1 task (serial/pooling scan), a PASSTHROUGH fan-out must be inserted
+        // before these exchanges to avoid a single-task bottleneck.
+        public boolean isHeavyOperation() {
+            switch (this) {
+                case GLOBAL_EXECUTION_HASH_SHUFFLE:
+                case LOCAL_EXECUTION_HASH_SHUFFLE:
+                case BUCKET_HASH_SHUFFLE:
+                case ADAPTIVE_PASSTHROUGH:
                     return true;
                 default:
                     return false;
