@@ -80,24 +80,20 @@ suite("test_local_shuffle_fe_be_consistency") {
     //  enableFePlanner=true  → enable_local_shuffle_planner=true  (FE plans exchanges)
     //  enableFePlanner=false → enable_local_shuffle_planner=false (BE plans natively)
     // ============================================================
-    // Poll until the profile for queryId is stable (two consecutive reads match).
-    // The query ID appears in the header early, but operator metrics are written asynchronously
-    // after the query finishes. A stable profile means writing is complete.
+    // Poll until the profile contains "Is Profile Collection Completed: true".
+    // This field is written by SummaryProfile.queryFinished() after waitForFragmentsDone(),
+    // guaranteeing all BE operator metrics have been merged into the profile.
     def waitForProfile = { String queryId ->
         def maxAttempts = 30
         def sleepMs = 300
-        String prev = ""
         for (int i = 0; i < maxAttempts; i++) {
             Thread.sleep(sleepMs)
             try {
                 def text = getProfile(queryId)
-                if (text.contains(queryId) && text == prev) {
-                    return text  // stable across two consecutive reads → complete
+                if (text.contains("Is Profile Collection Completed")) {
+                    return text
                 }
-                prev = text
-            } catch (Exception ignored) {
-                prev = ""
-            }
+            } catch (Exception ignored) {}
         }
         return getProfile(queryId)
     }
