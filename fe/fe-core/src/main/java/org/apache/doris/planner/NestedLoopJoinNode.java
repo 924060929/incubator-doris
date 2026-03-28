@@ -179,8 +179,13 @@ public class NestedLoopJoinNode extends JoinNodeBase {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
 
-        boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext())
-                && ((children.get(0) instanceof ScanNode) || (children.get(1) instanceof ScanNode));
+        // Use fragment.useSerialSource() directly instead of also checking
+        // (children instanceof ScanNode).  When NLJs are nested, the outer NLJ's
+        // children are inner NLJ / ExchangeNode (not ScanNode), but pooling scan
+        // handling is still needed — without it, the serial Exchange on the build
+        // side won't get a BROADCAST local exchange, causing "must set shared
+        // state, in CROSS_JOIN_OPERATOR" for instances 1+.
+        boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext());
 
         LocalExchangeTypeRequire probeSideRequire;
         LocalExchangeTypeRequire buildSideRequire;
@@ -207,7 +212,13 @@ public class NestedLoopJoinNode extends JoinNodeBase {
             outputType = LocalExchangeType.ADAPTIVE_PASSTHROUGH;
         }
 
-        PlanNode probeSide = enforceChildExchange(
+        // NLJ creates a pipeline boundary in BE (build side splits into a separate
+        // pipeline).  BE's need_to_local_exchange Step 4 always inserts a local exchange
+        // for non-hash distribution types, even if the child already outputs the same
+        // type.  Use forceEnforceChildExchange for the probe side to match BE behavior
+        // — always insert ADAPTIVE_PASSTHROUGH even when the child (e.g., another NLJ)
+        // already outputs ADAPTIVE_PASSTHROUGH.
+        PlanNode probeSide = forceEnforceChildExchange(
                 translatorContext, probeSideRequire, children.get(0), 0).first;
         PlanNode buildSide = enforceChildExchange(
                 translatorContext, buildSideRequire, children.get(1), 1).first;

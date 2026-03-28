@@ -1044,6 +1044,30 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     }
 
     /**
+     * Like {@link #enforceChildExchange} but always inserts a local exchange
+     * when the require is not noRequire, even if the child already outputs a
+     * matching distribution.  This mirrors BE's need_to_local_exchange Step 4
+     * which always inserts non-hash exchanges regardless of the current
+     * distribution.  Used by NLJ probe side where each NLJ creates a pipeline
+     * boundary and data must be re-partitioned.
+     */
+    protected Pair<PlanNode, LocalExchangeType> forceEnforceChildExchange(
+            PlanTranslatorContext translatorContext, LocalExchangeTypeRequire require,
+            PlanNode child, int childIndex) {
+        Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
+                translatorContext, child, require, childIndex);
+        if (require.preferType() != LocalExchangeType.NOOP) {
+            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
+                    require, translatorContext, this, childOutput.first);
+            return Pair.of(
+                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
+                            preferType, getChildDistributeExprList(childIndex)),
+                    childOutput.second);
+        }
+        return childOutput;
+    }
+
+    /**
      * Whether the child at {@code childIndex} starts a new pipeline context, causing
      * its serial-ancestor flag to be reset to {@code false} rather than inherited from this node.
      * Override to return {@code true} for pipeline-splitting nodes (LocalExchangeNode) and nodes
