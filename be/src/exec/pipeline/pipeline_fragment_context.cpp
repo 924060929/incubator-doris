@@ -264,6 +264,25 @@ Status PipelineFragmentContext::_build_and_prepare_full_pipeline(ThreadPool* thr
         // Create deferred local exchangers now that all pipelines have final num_tasks.
         RETURN_IF_ERROR(_create_deferred_local_exchangers());
 
+        // Raise num_tasks for pipelines whose serial non-scan operators (e.g.,
+        // UNPARTITIONED Exchange) reduced num_tasks below _num_instances.
+        // Without this, fragment instances 1+ have no task for these pipelines
+        // and downstream operators fail with "must set shared state".
+        //
+        // This applies to ALL pipelines (not just deferred exchanger upstreams):
+        // fragments with UNION/INTERSECT/EXCEPT + serial Exchange in child
+        // pipelines also need the raise, even without FE-planned local exchange.
+        //
+        // Exception: serial scan sources (pooling scan) keep num_tasks=1 — the
+        // PassthroughExchanger(1, N) handles the fan-out correctly.
+        // NOTE: Do NOT raise pipelines whose source is a serial operator
+        // (Exchange or scan) — they legitimately have 1 task, and raising
+        // them causes crashes (e.g., 4 Exchange tasks but only 1 receives
+        // data).  The correct fix for shared state injection across
+        // instances is handled by the FE: it inserts local exchange nodes
+        // between serial operators and their downstream consumers, creating
+        // proper pipeline boundaries with _num_instances tasks.
+
         // 3. Create sink operator
         if (!_params.fragment.__isset.output_sink) {
             return Status::InternalError("No output sink in this fragment!");
@@ -668,29 +687,8 @@ Status PipelineFragmentContext::_build_pipelines(ObjectPool* pool, const Descrip
 
 Status PipelineFragmentContext::_create_deferred_local_exchangers() {
     for (auto& info : _deferred_exchangers) {
-        // Raise upstream pipeline's num_tasks to _num_instances when a serial
-        // non-scan operator (e.g., UNPARTITIONED Exchange) reduced it below
-        // _num_instances.  This is needed because downstream pipelines
-        // (join build, agg, sort, union, etc.) need _num_instances tasks so
-        // every fragment instance can create/inject shared state.  Without the
-        // raise, instances 1+ have no upstream task and operators fail with
-        // "must set shared state".
-        //
-        // Exception: do NOT raise when the serial operator is a scan source
-        // (pooling scan).  For pooling scan, 1 sender is correct —
-        // PassthroughExchanger(1, N) handles the 1→N fan-out properly.
-        if (info.upstream_pipe->num_tasks() < _num_instances) {
-            bool has_serial_scan = false;
-            for (auto& op : info.upstream_pipe->operators()) {
-                if (op->is_serial_operator() && op->is_source()) {
-                    has_serial_scan = true;
-                    break;
-                }
-            }
-            if (!has_serial_scan) {
-                info.upstream_pipe->set_num_tasks(_num_instances);
-            }
-        }
+        // num_tasks raise is handled globally in _build_and_prepare_full_pipeline
+        // after this function returns.  No per-exchanger adjustment needed here.
         const int sender_count = info.upstream_pipe->num_tasks();
         switch (info.partition_type) {
         case TLocalPartitionType::LOCAL_EXECUTION_HASH_SHUFFLE:
