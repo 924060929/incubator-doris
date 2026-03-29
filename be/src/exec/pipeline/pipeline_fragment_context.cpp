@@ -668,10 +668,29 @@ Status PipelineFragmentContext::_build_pipelines(ObjectPool* pool, const Descrip
 
 Status PipelineFragmentContext::_create_deferred_local_exchangers() {
     for (auto& info : _deferred_exchangers) {
-        // upstream_pipe->num_tasks() is already the correct sender count:
-        // _create_tree_helper sets it via add_operator (serial operators call set_num_tasks with
-        // _parallel_instances, non-serial operators leave it at the value inherited from
-        // add_pipeline).  No adjustment is needed here.
+        // Raise upstream pipeline's num_tasks to _num_instances when a serial
+        // non-scan operator (e.g., UNPARTITIONED Exchange) reduced it below
+        // _num_instances.  This is needed because downstream pipelines
+        // (join build, agg, sort, union, etc.) need _num_instances tasks so
+        // every fragment instance can create/inject shared state.  Without the
+        // raise, instances 1+ have no upstream task and operators fail with
+        // "must set shared state".
+        //
+        // Exception: do NOT raise when the serial operator is a scan source
+        // (pooling scan).  For pooling scan, 1 sender is correct —
+        // PassthroughExchanger(1, N) handles the 1→N fan-out properly.
+        if (info.upstream_pipe->num_tasks() < _num_instances) {
+            bool has_serial_scan = false;
+            for (auto& op : info.upstream_pipe->operators()) {
+                if (op->is_serial_operator() && op->is_source()) {
+                    has_serial_scan = true;
+                    break;
+                }
+            }
+            if (!has_serial_scan) {
+                info.upstream_pipe->set_num_tasks(_num_instances);
+            }
+        }
         const int sender_count = info.upstream_pipe->num_tasks();
         switch (info.partition_type) {
         case TLocalPartitionType::LOCAL_EXECUTION_HASH_SHUFFLE:
