@@ -1014,28 +1014,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
                 ? false
                 : hasSerialAncestorInPipeline || isSerialOperator();
         translatorContext.setHasSerialAncestorInPipeline(child, childHasSerialAncestorInPipeline);
-        Pair<PlanNode, LocalExchangeType> result =
-                child.enforceAndDeriveLocalExchange(translatorContext, this, requireChild);
-
-        // If the returned node is a serial EXCHANGE operator, insert a
-        // PASSTHROUGH local exchange to create a pipeline boundary.  This
-        // mirrors BE's _add_local_exchange which inserts an exchange after
-        // serial operators, ensuring downstream pipelines have _num_instances
-        // tasks for shared state injection and proper mem_counters
-        // initialization.  Without this, the serial Exchange reduces the
-        // pipeline's num_tasks to 1, causing SIGSEGV (null mem_counters) or
-        // "must set shared state" errors.
-        //
-        // Only apply when fragment uses serial source (pooling scan mode).
-        // Without useSerialSource(), non-pooling fragments may get unnecessary
-        // PASSTHROUGH exchanges that change pipeline structure and cause deadlocks.
-        if (result.first instanceof ExchangeNode
-                && result.first.isSerialOperator()
-                && fragment.useSerialSource(translatorContext.getConnectContext())) {
-            return Pair.of(
-                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), result.first,
-                            LocalExchangeType.PASSTHROUGH, null),
-                    result.second);
+        return child.enforceAndDeriveLocalExchange(translatorContext, this, requireChild);
         }
         return result;
     }

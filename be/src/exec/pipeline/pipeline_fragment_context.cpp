@@ -1802,11 +1802,16 @@ Status PipelineFragmentContext::_create_operator(ObjectPool* pool, const TPlanNo
     }
     case TPlanNodeType::LOCAL_EXCHANGE_NODE: {
         op = std::make_shared<LocalExchangeSourceOperatorX>(pool, tnode, next_operator_id(), descs);
-        // Save downstream pipeline's num_tasks before add_operator potentially reduces it
-        // (is_serial_operator on the LocalExchangeSourceOperatorX would set num_tasks=1,
-        // but the downstream pipeline needs _num_instances tasks — the serial semantics
-        // should only apply to the upstream scan pipeline).
-        auto downstream_num_tasks = cur_pipe->num_tasks();
+        // The downstream pipeline (containing LocalExchangeSource) must have
+        // _num_instances tasks — matching BE-native _inherit_pipeline_properties
+        // which sets pipe_with_source.set_num_tasks(_num_instances).
+        // Without this, when the parent pipeline was reduced by a serial operator
+        // (e.g., serial Exchange with use_serial_exchange=true, or UNPARTITIONED
+        // Exchange), the downstream inherits the reduced num_tasks via
+        // add_pipeline(parent).  The deferred exchanger creates _num_instances
+        // channels but only fewer source tasks initialize mem_counters — the
+        // sink round-robins to all channels and crashes on uninitialized ones.
+        auto downstream_num_tasks = _num_instances;
         RETURN_IF_ERROR(cur_pipe->add_operator(op, _parallel_instances));
         // Restore downstream pipeline's num_tasks (mirroring _inherit_pipeline_properties:
         // downstream keeps _num_instances, upstream gets the serial/reduced count)
