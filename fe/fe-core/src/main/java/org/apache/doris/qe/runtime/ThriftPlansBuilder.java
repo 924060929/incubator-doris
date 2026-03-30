@@ -297,21 +297,10 @@ public class ThriftPlansBuilder {
             PipelineDistributedPlan childPlan, ConnectContext connectContext) {
         PlanFragment fragment = childPlan.getFragmentJob().getFragment();
         PlanNode planRoot = fragment.getPlanRoot();
-        // A fragment outputs serially if its output pipeline has only 1 task.
-        // This happens when:
-        // 1. The fragment uses serial source (pooling scan) AND the plan root
-        //    is serial or has no serial children (no local exchange fan-out)
-        // 2. The fragment's data partition is UNPARTITIONED — it runs on only
-        //    1 worker and always outputs serially regardless of local exchange
-        if (fragment.getDataPartition().isPartitioned()) {
-            if (!fragment.useSerialSource(connectContext)) {
-                return false;
-            }
-            return planRoot.isSerialOperator() || !planRoot.hasSerialChildren();
-        } else {
-            // UNPARTITIONED fragment: only 1 worker, outputs serially
-            return true;
+        if (!fragment.useSerialSource(connectContext)) {
+            return false;
         }
+        return planRoot.isSerialOperator() || !planRoot.hasSerialChildren();
     }
 
     private static void setMultiCastDestinationThriftIfNotSet(PipelineDistributedPlan fragmentPlan) {
