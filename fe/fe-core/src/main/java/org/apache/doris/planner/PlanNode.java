@@ -1015,8 +1015,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
                 : hasSerialAncestorInPipeline || isSerialOperator();
         translatorContext.setHasSerialAncestorInPipeline(child, childHasSerialAncestorInPipeline);
         return child.enforceAndDeriveLocalExchange(translatorContext, this, requireChild);
-        }
-        return result;
     }
 
     /**
