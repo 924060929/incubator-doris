@@ -297,7 +297,15 @@ public class AggregationNode extends PlanNode {
             if (children.get(0) instanceof HashJoinNode
                     && sessionVariable.enableStreamingAggHashJoinForcePassthrough) {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
-            } else if (fragment != null && fragment.useSerialSource(connectContext)) {
+            } else if (fragment != null && fragment.useSerialSource(connectContext)
+                    && children.get(0).isSerialOperator()) {
+                // Mirrors BE StreamingAggOperatorX::required_data_distribution():
+                //   return _child->is_serial_operator() ? PASSTHROUGH : NOOP
+                // Check the IMMEDIATE child's serialness (e.g. pooling OlapScan → serial=true,
+                // NLJ (INNER/LEFT) → serial=false).  Using fragment.useSerialSource() alone
+                // over-fires when NLJ exchanges have been inserted below — in BE, after an
+                // APT exchange is inserted, the new pipeline has _use_serial_source=false,
+                // so StreamingAgg returns NOOP in that pipeline.
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
