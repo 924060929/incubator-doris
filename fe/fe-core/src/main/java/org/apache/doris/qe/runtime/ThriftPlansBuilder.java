@@ -572,7 +572,33 @@ public class ThriftPlansBuilder {
         // but only the first one actually receives remote data. In that case receiverPlan.getInstanceJobs()
         // no longer matches sender destinations, and using receiver instance order will produce an invalid
         // shuffle_idx_to_instance_idx mapping for BE.
-        Entry<ExchangeNode, DistributedPlan> exchangeToChildPlan = receivePlan.getInputs().entries().iterator().next();
+        //
+        // When a fragment has multiple ExchangeNode inputs (e.g., NLJ with probe + BROADCAST build sides),
+        // always pick the one with the most destinations on this worker. A BROADCAST input has 1 dest per BE
+        // while the main data-carrying input (HASH-partitioned probe) has N dests per BE; using the BROADCAST
+        // one would produce a 1-entry map for GLOBAL_HASH LOCAL_EXCHANGE, causing rows to be lost.
+        Entry<ExchangeNode, DistributedPlan> exchangeToChildPlan = null;
+        int maxDestsOnWorker = -1;
+        for (Entry<ExchangeNode, DistributedPlan> entry : receivePlan.getInputs().entries()) {
+            ExchangeNode exchNode = entry.getKey();
+            PipelineDistributedPlan childPlan = (PipelineDistributedPlan) entry.getValue();
+            for (Entry<DataSink, List<AssignedJob>> kv : childPlan.getDestinations().entrySet()) {
+                if (kv.getKey().getExchNodeId().asInt() != exchNode.getId().asInt()) {
+                    continue;
+                }
+                int destsOnWorker = (int) kv.getValue().stream()
+                        .filter(j -> j.getAssignedWorker().id() == worker.id())
+                        .count();
+                if (destsOnWorker > maxDestsOnWorker) {
+                    maxDestsOnWorker = destsOnWorker;
+                    exchangeToChildPlan = entry;
+                }
+                break;
+            }
+        }
+        if (exchangeToChildPlan == null) {
+            return destIdToInstanceId;
+        }
         ExchangeNode linkNode = exchangeToChildPlan.getKey();
         PipelineDistributedPlan firstInputPlan = (PipelineDistributedPlan) exchangeToChildPlan.getValue();
         for (Entry<DataSink, List<AssignedJob>> kv : firstInputPlan.getDestinations().entrySet()) {
