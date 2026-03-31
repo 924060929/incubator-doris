@@ -255,13 +255,11 @@ public class SortNode extends PlanNode {
 
         LocalExchangeTypeRequire requireChild;
         LocalExchangeType outputType = null;
-        if (children.get(0) instanceof AnalyticEvalNode) {
-            if (mergeByexchange) {
-                // Outer merge-sort above analytic: data is already sorted/partitioned by analytic,
-                // just need passthrough for merge. BE: SortSink._merge_by_exchange=true → PASSTHROUGH.
-                requireChild = LocalExchangeTypeRequire.requirePassthrough();
-                outputType = LocalExchangeType.PASSTHROUGH;
-            } else if (AddLocalExchange.isColocated(this)) {
+        if (isAnalyticSort) {
+            // BE: SortSink._is_analytic_sort=true → required_data_distribution() = HASH.
+            // This sort serves a parent AnalyticEvalNode (window function) and requires
+            // data partitioned by the analytic's partition exprs.
+            if (AddLocalExchange.isColocated(this)) {
                 requireChild = LocalExchangeTypeRequire.requireHash();
                 outputType = AddLocalExchange.resolveExchangeType(
                         LocalExchangeTypeRequire.requireHash(), translatorContext, this,
@@ -273,11 +271,8 @@ public class SortNode extends PlanNode {
             // BE: SortSink._merge_by_exchange=true → required_data_distribution() = PASSTHROUGH.
             requireChild = LocalExchangeTypeRequire.requirePassthrough();
             outputType = LocalExchangeType.PASSTHROUGH;
-        } else if (fragment.useSerialSource(translatorContext.getConnectContext())
-                && children.get(0) instanceof ScanNode) {
-            requireChild = LocalExchangeTypeRequire.requirePassthrough();
-            outputType = LocalExchangeType.PASSTHROUGH;
         } else {
+            // BE: else → NOOP
             requireChild = LocalExchangeTypeRequire.noRequire();
             outputType = LocalExchangeType.NOOP;
         }

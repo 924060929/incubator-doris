@@ -126,8 +126,7 @@ public class ThriftPlansBuilder {
         for (PipelineDistributedPlan currentFragmentPlan : distributedPlans) {
             sharedFileScanRangeParams.putAll(computeFileScanRangeParams(currentFragmentPlan));
 
-            Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(
-                    currentFragmentPlan, coordinatorContext.connectContext);
+            Map<Integer, Integer> exchangeSenderNum = computeExchangeSenderNum(currentFragmentPlan);
             ListMultimap<DistributedPlanWorker, AssignedJob> instancesPerWorker
                     = groupInstancePerWorker(currentFragmentPlan);
             Map<DistributedPlanWorker, TPipelineFragmentParams> workerToCurrentFragment = Maps.newLinkedHashMap();
@@ -259,48 +258,14 @@ public class ThriftPlansBuilder {
     }
 
     private static Map<Integer, Integer> computeExchangeSenderNum(
-            PipelineDistributedPlan distributedPlan, ConnectContext connectContext) {
+            PipelineDistributedPlan distributedPlan) {
         Map<Integer, Integer> senderNum = Maps.newLinkedHashMap();
         for (Entry<ExchangeNode, DistributedPlan> kv : distributedPlan.getInputs().entries()) {
             ExchangeNode exchangeNode = kv.getKey();
             PipelineDistributedPlan childPlan = (PipelineDistributedPlan) kv.getValue();
-            List<AssignedJob> childInstances = childPlan.getInstanceJobs();
-
-            // The receiver's stream_recvr num_senders must match the number of tasks in the
-            // sender fragment's output pipeline.
-            //
-            // Local shuffle has two shapes:
-            // 1. serial source -> local exchange -> parallel operators -> DataStreamSink
-            //    In this case all fragment instances still send data, so sender count must keep
-            //    `childInstances.size()`.
-            // 2. serial source -> serial output pipeline -> DataStreamSink
-            //    In this case only the first instance per worker sends data, so sender count must
-            //    collapse to distinct workers.
-            boolean useLocalShuffle = childInstances.stream()
-                    .anyMatch(LocalShuffleAssignedJob.class::isInstance);
-            int actualSenderCount;
-            if (useLocalShuffle && senderFragmentOutputsSerially(childPlan, connectContext)) {
-                actualSenderCount = (int) childInstances.stream()
-                        .map(AssignedJob::getAssignedWorker)
-                        .distinct()
-                        .count();
-            } else {
-                actualSenderCount = childInstances.size();
-            }
-
-            senderNum.merge(exchangeNode.getId().asInt(), actualSenderCount, Integer::sum);
+            senderNum.merge(exchangeNode.getId().asInt(), childPlan.getInstanceJobs().size(), Integer::sum);
         }
         return senderNum;
-    }
-
-    private static boolean senderFragmentOutputsSerially(
-            PipelineDistributedPlan childPlan, ConnectContext connectContext) {
-        PlanFragment fragment = childPlan.getFragmentJob().getFragment();
-        PlanNode planRoot = fragment.getPlanRoot();
-        if (!fragment.useSerialSource(connectContext)) {
-            return false;
-        }
-        return planRoot.isSerialOperator() || !planRoot.hasSerialChildren();
     }
 
     private static void setMultiCastDestinationThriftIfNotSet(PipelineDistributedPlan fragmentPlan) {

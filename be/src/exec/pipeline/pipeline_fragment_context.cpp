@@ -687,8 +687,6 @@ Status PipelineFragmentContext::_build_pipelines(ObjectPool* pool, const Descrip
 
 Status PipelineFragmentContext::_create_deferred_local_exchangers() {
     for (auto& info : _deferred_exchangers) {
-        // num_tasks raise is handled globally in _build_and_prepare_full_pipeline
-        // after this function returns.  No per-exchanger adjustment needed here.
         const int sender_count = info.upstream_pipe->num_tasks();
         switch (info.partition_type) {
         case TLocalPartitionType::LOCAL_EXECUTION_HASH_SHUFFLE:

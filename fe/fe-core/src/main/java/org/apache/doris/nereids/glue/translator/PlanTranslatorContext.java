@@ -118,6 +118,13 @@ public class PlanTranslatorContext {
 
     private final Map<PlanNodeId, Boolean> serialAncestorInPipelineMap = Maps.newHashMap();
 
+    // Whether the current fragment uses LocalShuffleAssignedJob (pooling scan with
+    // ignoreDataDistribution → _parallel_instances=1 in BE). When true, serial operators
+    // indicate real pipeline bottlenecks needing PASSTHROUGH fan-out (heavy_ops).
+    // When false (regular bucket distribution), each instance has its own scan range
+    // and num_tasks matches _num_instances, so no fan-out is needed.
+    private boolean isLocalShuffleFragment = false;
+
     private boolean isTopMaterializeNode = true;
 
     private final Set<SlotId> virtualColumnIds = Sets.newHashSet();
@@ -253,6 +260,14 @@ public class PlanTranslatorContext {
 
     public boolean hasSerialAncestorInPipeline(PlanNode node) {
         return serialAncestorInPipelineMap.getOrDefault(node.getId(), false);
+    }
+
+    public void setIsLocalShuffleFragment(boolean isLocalShuffle) {
+        this.isLocalShuffleFragment = isLocalShuffle;
+    }
+
+    public boolean isLocalShuffleFragment() {
+        return isLocalShuffleFragment;
     }
 
     public SlotDescriptor addSlotDesc(TupleDescriptor t) {

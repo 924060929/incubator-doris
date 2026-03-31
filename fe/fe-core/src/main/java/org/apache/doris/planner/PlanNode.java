@@ -984,11 +984,15 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
                 return childOutput;
             }
             List<Expr> distributeExprs = childIndex >= 0 ? getChildDistributeExprList(childIndex) : null;
-            // Heavy ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp:1013-1025):
-            // When upstream has 1 task (serial/pooling scan) and exchange is heavy (hash shuffle,
-            // bucket hash, adaptive passthrough), insert PASSTHROUGH fan-out first to avoid
-            // single-task bottleneck on the heavy exchange sink.
-            if (preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
+            // Heavy ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp:1025-1038):
+            // Heavy ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp:1025-1038):
+            // When upstream has 1 task (serial source) and exchange is heavy, insert PASSTHROUGH
+            // fan-out first to avoid single-task bottleneck on the heavy exchange sink.
+            // Only applies to local-shuffle fragments (pooling scan) where _parallel_instances=1
+            // causes serial pipelines to have 1 task. In non-pooling fragments, each instance
+            // has its own scan range and all pipelines have _num_instances tasks.
+            if (translatorContext.isLocalShuffleFragment()
+                    && preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
                 PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
                         childOutput.first, LocalExchangeType.PASSTHROUGH, null);
                 return Pair.of(
@@ -1035,9 +1039,22 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         if (!require.satisfy(childOutput.second)) {
             LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
                     require, translatorContext, this, childOutput.first);
+            List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
+            // Heavy ops bottleneck avoidance (same as enforceChild):
+            // serial child + heavy exchange → insert PASSTHROUGH fan-out first
+            // Only for local-shuffle (pooling scan) fragments where serial means 1 task.
+            if (translatorContext.isLocalShuffleFragment()
+                    && preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
+                PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
+                        childOutput.first, LocalExchangeType.PASSTHROUGH, null);
+                return Pair.of(
+                        new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
+                                preferType, distributeExprs),
+                        childOutput.second);
+            }
             return Pair.of(
                     new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                            preferType, getChildDistributeExprList(childIndex)),
+                            preferType, distributeExprs),
                     childOutput.second);
         }
         return childOutput;
@@ -1059,9 +1076,22 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         if (require.preferType() != LocalExchangeType.NOOP) {
             LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
                     require, translatorContext, this, childOutput.first);
+            List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
+            // Heavy ops bottleneck avoidance (same as enforceChild):
+            // serial child + heavy exchange → insert PASSTHROUGH fan-out first
+            // Only for local-shuffle (pooling scan) fragments where serial means 1 task.
+            if (translatorContext.isLocalShuffleFragment()
+                    && preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
+                PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
+                        childOutput.first, LocalExchangeType.PASSTHROUGH, null);
+                return Pair.of(
+                        new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
+                                preferType, distributeExprs),
+                        childOutput.second);
+            }
             return Pair.of(
                     new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                            preferType, getChildDistributeExprList(childIndex)),
+                            preferType, distributeExprs),
                     childOutput.second);
         }
         return childOutput;

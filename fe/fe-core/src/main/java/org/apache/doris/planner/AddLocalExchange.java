@@ -32,35 +32,58 @@ import java.util.List;
 public class AddLocalExchange {
     public void addLocalExchange(List<PlanFragment> fragments, PlanTranslatorContext context) {
         for (PlanFragment fragment : fragments) {
-            addLocalExchangeForFragment(fragment, context);
+            addLocalExchangeForFragment(fragment, context, false);
         }
     }
 
-    /** addLocalExchange with distributed plans, skipping single-instance fragments (matching BE behavior) */
+    /** addLocalExchange with distributed plans, skipping single-instance fragments.
+     *  BE's _plan_local_exchange processes all pipelines regardless of _num_instances,
+     *  but with _num_instances==1 all pipelines have 1 task so local exchange is a no-op.
+     *  Skipping avoids inserting LOCAL_EXCHANGE_NODEs that change pipeline structure
+     *  without benefit and may cause sender/receiver count mismatches. */
     public void addLocalExchange(FragmentIdMapping<DistributedPlan> distributedPlans,
             PlanTranslatorContext context) {
         for (DistributedPlan plan : distributedPlans.values()) {
             PipelineDistributedPlan pipePlan = (PipelineDistributedPlan) plan;
             int instanceCount = pipePlan.getInstanceJobs().size();
-            // Match BE's early-return: if (_num_instances <= 1) return OK();
             if (instanceCount <= 1) {
                 continue;
             }
             PlanFragment fragment = pipePlan.getFragmentJob().getFragment();
-            addLocalExchangeForFragment(fragment, context);
+            boolean isLocalShuffle = pipePlan.getInstanceJobs().stream()
+                    .anyMatch(j -> j
+                            instanceof org.apache.doris.nereids.trees.plans.distribute
+                                    .worker.job.LocalShuffleAssignedJob);
+            addLocalExchangeForFragment(fragment, context, isLocalShuffle);
         }
     }
 
-    private void addLocalExchangeForFragment(PlanFragment fragment, PlanTranslatorContext context) {
+    /** @return true if a LOCAL_EXCHANGE_NODE was inserted in this fragment */
+    private void addLocalExchangeForFragment(PlanFragment fragment, PlanTranslatorContext context,
+            boolean isLocalShuffle) {
         DataSink sink = fragment.getSink();
         LocalExchangeTypeRequire require = sink == null
                 ? LocalExchangeTypeRequire.noRequire() : sink.getLocalExchangeTypeRequire();
         PlanNode root = fragment.getPlanRoot();
         context.setHasSerialAncestorInPipeline(root, false);
+        context.setIsLocalShuffleFragment(isLocalShuffle);
         Pair<PlanNode, LocalExchangeType> output = root
                 .enforceAndDeriveLocalExchange(context, null, require);
-        if (output.first != root) {
-            fragment.setPlanRoot(output.first);
+        PlanNode newRoot = output.first;
+        // Mirror BE OperatorBase base class required_data_distribution():
+        // when child (fragment root) is serial AND the fragment uses pooling scan
+        // (LocalShuffleAssignedJob → ignoreDataDistribution → _parallel_instances=1),
+        // the DataStreamSink pipeline has num_tasks=1 so only instance 0 creates a
+        // task and sends EOS. Downstream receivers expect _num_instances EOSes → hang.
+        // Insert PASSTHROUGH fan-out to create _num_instances sink tasks.
+        // Non-pooling fragments (regular bucket distribution) have _num_instances ==
+        // bucket_count and every instance gets a scan range, so all sink tasks run.
+        if (isLocalShuffle && newRoot.isSerialOperator()) {
+            newRoot = new LocalExchangeNode(context.nextPlanNodeId(), newRoot,
+                    LocalExchangeType.PASSTHROUGH, null);
+        }
+        if (newRoot != root) {
+            fragment.setPlanRoot(newRoot);
         }
     }
 

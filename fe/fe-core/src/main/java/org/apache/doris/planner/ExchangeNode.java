@@ -180,7 +180,15 @@ public class ExchangeNode extends PlanNode {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        if (partitionType == TPartitionType.HASH_PARTITIONED) {
+        // Mirror BE's ExchangeSourceOperatorX::required_data_distribution():
+        // serial Exchange returns NOOP. This covers both:
+        // 1. UNPARTITIONED exchange (naturally serial) → already NOOP in else branch
+        // 2. HASH/BUCKET exchange made serial by use_serial_exchange=true → override to NOOP
+        // Mirror BE ExchangeSourceOperatorX::required_data_distribution():
+        // serial → NOOP; else HASH/BUCKET/NOOP based on partition type.
+        if (isSerialOperator()) {
+            return Pair.of(this, LocalExchangeType.NOOP);
+        } else if (partitionType == TPartitionType.HASH_PARTITIONED) {
             return Pair.of(this, LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE);
         } else if (partitionType == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
             return Pair.of(this, LocalExchangeType.BUCKET_HASH_SHUFFLE);
