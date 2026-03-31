@@ -327,8 +327,14 @@ public class HashJoinNode extends JoinNodeBase {
                     LocalExchangeTypeRequire.requireBucketHash(), translatorContext, this,
                     children.get(0));
         } else {
-            buildSideRequire = probeSideRequire = LocalExchangeTypeRequire.requireGlobalExecutionHash();
-            outputType = LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE;
+            // Use requireHash() (not requireGlobalExecutionHash()) so that resolveExchangeType()
+            // can downgrade to LOCAL_EXECUTION_HASH_SHUFFLE via shouldUseLocalExecutionHash().
+            // This matches BE-native behavior where use_serial_exchange=true sets _use_serial_source=true,
+            // causing _add_local_exchange_impl to use LOCAL (not GLOBAL) hash shuffle.
+            // With use_serial_exchange=false, the upstream ExchangeNode already outputs
+            // GLOBAL_EXECUTION_HASH_SHUFFLE which satisfies requireHash() — no new exchange inserted.
+            buildSideRequire = probeSideRequire = LocalExchangeTypeRequire.requireHash();
+            outputType = null; // derived from probeResult.second below
         }
 
         Pair<PlanNode, LocalExchangeType> probeResult = enforceChildExchange(

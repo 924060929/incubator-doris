@@ -180,8 +180,12 @@ public class PartitionSortNode extends PlanNode {
         LocalExchangeTypeRequire requireChild;
         LocalExchangeType outputType;
         if (phase == PartitionTopnPhase.TWO_PHASE_GLOBAL_PTOPN) {
-            requireChild = LocalExchangeTypeRequire.requireGlobalExecutionHash();
-            outputType = LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE;
+            // Use requireHash() so resolveExchangeType() can downgrade to LOCAL_EXECUTION_HASH_SHUFFLE,
+            // matching BE-native behavior where _use_serial_source=true causes LOCAL (not GLOBAL) hash.
+            // Output type is derived from the child's actual output (may be LOCAL or GLOBAL depending
+            // on whether a new exchange was inserted or the existing upstream exchange already satisfied).
+            requireChild = LocalExchangeTypeRequire.requireHash();
+            outputType = null;
         } else {
             requireChild = LocalExchangeTypeRequire.requirePassthrough();
             outputType = LocalExchangeType.PASSTHROUGH;
@@ -189,7 +193,7 @@ public class PartitionSortNode extends PlanNode {
         Pair<PlanNode, LocalExchangeType> enforceResult
                 = enforceChild(translatorContext, requireChild, children.get(0));
         this.children = Lists.newArrayList(enforceResult.first);
-        return Pair.of(this, outputType);
+        return Pair.of(this, outputType != null ? outputType : enforceResult.second);
     }
 
     @Override
