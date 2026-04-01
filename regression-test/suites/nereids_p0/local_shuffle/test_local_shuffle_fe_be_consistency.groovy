@@ -860,6 +860,48 @@ suite("test_local_shuffle_fe_be_consistency") {
            GROUP BY GROUPING SETS ((k1), ())
            ORDER BY k1, rn""")
 
+    // ============================================================
+    //  14. RQG bug cases — serial NLJ + pooling scan (Bug 13 from rqg_bugs)
+    //  Serial NLJ (RIGHT_OUTER) with pooling scan. Previously crashed because
+    //  FE inserted BROADCAST on build side inflating num_tasks while probe stayed
+    //  serial. Fixed: serial NLJ sets buildSideRequire=noRequire().
+    // ============================================================
+    checkConsistencyWithSql("rqg_serial_nlj_right_outer_pooling",
+        """SELECT /*+SET_VAR(use_serial_exchange=true, parallel_pipeline_task_num=0,
+                             ignore_storage_data_distribution=true,
+                             enable_share_hash_table_for_broadcast_join=false,
+                             disable_streaming_preaggregations=true,
+                             disable_join_reorder=true)*/
+              b.k1 AS field1
+          FROM ls_serial a
+          RIGHT OUTER JOIN ls_serial b ON a.v1 > b.v1
+          GROUP BY field1
+          ORDER BY field1 ASC""")
+
+    // GLOBAL_HASH_SHUFFLE fix (Bug 10 from rqg_bugs) — self-join + NLJ with serial exchange
+    checkConsistencyWithSql("rqg_global_hash_shuffle_self_join_nlj",
+        """SELECT /*+SET_VAR(use_serial_exchange=true, parallel_pipeline_task_num=4,
+                             ignore_storage_data_distribution=true,
+                             disable_join_reorder=true, disable_colocate_plan=true)*/
+              a.k1 AS field1, a.v1 AS field2
+          FROM ls_t1 a
+          LEFT JOIN ls_t1 b ON a.k1 = b.k2
+          LEFT JOIN ls_t1 c ON a.k1 > b.k2
+          WHERE a.v1 > 5
+          GROUP BY field1, field2
+          ORDER BY field1, field2""")
+
+    // FULL OUTER JOIN + GROUP BY with serial exchange (Bug 11 from rqg_bugs)
+    checkConsistencyWithSql("rqg_global_hash_full_outer_join",
+        """SELECT /*+SET_VAR(use_serial_exchange=true, parallel_pipeline_task_num=4,
+                             ignore_storage_data_distribution=true)*/
+              a.k1, b.k1, count(1)
+          FROM ls_t1 a
+          FULL OUTER JOIN ls_t2 b ON a.k1 = b.k1
+          WHERE b.k1 = 2
+          GROUP BY a.k1, b.k1
+          ORDER BY 1, 2, 3""")
+
     // ================================================================
     //  Phase 2: Fetch all profiles and compare results
     //  By now, all queries have been executed and profiles are being

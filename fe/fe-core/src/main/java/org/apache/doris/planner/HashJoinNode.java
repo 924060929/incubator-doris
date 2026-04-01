@@ -322,7 +322,21 @@ public class HashJoinNode extends JoinNodeBase {
             // without inserting a redundant local exchange.
             outputType = probeChildSerial ? LocalExchangeType.PASSTHROUGH : null;
         } else if (AddLocalExchange.isColocated(this) || isBucketShuffle()) {
-            buildSideRequire = probeSideRequire = LocalExchangeTypeRequire.requireBucketHash();
+            probeSideRequire = LocalExchangeTypeRequire.requireBucketHash();
+            if (isBucketShuffle() && isSerialChildInThrift(translatorContext, children.get(1))) {
+                // BUCKET_SHUFFLE only: build child is ExchangeNode from another fragment.
+                // When serial (pooling scan), the Exchange reduces the build pipeline's
+                // num_tasks to _parallel_instances=1 via add_operator(). This causes
+                // instance 1+ to have probe tasks without build tasks → shared state
+                // injection fails. Use requirePassToOne to insert a local exchange that
+                // restores num_tasks, matching BE-native's PASSTHROUGH insertion.
+                // NOT for COLOCATE: build child is ScanNode in same fragment, no Exchange,
+                // no serial num_tasks reduction. Using PASS_TO_ONE would incorrectly route
+                // all build data to 1 instance, losing rows.
+                buildSideRequire = LocalExchangeTypeRequire.requirePassToOne();
+            } else {
+                buildSideRequire = LocalExchangeTypeRequire.requireBucketHash();
+            }
             outputType = AddLocalExchange.resolveExchangeType(
                     LocalExchangeTypeRequire.requireBucketHash(), translatorContext, this,
                     children.get(0));

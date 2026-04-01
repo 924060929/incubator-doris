@@ -279,7 +279,7 @@ public class AggregationNode extends PlanNode {
         LocalExchangeTypeRequire requireChild;
         if (canUseDistinctStreamingAgg(sessionVariable)) {
             // DistinctStreamingAggOperatorX in BE
-            if (needsFinalize || (aggInfo.getGroupingExprs().size() > 1 && !useStreamingPreagg)) {
+            if (needsFinalize || (!aggInfo.getGroupingExprs().isEmpty() && !useStreamingPreagg)) {
                 if (AddLocalExchange.isColocated(this)) {
                     requireChild = LocalExchangeTypeRequire.requireHash();
                 } else {
