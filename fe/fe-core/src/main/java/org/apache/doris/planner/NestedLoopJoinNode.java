@@ -196,11 +196,14 @@ public class NestedLoopJoinNode extends JoinNodeBase {
         } else if (isSerialOperator()) {
             // RIGHT_OUTER/RIGHT_SEMI/RIGHT_ANTI/FULL_OUTER: probe side must be serial (1 task)
             // to avoid duplicate unmatched rows from build side. No exchange needed for probe.
-            // BE: NestedLoopJoinProbeOperatorX returns NOOP for these join types.
+            // Build side: noRequire() regardless of pooling scan. The probe pipeline has 1 task
+            // (serial), so inserting BROADCAST on the build side would inflate build pipeline's
+            // num_tasks to _num_instances while probe stays at 1. This causes instance 1+ to
+            // create build tasks without corresponding probe tasks, leaving source_deps empty
+            // and crashing in set_ready_to_read(). BE-native avoids this via the
+            // num_tasks_of_parent()<=1 check in _add_local_exchange.
             probeSideRequire = LocalExchangeTypeRequire.noRequire();
-            buildSideRequire = childUsePoolingScan
-                    ? LocalExchangeTypeRequire.requireBroadcast()
-                    : LocalExchangeTypeRequire.noRequire();
+            buildSideRequire = LocalExchangeTypeRequire.noRequire();
             outputType = LocalExchangeType.NOOP;
         } else if (childUsePoolingScan) {
             probeSideRequire = LocalExchangeTypeRequire.requireAdaptivePassthrough();
