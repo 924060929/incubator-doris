@@ -180,14 +180,21 @@ public class ExchangeNode extends PlanNode {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        // Mirror BE's ExchangeSourceOperatorX::required_data_distribution():
-        // serial Exchange returns NOOP. This covers both:
-        // 1. UNPARTITIONED exchange (naturally serial) → already NOOP in else branch
-        // 2. HASH/BUCKET exchange made serial by use_serial_exchange=true → override to NOOP
-        // Mirror BE ExchangeSourceOperatorX::required_data_distribution():
-        // serial → NOOP; else HASH/BUCKET/NOOP based on partition type.
-        if (isSerialOperator()) {
-            return Pair.of(this, LocalExchangeType.NOOP);
+        // Must match the BE serial condition in toThrift(): isSerialOperator() && useSerialSource().
+        // Only insert PASSTHROUGH when the exchange will actually be serial on the BE.
+        // Without useSerialSource() check, we'd insert PASSTHROUGH in non-pooling fragments
+        // where the exchange has N tasks, corrupting broadcast join data distribution
+        // (PASSTHROUGH round-robin splits complete-dataset sinks into 1/N subsets per source).
+        boolean willBeSerialOnBe = isSerialOperator()
+                && fragment != null
+                && fragment.useSerialSource(ConnectContext.get());
+        if (willBeSerialOnBe) {
+            // Serial exchange → 1 task. Insert PASSTHROUGH to fan out to N tasks.
+            // Parent nodes (HashJoin, etc.) may add PASS_TO_ONE on top if they need
+            // single-builder semantics (e.g., broadcast join build side).
+            PlanNode pt = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
+                    this, LocalExchangeType.PASSTHROUGH, null);
+            return Pair.of(pt, LocalExchangeType.PASSTHROUGH);
         } else if (partitionType == TPartitionType.HASH_PARTITIONED) {
             return Pair.of(this, LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE);
         } else if (partitionType == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
