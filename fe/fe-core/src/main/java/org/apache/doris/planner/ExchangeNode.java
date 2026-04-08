@@ -189,9 +189,20 @@ public class ExchangeNode extends PlanNode {
                 && fragment != null
                 && fragment.useSerialSource(ConnectContext.get());
         if (willBeSerialOnBe) {
-            // Serial exchange → 1 task. Insert PASSTHROUGH to fan out to N tasks.
-            // Parent nodes (HashJoin, etc.) may add PASS_TO_ONE on top if they need
-            // single-builder semantics (e.g., broadcast join build side).
+            // Serial exchange → 1 task. Must fan out to N tasks for downstream operators.
+            // For HASH/BUCKET exchanges: return NOOP and let parent insert the appropriate
+            // redistribution (HASH_SHUFFLE or BUCKET_HASH_SHUFFLE). PASSTHROUGH round-robin
+            // would corrupt the hash/bucket distribution, and PASS_TO_ONE doesn't work for
+            // BUCKET_SHUFFLE joins (no shared hash table mechanism unlike BROADCAST).
+            // The heavy-ops bottleneck avoidance in enforceChildExchange() will automatically
+            // insert a PASSTHROUGH fan-out before the hash/bucket shuffle if needed.
+            if (partitionType == TPartitionType.HASH_PARTITIONED
+                    || partitionType == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
+                return Pair.of(this, LocalExchangeType.NOOP);
+            }
+            // For UNPARTITIONED (broadcast): PASSTHROUGH fan-out is safe because the
+            // exchange has the complete dataset. Parent nodes (HashJoin) may add PASS_TO_ONE
+            // on top for single-builder semantics (broadcast join build side).
             PlanNode pt = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
                     this, LocalExchangeType.PASSTHROUGH, null);
             return Pair.of(pt, LocalExchangeType.PASSTHROUGH);
