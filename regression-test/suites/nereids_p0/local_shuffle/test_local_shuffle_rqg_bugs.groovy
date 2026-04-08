@@ -775,5 +775,128 @@ suite("test_local_shuffle_rqg_bugs") {
         logger.info("Bug 14: SKIPPED (allow_replica_on_same_host not enabled, cannot create replication_num=3 tables)")
     }
 
+    // ============================================================
+    //  Bug 15: BUCKET_SHUFFLE join wrong results with serial exchange — PASS_TO_ONE data loss
+    //  Root cause: When serial exchange feeds BUCKET_SHUFFLE join build side,
+    //  PASS_TO_ONE routes ALL build data to task 0. Unlike BROADCAST joins,
+    //  BUCKET_SHUFFLE has no shared hash table mechanism — tasks 1..N-1 build
+    //  empty hash tables and lose rows during probe. Fixed by using
+    //  BUCKET_HASH_SHUFFLE instead of PASS_TO_ONE for BUCKET_SHUFFLE build side.
+    //  Tables use 3 buckets so pptn=4 triggers serial scan on single BE (3 < 4*1).
+    // ============================================================
+
+    logger.info("=== Bug 15: BUCKET_SHUFFLE join wrong results with serial PASS_TO_ONE ===")
+
+    sql "DROP TABLE IF EXISTS rqg_t7_3bucket"
+    sql "DROP TABLE IF EXISTS rqg_t8_3bucket"
+
+    sql """
+        CREATE TABLE rqg_t7_3bucket (
+            pk INT NOT NULL,
+            col_int INT NULL,
+            col_varchar VARCHAR(64) NULL
+        ) DUPLICATE KEY(pk)
+        DISTRIBUTED BY HASH(pk) BUCKETS 3
+        PROPERTIES ("replication_num" = "1")
+    """
+
+    sql """
+        CREATE TABLE rqg_t8_3bucket (
+            pk INT NOT NULL,
+            col_int INT NULL,
+            col_varchar VARCHAR(64) NULL
+        ) DUPLICATE KEY(pk)
+        DISTRIBUTED BY HASH(pk) BUCKETS 3
+        PROPERTIES ("replication_num" = "1")
+    """
+
+    sql """
+        INSERT INTO rqg_t7_3bucket VALUES
+            (0, 10, 'aaa'), (1, 20, 'bbb'), (2, 30, 'ccc'),
+            (3, 40, 'ddd'), (4, 50, 'eee'), (5, 60, 'fff'),
+            (6, 70, 'ggg'), (7, 80, 'hhh'), (8, 90, 'iii'), (9, 100, 'jjj')
+    """
+
+    sql """
+        INSERT INTO rqg_t8_3bucket VALUES
+            (0, 10, 'aaa'), (1, 20, 'bbb'), (2, 30, 'ccc'),
+            (3, 40, 'ddd'), (4, 50, 'eee'), (5, 60, 'fff'),
+            (6, 70, 'ggg'), (7, 80, 'hhh'), (8, 90, 'iii'), (9, 100, 'jjj')
+    """
+
+    Thread.sleep(3000)
+
+    try {
+        // pptn=4 with 3 buckets on 1 BE: 3 < 4*1 → serial scan → serial exchange
+        // This triggers the PASS_TO_ONE bug for BUCKET_SHUFFLE build side.
+        // Also test with higher pptn values to cover more cases.
+        for (int ppt : [4, 6, 8]) {
+            def bug15_fe = sql """
+                SELECT /*+SET_VAR(use_serial_exchange=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  enable_local_shuffle_planner=true,
+                                  ignore_storage_data_distribution=true,
+                                  enable_share_hash_table_for_broadcast_join=false,
+                                  enable_sql_cache=false,
+                                  disable_join_reorder=true)*/
+                    t1.pk, t1.col_int, t2.col_varchar
+                FROM rqg_t7_3bucket t1
+                INNER JOIN [shuffle] rqg_t8_3bucket t2 ON t1.pk = t2.pk
+                ORDER BY t1.pk
+            """
+            def bug15_be = sql """
+                SELECT /*+SET_VAR(use_serial_exchange=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  enable_local_shuffle_planner=false,
+                                  ignore_storage_data_distribution=true,
+                                  enable_share_hash_table_for_broadcast_join=false,
+                                  enable_sql_cache=false,
+                                  disable_join_reorder=true)*/
+                    t1.pk, t1.col_int, t2.col_varchar
+                FROM rqg_t7_3bucket t1
+                INNER JOIN [shuffle] rqg_t8_3bucket t2 ON t1.pk = t2.pk
+                ORDER BY t1.pk
+            """
+            logger.info("Bug 15 ppt=${ppt}: FE rows=${bug15_fe.size()}, BE rows=${bug15_be.size()}")
+            assertEquals(10, bug15_fe.size(), "Bug 15 ppt=${ppt}: expected 10 rows from FE planner, got ${bug15_fe.size()}")
+            assertEquals(bug15_be, bug15_fe, "Bug 15 ppt=${ppt}: FE/BE result mismatch for BUCKET_SHUFFLE + serial exchange")
+        }
+
+        // Also test LEFT OUTER JOIN to verify no rows lost on probe side
+        def bug15_left_fe = sql """
+            SELECT /*+SET_VAR(use_serial_exchange=true,
+                              parallel_pipeline_task_num=6,
+                              enable_local_shuffle_planner=true,
+                              ignore_storage_data_distribution=true,
+                              enable_share_hash_table_for_broadcast_join=false,
+                              enable_sql_cache=false,
+                              disable_join_reorder=true)*/
+                t1.pk, t2.col_int
+            FROM rqg_t7_3bucket t1
+            LEFT OUTER JOIN [shuffle] rqg_t8_3bucket t2 ON t1.pk = t2.pk
+            ORDER BY t1.pk
+        """
+        def bug15_left_be = sql """
+            SELECT /*+SET_VAR(use_serial_exchange=true,
+                              parallel_pipeline_task_num=6,
+                              enable_local_shuffle_planner=false,
+                              ignore_storage_data_distribution=true,
+                              enable_share_hash_table_for_broadcast_join=false,
+                              enable_sql_cache=false,
+                              disable_join_reorder=true)*/
+                t1.pk, t2.col_int
+            FROM rqg_t7_3bucket t1
+            LEFT OUTER JOIN [shuffle] rqg_t8_3bucket t2 ON t1.pk = t2.pk
+            ORDER BY t1.pk
+        """
+        assertEquals(10, bug15_left_fe.size(), "Bug 15 LEFT JOIN: expected 10 rows from FE planner")
+        assertEquals(bug15_left_be, bug15_left_fe, "Bug 15 LEFT JOIN: FE/BE result mismatch")
+
+        logger.info("Bug 15: PASSED (no wrong results, all pptn values correct)")
+    } catch (Throwable t) {
+        logger.error("Bug 15 FAILED: ${t.message}")
+        assertTrue(false, "Bug 15: BUCKET_SHUFFLE wrong results with serial PASS_TO_ONE: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }
