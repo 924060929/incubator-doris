@@ -1041,5 +1041,55 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 18: Serial NLJ PASSTHROUGH LE crash: ${t.message}")
     }
 
+    //  Bug 19: source_deps.size()=0 crash in NLJ build sink.
+    //  Root cause: serial NLJ (RIGHT_OUTER) resets serial ancestor flag for build side.
+    //  Exchange(UNPARTITIONED) on build side sees hasSerialAncestorInPipeline=false and
+    //  inserts PASSTHROUGH LE. This restores build pipeline num_tasks to _num_instances
+    //  while probe pipeline stays at 1. The extra build tasks have NLJ shared state with
+    //  empty source_deps → crash in set_ready_to_read().
+    //  Fix: shouldResetSerialFlagForChild(1) returns false when NLJ is serial.
+    //  Differs from Bug 18 in fuzzy vars: enable_share_hash_table=true, broadcast_passthrough=false.
+    try {
+        logger.info("Bug 19: Testing serial NLJ build-side source_deps crash")
+        def bug19_baseline = sql """
+            SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                              enable_sql_cache=false)*/
+                table1.col_varchar_10__undef_signed AS field1
+            FROM rqg_t1 AS table1
+            LEFT JOIN rqg_t1 AS table2
+                ON table2.pk = table2.pk
+            WHERE table1.pk BETWEEN 2 AND 11
+            GROUP BY field1
+            ORDER BY 1
+        """
+
+        for (int ppt : [2, 4]) {
+            def bug19_result = sql """
+                SELECT /*+SET_VAR(use_serial_exchange=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  enable_local_shuffle_planner=true,
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false,
+                                  enable_share_hash_table_for_broadcast_join=true,
+                                  enable_broadcast_join_force_passthrough=false,
+                                  enable_parallel_scan=true,
+                                  disable_streaming_preaggregations=true)*/
+                    table1.col_varchar_10__undef_signed AS field1
+                FROM rqg_t1 AS table1
+                LEFT JOIN rqg_t1 AS table2
+                    ON table2.pk = table2.pk
+                WHERE table1.pk BETWEEN 2 AND 11
+                GROUP BY field1
+                ORDER BY 1
+            """
+            assertEquals(bug19_baseline, bug19_result,
+                "Bug 19 pptn=${ppt}: result mismatch with serial NLJ build side crash")
+        }
+        logger.info("Bug 19: PASSED (no crash, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 19 FAILED: ${t.message}")
+        assertTrue(false, "Bug 19: Serial NLJ build-side source_deps crash: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }

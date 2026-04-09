@@ -231,6 +231,14 @@ public class NestedLoopJoinNode extends JoinNodeBase {
 
     @Override
     protected boolean shouldResetSerialFlagForChild(int childIndex) {
-        return childIndex == 1;
+        // Build side (child 1) is a separate pipeline in BE.  Normally,
+        // the serial-ancestor flag should be reset across pipeline boundaries.
+        // BUT when NLJ itself is serial (RIGHT_OUTER/ANTI/SEMI/FULL_OUTER),
+        // the probe pipeline has num_tasks=1.  If we reset the flag, the
+        // build-side Exchange may insert PASSTHROUGH (restoring num_tasks to
+        // _num_instances), creating more build tasks than probe tasks.  The
+        // extra build tasks have a NLJ shared state with empty source_deps,
+        // crashing in set_ready_to_read().
+        return childIndex == 1 && !isSerialOperator();
     }
 }
