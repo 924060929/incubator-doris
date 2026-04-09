@@ -988,5 +988,58 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 16+17: Serial AnalyticEval crash/hang: ${t.message}")
     }
 
+    //  Bug 18: DCHECK crash in Pipeline::set_num_tasks when PASSTHROUGH LE is inserted
+    //  between serial NLJ and its child Exchange.
+    //  Root cause: ExchangeNode.enforceAndDeriveLocalExchange wraps UNPARTITIONED serial
+    //  Exchange with PASSTHROUGH LE. On BE, NLJ_PROBE (serial) sets pipeline num_tasks=1,
+    //  then the LE handler's set_num_tasks(_num_instances) overrides it to N, triggering
+    //  DCHECK (serial operator in pipeline with num_tasks > 1).
+    //  Fix: skip PASSTHROUGH wrapping when hasSerialAncestorInPipeline is true.
+    //  Query: LEFT JOIN with always-true self-ref condition (table.pk = table.pk) creates
+    //  RIGHT_OUTER NLJ (serial). With pptn>1 and ignore_data_distribution, the fragment
+    //  gets N instances but NLJ forces 1 task.
+    try {
+        logger.info("Bug 18: Testing serial NLJ with PASSTHROUGH LE crash")
+        // Use existing rqg_t1 table (10 rows, 10 buckets)
+        def bug18_baseline = sql """
+            SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                              enable_sql_cache=false)*/
+                table1.col_varchar_10__undef_signed AS field1
+            FROM rqg_t1 AS table1
+            LEFT JOIN rqg_t1 AS table2
+                ON table2.pk = table2.pk
+            WHERE table1.pk BETWEEN 2 AND 11
+            GROUP BY field1
+            ORDER BY 1
+        """
+
+        // Test with various pptn values — crash requires pptn > 1
+        for (int ppt : [4, 7]) {
+            def bug18_result = sql """
+                SELECT /*+SET_VAR(use_serial_exchange=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  enable_local_shuffle_planner=true,
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false,
+                                  enable_share_hash_table_for_broadcast_join=false,
+                                  enable_broadcast_join_force_passthrough=true,
+                                  enable_parallel_scan=false)*/
+                    table1.col_varchar_10__undef_signed AS field1
+                FROM rqg_t1 AS table1
+                LEFT JOIN rqg_t1 AS table2
+                    ON table2.pk = table2.pk
+                WHERE table1.pk BETWEEN 2 AND 11
+                GROUP BY field1
+                ORDER BY 1
+            """
+            assertEquals(bug18_baseline, bug18_result,
+                "Bug 18 pptn=${ppt}: result mismatch with serial NLJ + local exchange")
+        }
+        logger.info("Bug 18: PASSED (no crash, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 18 FAILED: ${t.message}")
+        assertTrue(false, "Bug 18: Serial NLJ PASSTHROUGH LE crash: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }

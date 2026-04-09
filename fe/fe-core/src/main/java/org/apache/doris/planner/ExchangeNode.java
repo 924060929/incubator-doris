@@ -189,6 +189,15 @@ public class ExchangeNode extends PlanNode {
                 && fragment != null
                 && fragment.useSerialSource(ConnectContext.get());
         if (willBeSerialOnBe) {
+            // If there is already a serial ancestor in the same pipeline (e.g., serial NLJ
+            // for RIGHT_OUTER/FULL_OUTER join), don't insert any local exchange. The serial
+            // ancestor already constrains the pipeline to 1 task. Inserting a PASSTHROUGH LE
+            // would create a pipeline boundary where the BE LOCAL_EXCHANGE_NODE handler calls
+            // set_num_tasks(_num_instances), overriding the serial constraint and causing a
+            // DCHECK crash (serial operator in pipeline with num_tasks > 1).
+            if (translatorContext.hasSerialAncestorInPipeline(this)) {
+                return Pair.of(this, LocalExchangeType.NOOP);
+            }
             // Serial exchange → 1 task. Must fan out to N tasks for downstream operators.
             // For HASH/BUCKET exchanges: return NOOP and let parent insert the appropriate
             // redistribution (HASH_SHUFFLE or BUCKET_HASH_SHUFFLE). PASSTHROUGH round-robin
