@@ -898,5 +898,95 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 15: BUCKET_SHUFFLE wrong results with serial PASS_TO_ONE: ${t.message}")
     }
 
+    // ============================================================
+    //  Bug 16 & 17: Serial AnalyticEval crash and DataStreamSink hang
+    //  with LocalShuffleAssignedJob (multiple instances on one BE)
+    //
+    //  Bug 16 (crash): Exchange wraps itself with PASSTHROUGH LocalExchange.
+    //  This restores AnalyticSink pipeline to _num_instances tasks while
+    //  serial AnalyticSource stays at 1 task. For instance_idx > 0,
+    //  source_deps is empty → DCHECK crash.
+    //
+    //  Bug 17 (hang): After fixing the crash, serial AnalyticSource reduces
+    //  all downstream pipeline tasks to 1 via add_pipeline() inheritance.
+    //  Only instance 0 runs DataStreamSink → receiver expects _num_instances
+    //  EOSes → hang.
+    //
+    //  Both triggered by: OVER() with no PARTITION BY + GROUPING SETS +
+    //  pptn=0 (auto-parallel) + disable_streaming_preaggregations=true
+    //  RQG build 186195, query IDs: 7f3178a77c2c4b6b, 71887f7bf804c0c, 5dd9fcad234c4484
+    // ============================================================
+    sql "DROP TABLE IF EXISTS rqg_analytic_t1"
+    sql """
+        CREATE TABLE rqg_analytic_t1 (
+            pk INT NOT NULL,
+            col_int_undef_signed INT
+        ) ENGINE=OLAP
+        DUPLICATE KEY(pk)
+        DISTRIBUTED BY HASH(pk) BUCKETS 10
+        PROPERTIES ("replication_num" = "1")
+    """
+    sql """
+        INSERT INTO rqg_analytic_t1 VALUES
+        (1, 10), (2, 20), (3, 30), (4, 40), (5, 50),
+        (6, 60), (7, 70), (8, 80), (9, 90), (10, 100),
+        (11, 10), (12, 20), (13, 30), (14, 40), (15, 50),
+        (16, 60), (17, 70), (18, 80), (19, 90), (20, 100)
+    """
+
+    try {
+        logger.info("Bug 16+17: Testing serial AnalyticEval with GROUPING SETS")
+
+        // Baseline: pptn=1 (no multi-instance, no local shuffle)
+        def bug16_baseline = sql """
+            SELECT /*+SET_VAR(parallel_pipeline_task_num=1,
+                              enable_sql_cache=false,
+                              disable_streaming_preaggregations=true)*/
+                COUNT(MIN(col_int_undef_signed) OVER())
+            FROM rqg_analytic_t1
+            GROUP BY GROUPING SETS ((col_int_undef_signed, pk), (), (pk))
+            ORDER BY 1
+        """
+        assertEquals(41, bug16_baseline.size(), "Bug 16 baseline: expected 41 rows")
+
+        // Test with pptn=0 (auto-parallel, triggers LocalShuffleAssignedJob)
+        for (int ppt : [0, 2, 4, 8]) {
+            def bug16_result = sql """
+                SELECT /*+SET_VAR(parallel_pipeline_task_num=${ppt},
+                                  enable_local_shuffle_planner=true,
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false,
+                                  disable_streaming_preaggregations=true)*/
+                    COUNT(MIN(col_int_undef_signed) OVER())
+                FROM rqg_analytic_t1
+                GROUP BY GROUPING SETS ((col_int_undef_signed, pk), (), (pk))
+                ORDER BY 1
+            """
+            assertEquals(bug16_baseline, bug16_result,
+                "Bug 16+17 pptn=${ppt}: result mismatch with serial AnalyticEval")
+        }
+
+        // Also test with use_serial_exchange=true (makes ALL exchanges serial)
+        def bug16_serial = sql """
+            SELECT /*+SET_VAR(use_serial_exchange=true,
+                              parallel_pipeline_task_num=0,
+                              enable_local_shuffle_planner=true,
+                              ignore_storage_data_distribution=true,
+                              enable_sql_cache=false,
+                              disable_streaming_preaggregations=true)*/
+                COUNT(MIN(col_int_undef_signed) OVER())
+            FROM rqg_analytic_t1
+            GROUP BY GROUPING SETS ((col_int_undef_signed, pk), (), (pk))
+            ORDER BY 1
+        """
+        assertEquals(bug16_baseline, bug16_serial,
+            "Bug 16+17 serial_exchange: result mismatch")
+
+        logger.info("Bug 16+17: PASSED (no crash, no hang, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 16+17 FAILED: ${t.message}")
+        assertTrue(false, "Bug 16+17: Serial AnalyticEval crash/hang: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }
