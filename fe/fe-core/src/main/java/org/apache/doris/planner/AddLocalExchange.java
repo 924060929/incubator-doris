@@ -71,14 +71,16 @@ public class AddLocalExchange {
                 .enforceAndDeriveLocalExchange(context, null, require);
         PlanNode newRoot = output.first;
         // Mirror BE OperatorBase base class required_data_distribution():
-        // when child (fragment root) is serial AND the fragment uses pooling scan
+        // when any operator in the fragment plan is serial AND the fragment uses pooling scan
         // (LocalShuffleAssignedJob → ignoreDataDistribution → _parallel_instances=1),
-        // the DataStreamSink pipeline has num_tasks=1 so only instance 0 creates a
-        // task and sends EOS. Downstream receivers expect _num_instances EOSes → hang.
+        // serial operators reduce pipeline num_tasks to 1, and this propagates via
+        // add_pipeline() to all downstream pipelines (including the DataStreamSink pipeline).
+        // Only instance 0 creates tasks and sends EOS. Downstream receivers expect
+        // _num_instances EOSes → hang.
         // Insert PASSTHROUGH fan-out to create _num_instances sink tasks.
         // Non-pooling fragments (regular bucket distribution) have _num_instances ==
         // bucket_count and every instance gets a scan range, so all sink tasks run.
-        if (isLocalShuffle && newRoot.isSerialOperator()) {
+        if (isLocalShuffle && (newRoot.isSerialOperator() || newRoot.hasSerialChildren())) {
             newRoot = new LocalExchangeNode(context.nextPlanNodeId(), newRoot,
                     LocalExchangeType.PASSTHROUGH, null);
         }

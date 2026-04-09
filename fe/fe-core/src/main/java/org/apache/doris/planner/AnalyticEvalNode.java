@@ -172,8 +172,24 @@ public class AnalyticEvalNode extends PlanNode {
         LocalExchangeTypeRequire requireChild;
         LocalExchangeType outputType = null;
         if (partitionExprs.isEmpty()) {
-            requireChild = LocalExchangeTypeRequire.requirePassthrough();
-            outputType = LocalExchangeType.PASSTHROUGH;
+            // Serial AnalyticEval (OVER() with no PARTITION BY):
+            // Must NOT have any LocalExchange between AnalyticEval and its child.
+            // On BE, AnalyticSink and AnalyticSource share state (source_deps/sink_deps).
+            // A LocalExchange below would restore the AnalyticSink pipeline to _num_instances
+            // tasks while the serial AnalyticSource pipeline stays at 1 task. For instance_idx > 0,
+            // the AnalyticSource task is never created, leaving source_deps empty →
+            // crash when AnalyticSink calls set_ready_to_read(0).
+            //
+            // We call enforceChild with noRequire to traverse children, then strip any
+            // LocalExchange the child inserted (e.g., Exchange wrapping itself with PASSTHROUGH).
+            Pair<PlanNode, LocalExchangeType> enforceResult
+                    = enforceChild(translatorContext, LocalExchangeTypeRequire.noRequire(), children.get(0));
+            PlanNode newChild = enforceResult.first;
+            if (newChild instanceof LocalExchangeNode) {
+                newChild = newChild.getChild(0);
+            }
+            children = Lists.newArrayList(newChild);
+            return Pair.of(this, LocalExchangeType.PASSTHROUGH);
         } else if (orderByElements.isEmpty()) {
             if (AddLocalExchange.isColocated(this)) {
                 requireChild = LocalExchangeTypeRequire.requireHash();
