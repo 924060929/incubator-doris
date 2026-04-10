@@ -725,11 +725,9 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
             PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        boolean useSerialSource = fragment != null && fragment.useSerialSource(translatorContext.getConnectContext());
-        if (useSerialSource) {
-            return Pair.of(this, LocalExchangeType.NOOP);
-        }
-        return Pair.of(this, LocalExchangeType.BUCKET_HASH_SHUFFLE);
+        // Base ScanNode returns NOOP — only OlapScanNode overrides with BUCKET_HASH_SHUFFLE
+        // for non-pooling scans that have bucket distribution.
+        return Pair.of(this, LocalExchangeType.NOOP);
     }
 
     public void setDesc(TupleDescriptor desc) {

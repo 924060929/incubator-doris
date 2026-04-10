@@ -966,15 +966,19 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         return Pair.of(this, LocalExchangeType.NOOP);
     }
 
+    /**
+     * Enforce a local exchange requirement on a child, respecting serial-ancestor semantics.
+     * If this node or an ancestor in the same pipeline is serial, the exchange is skipped
+     * (mirrors BE's need_to_local_exchange: any_of(operators[idx..end], is_serial) → skip).
+     * Returns (resultNode, outputType) where outputType is the resolved exchange type
+     * (preferType when an exchange is inserted).
+     */
     protected Pair<PlanNode, LocalExchangeType> enforceChild(
             PlanTranslatorContext translatorContext, LocalExchangeTypeRequire requireChild, PlanNode originChild) {
         int childIndex = children.indexOf(originChild);
         Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
                 translatorContext, originChild, requireChild, childIndex);
         if (!requireChild.satisfy(childOutput.second)) {
-            // Mirror BE's need_to_local_exchange: if any operator at or after the current position
-            // is serial (including this node itself), skip the exchange.
-            // BE: any_of(operators[idx..end], is_serial) → return false
             if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator()) {
                 return childOutput;
             }
@@ -984,27 +988,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
                 return childOutput;
             }
             List<Expr> distributeExprs = childIndex >= 0 ? getChildDistributeExprList(childIndex) : null;
-            // Heavy ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp:1025-1038):
-            // Heavy ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp:1025-1038):
-            // When upstream has 1 task (serial source) and exchange is heavy, insert PASSTHROUGH
-            // fan-out first to avoid single-task bottleneck on the heavy exchange sink.
-            // Only applies to local-shuffle fragments (pooling scan) where _parallel_instances=1
-            // causes serial pipelines to have 1 task. In non-pooling fragments, each instance
-            // has its own scan range and all pipelines have _num_instances tasks.
-            if (translatorContext.isLocalShuffleFragment()
-                    && preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
-                PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
-                        childOutput.first, LocalExchangeType.PASSTHROUGH, null);
-                return Pair.of(
-                        new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
-                                preferType, distributeExprs),
-                        preferType);
-            }
-            return Pair.of(
-                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                            preferType, distributeExprs),
-                    preferType
-            );
+            PlanNode wrapped = insertLocalExchange(
+                    translatorContext, childOutput.first, preferType, distributeExprs);
+            return Pair.of(wrapped, preferType);
         } else {
             return childOutput;
         }
@@ -1022,14 +1008,11 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     }
 
     /**
-     * Enforces a local exchange requirement on a single child without the serial-ancestor
-     * check or heavy-ops bottleneck avoidance that {@link #enforceChild} applies.
+     * Enforce a local exchange requirement on a child without the serial-ancestor check.
      * Use for nodes whose children's distribution requirements must be satisfied regardless
      * of serial ancestors in the same pipeline (joins, set operations, etc.).
-     *
-     * @return (resultNode, childOutputType) — resultNode may be a new LocalExchangeNode wrapper
-     *         if an exchange was inserted; childOutputType is the child's reported output
-     *         distribution before any inserted exchange (useful for deriving the parent's output).
+     * Returns (resultNode, childOutputType) where childOutputType is the child's reported
+     * output distribution before any inserted exchange (useful for deriving the parent's output).
      */
     protected Pair<PlanNode, LocalExchangeType> enforceChildExchange(
             PlanTranslatorContext translatorContext, LocalExchangeTypeRequire require,
@@ -1040,33 +1023,19 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
             LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
                     require, translatorContext, this, childOutput.first);
             List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
-            // Heavy ops bottleneck avoidance (same as enforceChild):
-            // serial child + heavy exchange → insert PASSTHROUGH fan-out first
-            // Only for local-shuffle (pooling scan) fragments where serial means 1 task.
-            if (translatorContext.isLocalShuffleFragment()
-                    && preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
-                PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
-                        childOutput.first, LocalExchangeType.PASSTHROUGH, null);
-                return Pair.of(
-                        new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
-                                preferType, distributeExprs),
-                        childOutput.second);
-            }
-            return Pair.of(
-                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                            preferType, distributeExprs),
-                    childOutput.second);
+            PlanNode wrapped = insertLocalExchange(
+                    translatorContext, childOutput.first, preferType, distributeExprs);
+            return Pair.of(wrapped, childOutput.second);
         }
         return childOutput;
     }
 
     /**
      * Like {@link #enforceChildExchange} but always inserts a local exchange
-     * when the require is not noRequire, even if the child already outputs a
-     * matching distribution.  This mirrors BE's need_to_local_exchange Step 4
-     * which always inserts non-hash exchanges regardless of the current
-     * distribution.  Used by NLJ probe side where each NLJ creates a pipeline
-     * boundary and data must be re-partitioned.
+     * when the require is not NOOP, even if the child already outputs a matching distribution.
+     * Mirrors BE's need_to_local_exchange Step 4 which always inserts non-hash exchanges
+     * regardless of the current distribution. Used by NLJ probe side where each NLJ creates
+     * a pipeline boundary and data must be re-partitioned.
      */
     protected Pair<PlanNode, LocalExchangeType> forceEnforceChildExchange(
             PlanTranslatorContext translatorContext, LocalExchangeTypeRequire require,
@@ -1077,24 +1046,32 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
             LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
                     require, translatorContext, this, childOutput.first);
             List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
-            // Heavy ops bottleneck avoidance (same as enforceChild):
-            // serial child + heavy exchange → insert PASSTHROUGH fan-out first
-            // Only for local-shuffle (pooling scan) fragments where serial means 1 task.
-            if (translatorContext.isLocalShuffleFragment()
-                    && preferType.isHeavyOperation() && childOutput.first.isSerialOperator()) {
-                PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
-                        childOutput.first, LocalExchangeType.PASSTHROUGH, null);
-                return Pair.of(
-                        new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
-                                preferType, distributeExprs),
-                        childOutput.second);
-            }
-            return Pair.of(
-                    new LocalExchangeNode(translatorContext.nextPlanNodeId(), childOutput.first,
-                            preferType, distributeExprs),
-                    childOutput.second);
+            PlanNode wrapped = insertLocalExchange(
+                    translatorContext, childOutput.first, preferType, distributeExprs);
+            return Pair.of(wrapped, childOutput.second);
         }
         return childOutput;
+    }
+
+    /**
+     * Insert a LocalExchangeNode wrapping {@code child} with the given exchange type.
+     * Handles heavy-ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp):
+     * when upstream has 1 task (serial source) and exchange is heavy (hash/bucket/adaptive),
+     * insert a PASSTHROUGH fan-out first to avoid single-task bottleneck on the heavy
+     * exchange sink. Only applies to local-shuffle (pooling scan) fragments where
+     * _parallel_instances=1 causes serial pipelines to have 1 task.
+     */
+    private PlanNode insertLocalExchange(PlanTranslatorContext translatorContext,
+            PlanNode child, LocalExchangeType exchangeType, List<Expr> distributeExprs) {
+        if (translatorContext.isLocalShuffleFragment()
+                && exchangeType.isHeavyOperation() && child.isSerialOperator()) {
+            PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
+                    child, LocalExchangeType.PASSTHROUGH, null);
+            return new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,
+                    exchangeType, distributeExprs);
+        }
+        return new LocalExchangeNode(translatorContext.nextPlanNodeId(), child,
+                exchangeType, distributeExprs);
     }
 
     /**

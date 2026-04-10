@@ -1419,6 +1419,12 @@ public class OlapScanNode extends ScanNode {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
             PlanTranslatorContext translatorContext, PlanNode parent,
             LocalExchangeTypeRequire parentRequire) {
-        return super.enforceAndDeriveLocalExchange(translatorContext, parent, parentRequire);
+        boolean useSerialSource = fragment != null
+                && fragment.useSerialSource(translatorContext.getConnectContext());
+        if (useSerialSource) {
+            return Pair.of(this, LocalExchangeType.NOOP);
+        }
+        // Non-pooling OlapScan has bucket distribution — each instance scans specific buckets
+        return Pair.of(this, LocalExchangeType.BUCKET_HASH_SHUFFLE);
     }
 }

@@ -25,7 +25,6 @@ import org.apache.doris.analysis.ExprToSqlVisitor;
 import org.apache.doris.analysis.ExprToThriftVisitor;
 import org.apache.doris.analysis.ToSqlParams;
 import org.apache.doris.analysis.TupleDescriptor;
-import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 import org.apache.doris.thrift.TDataSink;
 import org.apache.doris.thrift.TDataSinkType;
 import org.apache.doris.thrift.TDataStreamSink;
@@ -241,8 +240,4 @@ public class DataStreamSink extends DataSink {
         return result;
     }
 
-    @Override
-    public LocalExchangeTypeRequire getLocalExchangeTypeRequire() {
-        return LocalExchangeTypeRequire.noRequire();
-    }
 }

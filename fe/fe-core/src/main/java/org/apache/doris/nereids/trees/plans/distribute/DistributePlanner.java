@@ -31,6 +31,7 @@ import org.apache.doris.nereids.trees.plans.distribute.worker.job.AssignedJobBui
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.BucketScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.DefaultScanSource;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleAssignedJob;
+import org.apache.doris.nereids.trees.plans.distribute.worker.job.LocalShuffleBucketJoinAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.StaticAssignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJob;
 import org.apache.doris.nereids.trees.plans.distribute.worker.job.UnassignedJobBuilder;
@@ -244,6 +245,13 @@ public class DistributePlanner {
         boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
                 .anyMatch(LocalShuffleAssignedJob.class::isInstance);
         if (useLocalShuffle) {
+            // For BUCKET_SHUFFLE with local shuffle, each instance handles specific buckets.
+            // The exchange must route data to each instance individually, not just the first
+            // per worker. Otherwise instances 1..N-1 create ExchangeSource tasks that never
+            // receive data or EOS, causing a hang.
+            if (linkNode.getPartitionType() == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
+                return receiverPlan.getInstanceJobs();
+            }
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
@@ -256,8 +264,20 @@ public class DistributePlanner {
             PipelineDistributedPlan plan, List<AssignedJob> unsorted, int bucketNum) {
         AssignedJob[] instances = new AssignedJob[bucketNum];
         for (AssignedJob instanceJob : unsorted) {
-            BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
-            for (Integer bucketIndex : bucketScanSource.bucketIndexToScanNodeToTablets.keySet()) {
+            // For LocalShuffleBucketJoinAssignedJob, use assignedJoinBucketIndexes which
+            // gives the specific join bucket(s) this instance handles. The scanSource
+            // buckets include ALL buckets on this worker (shared via pooling scan),
+            // which would cause collisions when multiple instances on the same worker
+            // each handle different join buckets.
+            Iterable<Integer> bucketIndices;
+            if (instanceJob instanceof LocalShuffleBucketJoinAssignedJob) {
+                bucketIndices = ((LocalShuffleBucketJoinAssignedJob) instanceJob)
+                        .getAssignedJoinBucketIndexes();
+            } else {
+                BucketScanSource bucketScanSource = (BucketScanSource) instanceJob.getScanSource();
+                bucketIndices = bucketScanSource.bucketIndexToScanNodeToTablets.keySet();
+            }
+            for (Integer bucketIndex : bucketIndices) {
                 if (instances[bucketIndex] != null) {
                     throw new IllegalStateException(
                             "Multi instances scan same buckets: " + instances[bucketIndex] + " and " + instanceJob

@@ -102,15 +102,12 @@ public class ExchangeNode extends PlanNode {
 
     @Override
     protected void toThrift(TPlanNode msg) {
-        // If this fragment has another scan node, this exchange node is serial or not should be decided by the scan
-        // node.
-        // When FE-planned local shuffle is enabled, ExchangeNode's serial flag is preserved
-        // (same as BE-planned path). The ExchangeNode pipeline will have num_tasks=1 when serial,
-        // meaning only instance 0 creates a task. This is correct because FE's
-        // filterInstancesWhichCanReceiveDataFromRemote() ensures only the first instance per
-        // worker receives remote data. The deferred exchanger uses upstream_pipe->num_tasks()
-        // to get the correct sender_count.
-        msg.setIsSerialOperator((isSerialOperator() || fragment.hasSerialScanNode())
+        // Exchange serial status should depend only on isSerialOperator() (UNPARTITIONED or
+        // use_serial_exchange), NOT on fragment.hasSerialScanNode(). With FE-planned local
+        // exchanges, serial scans are already handled by PASSTHROUGH fan-out. Making
+        // non-UNPARTITIONED exchanges (e.g. BUCKET_SHUFFLE) serial would reduce the build-side
+        // pipeline to num_tasks=1, preventing shared state propagation to other instances.
+        msg.setIsSerialOperator(isSerialOperator()
                 && fragment.useSerialSource(ConnectContext.get()));
         msg.node_type = TPlanNodeType.EXCHANGE_NODE;
         msg.exchange_node = new TExchangeNode();

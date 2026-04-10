@@ -1004,7 +1004,7 @@ suite("test_local_shuffle_rqg_bugs") {
         def bug18_baseline = sql """
             SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
                               enable_sql_cache=false)*/
-                table1.col_varchar_10__undef_signed AS field1
+                table1.col_int_undef_signed AS field1
             FROM rqg_t1 AS table1
             LEFT JOIN rqg_t1 AS table2
                 ON table2.pk = table2.pk
@@ -1024,7 +1024,7 @@ suite("test_local_shuffle_rqg_bugs") {
                                   enable_share_hash_table_for_broadcast_join=false,
                                   enable_broadcast_join_force_passthrough=true,
                                   enable_parallel_scan=false)*/
-                    table1.col_varchar_10__undef_signed AS field1
+                    table1.col_int_undef_signed AS field1
                 FROM rqg_t1 AS table1
                 LEFT JOIN rqg_t1 AS table2
                     ON table2.pk = table2.pk
@@ -1054,7 +1054,7 @@ suite("test_local_shuffle_rqg_bugs") {
         def bug19_baseline = sql """
             SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
                               enable_sql_cache=false)*/
-                table1.col_varchar_10__undef_signed AS field1
+                table1.col_int_undef_signed AS field1
             FROM rqg_t1 AS table1
             LEFT JOIN rqg_t1 AS table2
                 ON table2.pk = table2.pk
@@ -1074,7 +1074,7 @@ suite("test_local_shuffle_rqg_bugs") {
                                   enable_broadcast_join_force_passthrough=false,
                                   enable_parallel_scan=true,
                                   disable_streaming_preaggregations=true)*/
-                    table1.col_varchar_10__undef_signed AS field1
+                    table1.col_int_undef_signed AS field1
                 FROM rqg_t1 AS table1
                 LEFT JOIN rqg_t1 AS table2
                     ON table2.pk = table2.pk
