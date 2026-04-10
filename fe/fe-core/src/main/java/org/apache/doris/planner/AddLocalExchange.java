@@ -58,7 +58,6 @@ public class AddLocalExchange {
         }
     }
 
-    /** @return true if a LOCAL_EXCHANGE_NODE was inserted in this fragment */
     private void addLocalExchangeForFragment(PlanFragment fragment, PlanTranslatorContext context,
             boolean isLocalShuffle) {
         DataSink sink = fragment.getSink();

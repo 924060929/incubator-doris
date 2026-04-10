@@ -1091,5 +1091,63 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 19: Serial NLJ build-side source_deps crash: ${t.message}")
     }
 
+    //  Bug 20: Hang (ASAN: COREDUMP source_deps.size()=0 in AggSinkOperatorX) when
+    //  use_serial_exchange=true + RIGHT JOIN + GROUP BY in non-pooling fragment.
+    //  Root cause: serial HASH Exchange in non-pooling fragment returned NOOP, causing FE
+    //  to insert LOCAL_EXECUTION_HASH_SHUFFLE LE. On BE, serial Exchange pipeline has 1 task
+    //  but LE downstream has _num_instances tasks. AggSink on instances 1+ has empty source_deps.
+    //  Fix: ExchangeNode.enforceAndDeriveLocalExchange() returns actual distribution type
+    //  (GLOBAL_EXECUTION_HASH_SHUFFLE/BUCKET_HASH_SHUFFLE) for serial Exchange in non-pooling
+    //  fragments, preventing LE insertion.
+    //  Requires 3+ BEs to reproduce (single BE has _num_instances=1, no hang).
+    try {
+        logger.info("Bug 20: Testing serial exchange + agg hang in non-pooling fragment")
+        // Baseline uses same fuzzy vars but with planner=false (BE-native).
+        // This way we compare FE-planned vs BE-native under identical conditions,
+        // not against "correct" results — use_serial_exchange=true itself may have
+        // pre-existing BE bugs with certain pptn values.
+        def bug20_baseline_sql = { int ppt -> """
+            SELECT /*+SET_VAR(use_serial_exchange=true,
+                              parallel_pipeline_task_num=${ppt},
+                              enable_local_shuffle_planner=false,
+                              ignore_storage_data_distribution=true,
+                              enable_sql_cache=false,
+                              enable_share_hash_table_for_broadcast_join=false,
+                              disable_streaming_preaggregations=true)*/
+                table1.pk AS field1
+            FROM rqg_t1 AS table1
+            RIGHT OUTER JOIN rqg_t1 AS table2 ON table1.pk = table2.pk
+            LEFT JOIN rqg_t1 AS table3 ON table3.pk = table1.pk
+            WHERE table1.col_int_undef_signed IS NOT NULL OR table1.pk <> 10
+            GROUP BY field1
+            ORDER BY 1
+        """ }
+        for (int ppt : [3, 4, 7]) {
+            def bug20_baseline = sql bug20_baseline_sql(ppt)
+            def bug20_result = sql """
+                SELECT /*+SET_VAR(use_serial_exchange=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  enable_local_shuffle_planner=true,
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false,
+                                  enable_share_hash_table_for_broadcast_join=false,
+                                  disable_streaming_preaggregations=true)*/
+                    table1.pk AS field1
+                FROM rqg_t1 AS table1
+                RIGHT OUTER JOIN rqg_t1 AS table2 ON table1.pk = table2.pk
+                LEFT JOIN rqg_t1 AS table3 ON table3.pk = table1.pk
+                WHERE table1.col_int_undef_signed IS NOT NULL OR table1.pk <> 10
+                GROUP BY field1
+                ORDER BY 1
+            """
+            assertEquals(bug20_baseline, bug20_result,
+                "Bug 20 pptn=${ppt}: result mismatch with serial exchange + agg hang")
+        }
+        logger.info("Bug 20: PASSED (no hang, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 20 FAILED: ${t.message}")
+        assertTrue(false, "Bug 20: Serial exchange + agg hang: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }

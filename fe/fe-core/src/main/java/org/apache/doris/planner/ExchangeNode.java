@@ -102,12 +102,11 @@ public class ExchangeNode extends PlanNode {
 
     @Override
     protected void toThrift(TPlanNode msg) {
-        // Exchange serial status should depend only on isSerialOperator() (UNPARTITIONED or
-        // use_serial_exchange), NOT on fragment.hasSerialScanNode(). With FE-planned local
-        // exchanges, serial scans are already handled by PASSTHROUGH fan-out. Making
-        // non-UNPARTITIONED exchanges (e.g. BUCKET_SHUFFLE) serial would reduce the build-side
-        // pipeline to num_tasks=1, preventing shared state propagation to other instances.
-        msg.setIsSerialOperator(isSerialOperator()
+        // BE local shuffle only supports two modes: 1 instance or all instances receiving data.
+        // hasSerialScanNode() ensures Exchange is serial when sibling scan is pooling,
+        // avoiding a middle-ground where some but not all instances receive data
+        // (EOS count mismatch → hang).
+        msg.setIsSerialOperator((isSerialOperator() || fragment.hasSerialScanNode())
                 && fragment.useSerialSource(ConnectContext.get()));
         msg.node_type = TPlanNodeType.EXCHANGE_NODE;
         msg.exchange_node = new TExchangeNode();
@@ -182,7 +181,9 @@ public class ExchangeNode extends PlanNode {
         // Without useSerialSource() check, we'd insert PASSTHROUGH in non-pooling fragments
         // where the exchange has N tasks, corrupting broadcast join data distribution
         // (PASSTHROUGH round-robin splits complete-dataset sinks into 1/N subsets per source).
-        boolean willBeSerialOnBe = isSerialOperator()
+        // Must match toThrift: include hasSerialScanNode() — when sibling scan is pooling,
+        // Exchange becomes serial on BE even if Exchange itself isn't inherently serial.
+        boolean willBeSerialOnBe = (isSerialOperator() || fragment.hasSerialScanNode())
                 && fragment != null
                 && fragment.useSerialSource(ConnectContext.get());
         if (willBeSerialOnBe) {
@@ -195,23 +196,35 @@ public class ExchangeNode extends PlanNode {
             if (translatorContext.hasSerialAncestorInPipeline(this)) {
                 return Pair.of(this, LocalExchangeType.NOOP);
             }
-            // Serial exchange → 1 task. Must fan out to N tasks for downstream operators.
-            // For HASH/BUCKET exchanges: return NOOP and let parent insert the appropriate
-            // redistribution (HASH_SHUFFLE or BUCKET_HASH_SHUFFLE). PASSTHROUGH round-robin
-            // would corrupt the hash/bucket distribution, and PASS_TO_ONE doesn't work for
-            // BUCKET_SHUFFLE joins (no shared hash table mechanism unlike BROADCAST).
-            // The heavy-ops bottleneck avoidance in enforceChildExchange() will automatically
-            // insert a PASSTHROUGH fan-out before the hash/bucket shuffle if needed.
+            // Serial HASH/BUCKET exchange:
+            // In pooling fragments, return NOOP so parent inserts hash/bucket LE with
+            // PASSTHROUGH fan-out (heavy-ops avoidance). Serial exchange has 1 task,
+            // LE fans out to _num_instances tasks.
+            // In non-pooling fragments, report the actual distribution type so parent's
+            // require is satisfied without inserting LE. The serial exchange reduces
+            // pipeline num_tasks to 1, matching BE-native behavior. Inserting LE in
+            // non-pooling fragments creates a pipeline split where downstream has
+            // _num_instances tasks but only 1 sender, causing shared-state mismatch.
             if (partitionType == TPartitionType.HASH_PARTITIONED
                     || partitionType == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
-                return Pair.of(this, LocalExchangeType.NOOP);
+                if (translatorContext.isLocalShuffleFragment()) {
+                    return Pair.of(this, LocalExchangeType.NOOP);
+                }
+                LocalExchangeType outputType = partitionType == TPartitionType.HASH_PARTITIONED
+                        ? LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE
+                        : LocalExchangeType.BUCKET_HASH_SHUFFLE;
+                return Pair.of(this, outputType);
             }
-            // For UNPARTITIONED (broadcast): PASSTHROUGH fan-out is safe because the
-            // exchange has the complete dataset. Parent nodes (HashJoin) may add PASS_TO_ONE
-            // on top for single-builder semantics (broadcast join build side).
-            PlanNode pt = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
-                    this, LocalExchangeType.PASSTHROUGH, null);
-            return Pair.of(pt, LocalExchangeType.PASSTHROUGH);
+            // For UNPARTITIONED (broadcast): in pooling fragments, PASSTHROUGH fan-out is
+            // needed because the exchange has 1 task but downstream needs N tasks.
+            // In non-pooling fragments, don't insert PASSTHROUGH — BE-native handles
+            // this via _plan_local_exchange which checks serial operators in the pipeline.
+            if (translatorContext.isLocalShuffleFragment()) {
+                PlanNode pt = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
+                        this, LocalExchangeType.PASSTHROUGH, null);
+                return Pair.of(pt, LocalExchangeType.PASSTHROUGH);
+            }
+            return Pair.of(this, LocalExchangeType.NOOP);
         } else if (partitionType == TPartitionType.HASH_PARTITIONED) {
             return Pair.of(this, LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE);
         } else if (partitionType == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
