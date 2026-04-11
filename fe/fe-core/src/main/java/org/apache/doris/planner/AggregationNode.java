@@ -285,7 +285,11 @@ public class AggregationNode extends PlanNode {
                 } else {
                     requireChild = parentRequire.autoRequireHash();
                 }
-            } else if (sessionVariable.enableDistinctStreamingAggForcePassthrough) {
+            } else if (sessionVariable.enableDistinctStreamingAggForcePassthrough
+                    && !(children.get(0) instanceof ExchangeNode)) {
+                // Don't request PASSTHROUGH for serial ExchangeNode children — inserting
+                // PASSTHROUGH between Exchange and streaming AGG breaks AggSink↔AggSource
+                // shared state. See streaming preagg branch for detailed explanation.
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
@@ -298,14 +302,16 @@ public class AggregationNode extends PlanNode {
                     && sessionVariable.enableStreamingAggHashJoinForcePassthrough) {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else if (fragment != null && fragment.useSerialSource(connectContext)
-                    && children.get(0).isSerialOperator()) {
+                    && children.get(0).isSerialOperator()
+                    && !(children.get(0) instanceof ExchangeNode)) {
                 // Mirrors BE StreamingAggOperatorX::required_data_distribution():
                 //   return _child->is_serial_operator() ? PASSTHROUGH : NOOP
-                // Check the IMMEDIATE child's serialness (e.g. pooling OlapScan → serial=true,
-                // NLJ (INNER/LEFT) → serial=false).  Using fragment.useSerialSource() alone
-                // over-fires when NLJ exchanges have been inserted below — in BE, after an
-                // APT exchange is inserted, the new pipeline has _use_serial_source=false,
-                // so StreamingAgg returns NOOP in that pipeline.
+                // Only request PASSTHROUGH for serial non-Exchange children (e.g. pooling
+                // OlapScan). For serial ExchangeNode (e.g. UNPARTITIONED from MultiCast),
+                // don't request PASSTHROUGH: in BE, need_to_local_exchange sees the serial
+                // Exchange in the pipeline and skips LE insertion. Inserting PASSTHROUGH
+                // between Exchange and streaming AGG creates a pipeline split that breaks
+                // AggSink↔AggSource shared state → DCHECK/SIGSEGV crash.
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
@@ -318,7 +324,9 @@ public class AggregationNode extends PlanNode {
                     requireChild = LocalExchangeTypeRequire.noRequire();
                 } else {
                     // Serialize agg, no group key: base class → child serial → PASSTHROUGH, else NOOP
-                    if (fragment != null && fragment.useSerialSource(connectContext)) {
+                    // Exclude ExchangeNode children for same reason as streaming AGG above.
+                    if (fragment != null && fragment.useSerialSource(connectContext)
+                            && !(children.get(0) instanceof ExchangeNode)) {
                         requireChild = LocalExchangeTypeRequire.requirePassthrough();
                     } else {
                         requireChild = LocalExchangeTypeRequire.noRequire();
