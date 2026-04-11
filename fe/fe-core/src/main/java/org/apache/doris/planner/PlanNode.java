@@ -979,7 +979,13 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
                 translatorContext, originChild, requireChild, childIndex);
         if (!requireChild.satisfy(childOutput.second)) {
-            if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator()) {
+            // Mirrors BE need_to_local_exchange: any_of(operators[idx..end], is_serial) → skip.
+            // Check ancestors (hasSerialAncestorInPipeline), self (isSerialOperator), AND child.
+            // When the child is serial (e.g. UNPARTITIONED Exchange), inserting a PASSTHROUGH LE
+            // creates a pipeline split where AggSink↔AggSource shared state becomes disconnected
+            // because the LE boundary puts them in separate pipelines with mismatched task counts.
+            if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator()
+                    || childOutput.first.isSerialOperator()) {
                 return childOutput;
             }
             LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
