@@ -285,13 +285,7 @@ public class AggregationNode extends PlanNode {
                 } else {
                     requireChild = parentRequire.autoRequireHash();
                 }
-            } else if (sessionVariable.enableDistinctStreamingAggForcePassthrough
-                    && children.get(0) instanceof ScanNode) {
-                // Only request PASSTHROUGH when child is a ScanNode (pooling scan fan-out).
-                // For any other serial child (Exchange, AGG, etc.), inserting PASSTHROUGH
-                // creates a pipeline split that breaks AggSink↔AggSource shared state
-                // → DCHECK/SIGSEGV in set_ready_to_read(). In BE, need_to_local_exchange
-                // sees serial operators in the pipeline and skips LE insertion.
+            } else if (sessionVariable.enableDistinctStreamingAggForcePassthrough) {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
@@ -304,13 +298,9 @@ public class AggregationNode extends PlanNode {
                     && sessionVariable.enableStreamingAggHashJoinForcePassthrough) {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else if (fragment != null && fragment.useSerialSource(connectContext)
-                    && children.get(0).isSerialOperator()
-                    && children.get(0) instanceof ScanNode) {
+                    && children.get(0).isSerialOperator()) {
                 // Mirrors BE StreamingAggOperatorX::required_data_distribution():
                 //   return _child->is_serial_operator() ? PASSTHROUGH : NOOP
-                // Only request PASSTHROUGH for serial ScanNode children (pooling scan).
-                // For other serial children (Exchange, AGG), inserting PASSTHROUGH creates
-                // a pipeline split that breaks AggSink↔AggSource shared state pairing.
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
@@ -323,9 +313,7 @@ public class AggregationNode extends PlanNode {
                     requireChild = LocalExchangeTypeRequire.noRequire();
                 } else {
                     // Serialize agg, no group key: base class → child serial → PASSTHROUGH, else NOOP
-                    // Only for ScanNode children (pooling scan) — same reason as above.
-                    if (fragment != null && fragment.useSerialSource(connectContext)
-                            && children.get(0) instanceof ScanNode) {
+                    if (fragment != null && fragment.useSerialSource(connectContext)) {
                         requireChild = LocalExchangeTypeRequire.requirePassthrough();
                     } else {
                         requireChild = LocalExchangeTypeRequire.noRequire();

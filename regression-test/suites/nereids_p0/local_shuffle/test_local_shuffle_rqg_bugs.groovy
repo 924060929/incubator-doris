@@ -1149,5 +1149,77 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 20: Serial exchange + agg hang: ${t.message}")
     }
 
+    // ============================================================
+    //  Bug 21: Multi-distinct COUNT on many-bucket table → COREDUMP
+    //  RQG build 186737/186929/186952: AggSinkOperatorX::sink → set_ready_to_read
+    //  with empty source_deps.
+    //
+    //  Root cause: AGG operators (streaming, distinct-streaming, serialize) requested
+    //  PASSTHROUGH from non-ScanNode serial children (Exchange, AGG), inserting a
+    //  PASSTHROUGH LE that created a pipeline split disconnecting AggSink↔AggSource
+    //  shared state.
+    //
+    //  Fix: restrict AGG PASSTHROUGH requests to ScanNode children only.
+    //  Triggered by: multi-distinct COUNT/MIN with MultiCastDataSinks feeding
+    //  serial UNPARTITIONED Exchanges into streaming AGG fragments.
+    // ============================================================
+    sql "DROP TABLE IF EXISTS rqg_t5_many_buckets"
+    sql """
+        CREATE TABLE rqg_t5_many_buckets (
+            pk INT NOT NULL,
+            col_int_undef_signed INT,
+            col_date_undef_signed DATE,
+            col_date_undef_signed2 DATE,
+            col_varchar_1024__undef_signed VARCHAR(1024)
+        ) ENGINE=OLAP
+        DUPLICATE KEY(pk)
+        DISTRIBUTED BY HASH(pk) BUCKETS 56
+        PROPERTIES ("replication_num" = "1")
+    """
+    sql """INSERT INTO rqg_t5_many_buckets VALUES
+        (1,1,'2023-12-09','2024-06-01','s1'),(2,2,'2023-03-15','2024-01-20','s2'),
+        (3,3,'2023-07-22','2024-03-10',NULL),(4,4,'2023-12-09','2024-06-01','s4'),
+        (5,5,'2023-01-05','2024-09-15','s5'),(6,6,'2023-08-11','2024-02-28','s6'),
+        (7,7,'2023-04-18','2024-07-04',NULL),(8,8,'2023-11-25','2024-05-12','s8'),
+        (9,9,'2023-06-30','2024-11-19','s9'),(10,10,'2023-02-14','2024-08-07','s10')
+    """
+
+    try {
+        logger.info("Bug 21: Testing multi-distinct COUNT on many-bucket table (COREDUMP fix)")
+        for (int ppt : [4, 6]) {
+            // Test without use_serial_exchange
+            def bug21_baseline = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    MIN(distinct col_date_undef_signed),
+                    COUNT(distinct col_date_undef_signed2),
+                    COUNT(distinct col_int_undef_signed)
+                FROM rqg_t5_many_buckets
+                WHERE col_int_undef_signed = col_int_undef_signed
+                LIMIT 1000
+            """
+            def bug21_result = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    MIN(distinct col_date_undef_signed),
+                    COUNT(distinct col_date_undef_signed2),
+                    COUNT(distinct col_int_undef_signed)
+                FROM rqg_t5_many_buckets
+                WHERE col_int_undef_signed = col_int_undef_signed
+                LIMIT 1000
+            """
+            assertEquals(bug21_baseline, bug21_result,
+                "Bug 21 pptn=${ppt}: multi-distinct COUNT result mismatch (was COREDUMP)")
+        }
+        logger.info("Bug 21: PASSED (no crash, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 21 FAILED: ${t.message}")
+        assertTrue(false, "Bug 21: Multi-distinct COUNT COREDUMP: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }

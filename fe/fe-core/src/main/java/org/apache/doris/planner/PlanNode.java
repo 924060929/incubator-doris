@@ -1063,6 +1063,18 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
      */
     private PlanNode insertLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode child, LocalExchangeType exchangeType, List<Expr> distributeExprs) {
+        // Mirrors BE need_to_local_exchange: skip PASSTHROUGH/ADAPTIVE_PASSTHROUGH LE when
+        // child is a serial non-Scan operator. Serial Exchanges/AGGs have 1 task; inserting
+        // PASSTHROUGH/APT creates a pipeline split that breaks shared state (COREDUMP) or
+        // causes data loss (routes 1-task output to only 1 of N downstream tasks).
+        // HASH/BUCKET/BROADCAST/PASS_TO_ONE are NOT skipped — they properly redistribute
+        // or replicate data and are needed even with serial upstream.
+        // Serial ScanNodes (pooling scan) need fan-out and are handled by the heavy-ops path below.
+        if (child.isSerialOperator() && !(child instanceof ScanNode)
+                && (exchangeType == LocalExchangeType.PASSTHROUGH
+                    || exchangeType == LocalExchangeType.ADAPTIVE_PASSTHROUGH)) {
+            return child;
+        }
         if (translatorContext.isLocalShuffleFragment()
                 && exchangeType.isHeavyOperation() && child.isSerialOperator()) {
             PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
