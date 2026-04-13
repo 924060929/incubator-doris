@@ -364,8 +364,16 @@ public class HashJoinNode extends JoinNodeBase {
         if (!useSerialSource) {
             return false;
         }
-        if (child instanceof ExchangeNode) {
-            return child.isSerialOperator() || childFragment.hasSerialScanNode();
+        // Only consider the child serial for LE decisions when it's an actual pooling
+        // ScanNode. For serial non-Scan children (Exchange, AGG, NLJ), useSerialSource()
+        // may return true due to serial operators in the fragment, but inserting
+        // PASSTHROUGH/PASS_TO_ONE creates pipeline splits with mismatched task counts
+        // → HashJoinBuildSink source_deps empty → crash in set_ready_to_read().
+        if (!(child instanceof ScanNode)) {
+            if (child instanceof ExchangeNode) {
+                return child.isSerialOperator() || childFragment.hasSerialScanNode();
+            }
+            return false;
         }
         return child.isSerialOperator();
     }
