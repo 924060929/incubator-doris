@@ -179,13 +179,15 @@ public class NestedLoopJoinNode extends JoinNodeBase {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
 
-        // Use fragment.useSerialSource() directly instead of also checking
-        // (children instanceof ScanNode).  When NLJs are nested, the outer NLJ's
-        // children are inner NLJ / ExchangeNode (not ScanNode), but pooling scan
-        // handling is still needed — without it, the serial Exchange on the build
-        // side won't get a BROADCAST local exchange, causing "must set shared
-        // state, in CROSS_JOIN_OPERATOR" for instances 1+.
-        boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext());
+        // Only request APT/BROADCAST when the probe child is an actual serial ScanNode
+        // (pooling scan). For serial non-Scan children (Exchange, AGG, NLJ), the
+        // insertLocalExchange guard skips APT on probe side (serial non-Scan → no LE),
+        // but BROADCAST on build side would still be inserted → probe has 1 task but
+        // build has N tasks → NLJ source_deps empty for tasks 1..N-1 → crash.
+        // Original comment: nested NLJs need pooling handling — but that case is now
+        // covered by the serial NLJ branch (isSerialOperator) which skips both sides.
+        boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext())
+                && children.get(0) instanceof ScanNode;
 
         LocalExchangeTypeRequire probeSideRequire;
         LocalExchangeTypeRequire buildSideRequire;
