@@ -911,6 +911,24 @@ suite("test_local_shuffle_fe_be_consistency") {
           GROUP BY a.k1, b.k1
           ORDER BY 1, 2, 3""")
 
+    // ============================================================
+    //  15. NLJ + GROUPING SETS + subquery + pooling scan (RQG build 187580)
+    //  NLJ build side in a fragment without ScanNode (only Exchange) still needs
+    //  BROADCAST in pooling mode. Previously childUsePoolingScan was gated by
+    //  hasSerialScanNode() which excluded Exchange-only fragments, causing NLJ
+    //  build side to miss BROADCAST → probe tasks see partial build data → wrong results.
+    // ============================================================
+    checkConsistencyWithSql("nlj_grouping_sets_subquery_pooling",
+        """SELECT ${svSerialSource} COUNT(pk * (SELECT COUNT(pk) FROM ls_t1)) OVER()
+           FROM ls_t1
+           GROUP BY GROUPING SETS ((k1, k2), (), (k1))""")
+
+    // Same pattern but simpler: NLJ with subquery + pooling, no GROUPING SETS
+    checkConsistencyWithSql("nlj_subquery_pooling",
+        """SELECT ${svSerialSource} k1, (SELECT COUNT(*) FROM ls_t2)
+           FROM ls_t1
+           ORDER BY k1""")
+
     // ================================================================
     //  Phase 2: Fetch all profiles and compare results
     //  By now, all queries have been executed and profiles are being

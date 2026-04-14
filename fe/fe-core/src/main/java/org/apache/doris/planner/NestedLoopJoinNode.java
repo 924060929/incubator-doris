@@ -179,11 +179,9 @@ public class NestedLoopJoinNode extends JoinNodeBase {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
 
-        // Pooling scan: useSerialSource() AND actually has a pooling scan node in the fragment.
-        // Without hasSerialScanNode(), useSerialSource() can be true for fragments with only
-        // serial Exchanges (use_serial_exchange=true) but no pooling scan, causing false positives.
-        boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext())
-                && fragment.hasSerialScanNode();
+        // Pooling mode: the fragment uses serial source (pooling scan or serial exchange).
+        // NLJ build side needs BROADCAST in pooling mode so all probe tasks see full build data.
+        boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext());
 
         LocalExchangeTypeRequire probeSideRequire;
         LocalExchangeTypeRequire buildSideRequire;

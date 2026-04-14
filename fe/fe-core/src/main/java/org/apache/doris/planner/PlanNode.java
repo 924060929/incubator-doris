@@ -1007,8 +1007,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     /**
      * Create a LocalExchangeNode wrapping child with the given exchange type.
      * No child-type skip — matches BE's _add_local_exchange which inserts LE for any child
-     * type without checking instanceof. The shouldSkipLE in enforceRequire already handles
-     * the serial-ancestor check (operators[idx..end] toward sink).
+     * type without checking instanceof.
      *
      * Handles heavy-ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp):
      * when upstream has 1 task (serial source) and exchange is heavy (hash/bucket/adaptive),

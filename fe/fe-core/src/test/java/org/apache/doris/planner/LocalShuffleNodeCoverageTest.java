@@ -310,8 +310,6 @@ public class LocalShuffleNodeCoverageTest {
                 Lists.newArrayList(new TupleId(NEXT_ID.getAndIncrement())), JoinOperator.INNER_JOIN, false);
         serialSourceJoin.fragment = Mockito.mock(PlanFragment.class);
         Mockito.when(serialSourceJoin.fragment.useSerialSource(Mockito.any())).thenReturn(true);
-        // childUsePoolingScan requires BOTH useSerialSource AND hasSerialScanNode
-        Mockito.when(serialSourceJoin.fragment.hasSerialScanNode()).thenReturn(true);
         Pair<PlanNode, LocalExchangeType> serialOutput = serialSourceJoin.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.noRequire());
         Assertions.assertEquals(LocalExchangeType.ADAPTIVE_PASSTHROUGH, serialOutput.second);
