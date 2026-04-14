@@ -124,8 +124,9 @@ public class LocalShuffleNodeCoverageTest {
                 PartitionTopnPhase.TWO_PHASE_GLOBAL_PTOPN);
         Pair<PlanNode, LocalExchangeType> globalOutput = globalTopnNode.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.noRequire());
-        Assertions.assertEquals(LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE, globalOutput.second);
-        assertChildLocalExchangeType(globalTopnNode, 0, LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE);
+        // enforceRequire resolves RequireHash to LOCAL_EXECUTION_HASH_SHUFFLE (FE-planned always uses LOCAL)
+        Assertions.assertEquals(LocalExchangeType.LOCAL_EXECUTION_HASH_SHUFFLE, globalOutput.second);
+        assertChildLocalExchangeType(globalTopnNode, 0, LocalExchangeType.LOCAL_EXECUTION_HASH_SHUFFLE);
 
         TrackingPlanNode childNoop2 = new TrackingPlanNode(nextPlanNodeId(), LocalExchangeType.NOOP);
         PartitionSortNode passthroughNode = new PartitionSortNode(nextPlanNodeId(), childNoop2,
@@ -219,9 +220,10 @@ public class LocalShuffleNodeCoverageTest {
         hashJoin.setDistributionMode(DistributionMode.PARTITIONED);
         Pair<PlanNode, LocalExchangeType> hashOutput = hashJoin.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
-        Assertions.assertEquals(LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE, hashOutput.second);
-        assertChildLocalExchangeType(hashJoin, 0, LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE);
-        assertChildLocalExchangeType(hashJoin, 1, LocalExchangeType.GLOBAL_EXECUTION_HASH_SHUFFLE);
+        // enforceRequire resolves RequireHash to LOCAL_EXECUTION_HASH_SHUFFLE (FE-planned always uses LOCAL)
+        Assertions.assertEquals(LocalExchangeType.LOCAL_EXECUTION_HASH_SHUFFLE, hashOutput.second);
+        assertChildLocalExchangeType(hashJoin, 0, LocalExchangeType.LOCAL_EXECUTION_HASH_SHUFFLE);
+        assertChildLocalExchangeType(hashJoin, 1, LocalExchangeType.LOCAL_EXECUTION_HASH_SHUFFLE);
 
         TrackingPlanNode probe3 = new TrackingPlanNode(nextPlanNodeId(), LocalExchangeType.NOOP);
         TrackingPlanNode build3 = new TrackingPlanNode(nextPlanNodeId(), LocalExchangeType.NOOP);
@@ -242,6 +244,9 @@ public class LocalShuffleNodeCoverageTest {
         HashJoinNode serialProbeBroadcast = new HashJoinNode(nextPlanNodeId(), serialProbe, nonSerialBuild,
                 JoinOperator.INNER_JOIN, eqConjuncts, Collections.emptyList(), null, null, false);
         serialProbeBroadcast.setDistributionMode(DistributionMode.BROADCAST);
+        // BROADCAST serial check uses fragment.useSerialSource() on the HashJoinNode itself
+        serialProbeBroadcast.fragment = Mockito.mock(PlanFragment.class);
+        Mockito.when(serialProbeBroadcast.fragment.useSerialSource(Mockito.any())).thenReturn(true);
         Pair<PlanNode, LocalExchangeType> serialProbeOutput = serialProbeBroadcast.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
         Assertions.assertEquals(LocalExchangeType.PASSTHROUGH, serialProbeOutput.second);
@@ -257,6 +262,8 @@ public class LocalShuffleNodeCoverageTest {
         HashJoinNode serialBuildBroadcast = new HashJoinNode(nextPlanNodeId(), nonSerialProbe, serialBuild,
                 JoinOperator.INNER_JOIN, eqConjuncts, Collections.emptyList(), null, null, false);
         serialBuildBroadcast.setDistributionMode(DistributionMode.BROADCAST);
+        serialBuildBroadcast.fragment = Mockito.mock(PlanFragment.class);
+        Mockito.when(serialBuildBroadcast.fragment.useSerialSource(Mockito.any())).thenReturn(true);
         Pair<PlanNode, LocalExchangeType> serialBuildOutput = serialBuildBroadcast.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
         Assertions.assertEquals(LocalExchangeType.NOOP, serialBuildOutput.second);
@@ -303,6 +310,8 @@ public class LocalShuffleNodeCoverageTest {
                 Lists.newArrayList(new TupleId(NEXT_ID.getAndIncrement())), JoinOperator.INNER_JOIN, false);
         serialSourceJoin.fragment = Mockito.mock(PlanFragment.class);
         Mockito.when(serialSourceJoin.fragment.useSerialSource(Mockito.any())).thenReturn(true);
+        // childUsePoolingScan requires BOTH useSerialSource AND hasSerialScanNode
+        Mockito.when(serialSourceJoin.fragment.hasSerialScanNode()).thenReturn(true);
         Pair<PlanNode, LocalExchangeType> serialOutput = serialSourceJoin.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.noRequire());
         Assertions.assertEquals(LocalExchangeType.ADAPTIVE_PASSTHROUGH, serialOutput.second);
@@ -411,8 +420,10 @@ public class LocalShuffleNodeCoverageTest {
         Mockito.when(scanSort.fragment.useSerialSource(Mockito.any())).thenReturn(true);
         Pair<PlanNode, LocalExchangeType> scanOutput = scanSort.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.noRequire());
-        Assertions.assertEquals(LocalExchangeType.PASSTHROUGH, scanOutput.second);
-        // SortNode is serial → enforceChild skips exchange → child unchanged.
+        // Non-merge, non-analytic SortNode: isSerialOperator()=true, requireChild=noRequire,
+        // outputType=NOOP. enforceRequire shouldSkipLE skips because Sort itself is serial.
+        Assertions.assertEquals(LocalExchangeType.NOOP, scanOutput.second);
+        // SortNode is serial → enforceRequire skips exchange → child unchanged.
         Assertions.assertSame(serialScan, scanSort.getChild(0));
 
         // Analytic sort (mergeByexchange=false): sort before analytic with partition + orderBy.
