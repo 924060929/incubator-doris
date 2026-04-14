@@ -957,9 +957,8 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
             PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
         ArrayList<PlanNode> newChildren = Lists.newArrayList();
         for (int i = 0; i < children.size(); i++) {
-            PlanNode child = children.get(i);
             Pair<PlanNode, LocalExchangeType> childOutput
-                    = deriveAndEnforceChildLocalExchange(translatorContext, child, parentRequire, i);
+                    = enforceRequire(translatorContext, children.get(i), i, LocalExchangeTypeRequire.noRequire());
             newChildren.add(childOutput.first);
         }
         this.children = newChildren;
@@ -967,109 +966,60 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     }
 
     /**
-     * Enforce a local exchange requirement on a child, respecting serial-ancestor semantics.
-     * If this node or an ancestor in the same pipeline is serial, the exchange is skipped
-     * (mirrors BE's need_to_local_exchange: any_of(operators[idx..end], is_serial) → skip).
-     * Returns (resultNode, outputType) where outputType is the resolved exchange type
-     * (preferType when an exchange is inserted).
+     * Unified framework method: propagate serial flag → recurse child → satisfy check → Layer 1 skip → insert LE.
+     * Replaces the old enforceChild/enforceChildExchange/forceEnforceChildExchange trio.
+     *
+     * Layer 1 (shouldSkipLE): mirrors BE's need_to_local_exchange — skip when this node or
+     * an ancestor in the same pipeline is serial (operators[idx..end] has serial → skip).
+     * Layer 2 (require/output): each Node declares require and output in enforceAndDeriveLocalExchange.
      */
-    protected Pair<PlanNode, LocalExchangeType> enforceChild(
-            PlanTranslatorContext translatorContext, LocalExchangeTypeRequire requireChild, PlanNode originChild) {
-        int childIndex = children.indexOf(originChild);
-        Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, originChild, requireChild, childIndex);
-        if (!requireChild.satisfy(childOutput.second)) {
-            if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator()) {
-                return childOutput;
-            }
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    requireChild, translatorContext, this, childOutput.first);
-            if (childOutput.second == preferType) {
-                return childOutput;
-            }
-            List<Expr> distributeExprs = childIndex >= 0 ? getChildDistributeExprList(childIndex) : null;
-            PlanNode wrapped = insertLocalExchange(
-                    translatorContext, childOutput.first, preferType, distributeExprs);
-            return Pair.of(wrapped, preferType);
-        } else {
+    protected Pair<PlanNode, LocalExchangeType> enforceRequire(
+            PlanTranslatorContext translatorContext, PlanNode child, int childIndex,
+            LocalExchangeTypeRequire require) {
+        // 1. Propagate serial-ancestor flag to child
+        boolean childHasSerialAncestor = shouldResetSerialFlagForChild(childIndex)
+                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator();
+        translatorContext.setHasSerialAncestorInPipeline(child, childHasSerialAncestor);
+
+        // 2. Recurse child (Layer 2: child declares its own require/output)
+        Pair<PlanNode, LocalExchangeType> childOutput =
+                child.enforceAndDeriveLocalExchange(translatorContext, this, require);
+
+        // 3. Satisfy check: child output meets requirement → done
+        if (require.satisfy(childOutput.second)) {
             return childOutput;
         }
-    }
 
-    protected Pair<PlanNode, LocalExchangeType> deriveAndEnforceChildLocalExchange(
-            PlanTranslatorContext translatorContext, PlanNode child, LocalExchangeTypeRequire requireChild,
-            int childIndex) {
-        boolean hasSerialAncestorInPipeline = translatorContext.hasSerialAncestorInPipeline(this);
-        boolean childHasSerialAncestorInPipeline = shouldResetSerialFlagForChild(childIndex)
-                ? false
-                : hasSerialAncestorInPipeline || isSerialOperator();
-        translatorContext.setHasSerialAncestorInPipeline(child, childHasSerialAncestorInPipeline);
-        return child.enforceAndDeriveLocalExchange(translatorContext, this, requireChild);
-    }
-
-    /**
-     * Enforce a local exchange requirement on a child without the serial-ancestor check.
-     * Use for nodes whose children's distribution requirements must be satisfied regardless
-     * of serial ancestors in the same pipeline (joins, set operations, etc.).
-     * Returns (resultNode, childOutputType) where childOutputType is the child's reported
-     * output distribution before any inserted exchange (useful for deriving the parent's output).
-     */
-    protected Pair<PlanNode, LocalExchangeType> enforceChildExchange(
-            PlanTranslatorContext translatorContext, LocalExchangeTypeRequire require,
-            PlanNode child, int childIndex) {
-        Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, child, require, childIndex);
-        if (!require.satisfy(childOutput.second)) {
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    require, translatorContext, this, childOutput.first);
-            List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
-            PlanNode wrapped = insertLocalExchange(
-                    translatorContext, childOutput.first, preferType, distributeExprs);
-            return Pair.of(wrapped, childOutput.second);
+        // 4. Layer 1: skip LE when serial operator or ancestor in same pipeline
+        // Equivalent to BE's need_to_local_exchange: any_of(operators[idx..end], is_serial) → skip
+        if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator()) {
+            return childOutput;
         }
-        return childOutput;
+
+        // 5. Resolve exchange type and create LE node
+        LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
+                require, translatorContext, this, childOutput.first);
+        List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
+        PlanNode leNode = createLocalExchange(translatorContext, childOutput.first, preferType, distributeExprs);
+        return Pair.of(leNode, preferType);
     }
 
     /**
-     * Like {@link #enforceChildExchange} but always inserts a local exchange
-     * when the require is not NOOP, even if the child already outputs a matching distribution.
-     * Mirrors BE's need_to_local_exchange Step 4 which always inserts non-hash exchanges
-     * regardless of the current distribution. Used by NLJ probe side where each NLJ creates
-     * a pipeline boundary and data must be re-partitioned.
-     */
-    protected Pair<PlanNode, LocalExchangeType> forceEnforceChildExchange(
-            PlanTranslatorContext translatorContext, LocalExchangeTypeRequire require,
-            PlanNode child, int childIndex) {
-        Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
-                translatorContext, child, require, childIndex);
-        if (require.preferType() != LocalExchangeType.NOOP) {
-            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
-                    require, translatorContext, this, childOutput.first);
-            List<Expr> distributeExprs = getChildDistributeExprList(childIndex);
-            PlanNode wrapped = insertLocalExchange(
-                    translatorContext, childOutput.first, preferType, distributeExprs);
-            return Pair.of(wrapped, childOutput.second);
-        }
-        return childOutput;
-    }
-
-    /**
-     * Insert a LocalExchangeNode wrapping {@code child} with the given exchange type.
+     * Create a LocalExchangeNode wrapping child with the given exchange type.
+     *
+     * Skip PT/APT insertion when child is a serial non-Scan operator: serial Exchanges/AGGs
+     * have 1 task; inserting PASSTHROUGH creates a pipeline split that breaks shared state
+     * or causes data loss. HASH/BUCKET/BROADCAST/PASS_TO_ONE are NOT skipped — they properly
+     * redistribute or replicate data. Serial ScanNodes (pooling scan) need fan-out and are
+     * handled by the heavy-ops path below.
+     *
      * Handles heavy-ops bottleneck avoidance (mirrors BE pipeline_fragment_context.cpp):
      * when upstream has 1 task (serial source) and exchange is heavy (hash/bucket/adaptive),
      * insert a PASSTHROUGH fan-out first to avoid single-task bottleneck on the heavy
-     * exchange sink. Only applies to local-shuffle (pooling scan) fragments where
-     * _parallel_instances=1 causes serial pipelines to have 1 task.
+     * exchange sink. Only applies to local-shuffle (pooling scan) fragments.
      */
-    private PlanNode insertLocalExchange(PlanTranslatorContext translatorContext,
+    protected PlanNode createLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode child, LocalExchangeType exchangeType, List<Expr> distributeExprs) {
-        // Mirrors BE need_to_local_exchange: skip PASSTHROUGH/ADAPTIVE_PASSTHROUGH LE when
-        // child is a serial non-Scan operator. Serial Exchanges/AGGs have 1 task; inserting
-        // PASSTHROUGH/APT creates a pipeline split that breaks shared state (COREDUMP) or
-        // causes data loss (routes 1-task output to only 1 of N downstream tasks).
-        // HASH/BUCKET/BROADCAST/PASS_TO_ONE are NOT skipped — they properly redistribute
-        // or replicate data and are needed even with serial upstream.
-        // Serial ScanNodes (pooling scan) need fan-out and are handled by the heavy-ops path below.
         if (child.isSerialOperator() && !(child instanceof ScanNode)
                 && (exchangeType == LocalExchangeType.PASSTHROUGH
                     || exchangeType == LocalExchangeType.ADAPTIVE_PASSTHROUGH)) {

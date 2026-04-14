@@ -278,7 +278,7 @@ public class SortNode extends PlanNode {
         }
 
         Pair<PlanNode, LocalExchangeType> enforceResult
-                = enforceChild(translatorContext, requireChild, children.get(0));
+                = enforceRequire(translatorContext, children.get(0), 0, requireChild);
         this.children = Lists.newArrayList(enforceResult.first);
         if (outputType == null) {
             outputType = enforceResult.second;

@@ -191,7 +191,7 @@ public class PartitionSortNode extends PlanNode {
             outputType = LocalExchangeType.PASSTHROUGH;
         }
         Pair<PlanNode, LocalExchangeType> enforceResult
-                = enforceChild(translatorContext, requireChild, children.get(0));
+                = enforceRequire(translatorContext, children.get(0), 0, requireChild);
         this.children = Lists.newArrayList(enforceResult.first);
         return Pair.of(this, outputType != null ? outputType : enforceResult.second);
     }

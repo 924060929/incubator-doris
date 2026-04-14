@@ -98,8 +98,8 @@ public class RecursiveCteNode extends PlanNode {
         ArrayList<PlanNode> newChildren = Lists.newArrayList();
         for (int i = 0; i < children.size(); i++) {
             PlanNode child = children.get(i);
-            Pair<PlanNode, LocalExchangeType> childOutput = deriveAndEnforceChildLocalExchange(
-                    translatorContext, child, LocalExchangeTypeRequire.noRequire(), i);
+            Pair<PlanNode, LocalExchangeType> childOutput = enforceRequire(
+                    translatorContext, child, i, LocalExchangeTypeRequire.noRequire());
             newChildren.add(childOutput.first);
         }
         this.children = newChildren;

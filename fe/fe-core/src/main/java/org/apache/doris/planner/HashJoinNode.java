@@ -306,8 +306,14 @@ public class HashJoinNode extends JoinNodeBase {
             buildSideRequire = probeSideRequire = LocalExchangeTypeRequire.noRequire();
             outputType = LocalExchangeType.NOOP;
         } else if (distrMode == DistributionMode.BROADCAST) {
-            boolean probeChildSerial = isSerialChildInThrift(translatorContext, children.get(0));
-            boolean buildChildSerial = isSerialChildInThrift(translatorContext, children.get(1));
+            // BE: _child->is_serial_operator() ? PASSTHROUGH/PASS_TO_ONE : NOOP
+            // useSerialSource gate: ScanNode.isSerialOperator() can be true in non-pooling
+            // (scanRanges < pptn) but isn't serial on BE. ExchangeNode.isSerialOperator()
+            // already includes useSerialSource, so the gate is harmless for Exchange children.
+            boolean useSerialSource = fragment != null
+                    && fragment.useSerialSource(translatorContext.getConnectContext());
+            boolean probeChildSerial = useSerialSource && children.get(0).isSerialOperator();
+            boolean buildChildSerial = useSerialSource && children.get(1).isSerialOperator();
             probeSideRequire = probeChildSerial
                     ? LocalExchangeTypeRequire.requirePassthrough()
                     : LocalExchangeTypeRequire.noRequire();
@@ -315,11 +321,7 @@ public class HashJoinNode extends JoinNodeBase {
                     ? LocalExchangeTypeRequire.requirePassToOne()
                     : LocalExchangeTypeRequire.noRequire();
             // For serial probe: output is PASSTHROUGH (data from single instance).
-            // For non-serial probe: propagate probe side's distribution (null → falls through to
-            // probeSideOutput.second below). This mirrors BE's ScanOperator returning
-            // BUCKET_HASH_SHUFFLE and !(hash && hash) check in need_to_local_exchange: if
-            // probe side is already hash-distributed, parent hash requirement is satisfied
-            // without inserting a redundant local exchange.
+            // For non-serial probe: propagate probe side's actual distribution.
             outputType = probeChildSerial ? LocalExchangeType.PASSTHROUGH : null;
         } else if (AddLocalExchange.isColocated(this) || isBucketShuffle()) {
             probeSideRequire = LocalExchangeTypeRequire.requireBucketHash();
@@ -328,7 +330,7 @@ public class HashJoinNode extends JoinNodeBase {
             // hash table mechanism — PASS_TO_ONE routes all data to task 0 while tasks 1..N-1
             // build empty hash tables, losing rows. BUCKET_HASH_SHUFFLE correctly distributes
             // build data by bucket to match the probe side's bucket distribution.
-            // The serial exchange returns NOOP, so enforceChildExchange() will insert a
+            // The serial exchange returns NOOP, so enforceRequire() will insert a
             // BUCKET_HASH_SHUFFLE local exchange (with PASSTHROUGH fan-out for heavy-ops
             // bottleneck avoidance).
             buildSideRequire = LocalExchangeTypeRequire.requireBucketHash();
@@ -346,36 +348,15 @@ public class HashJoinNode extends JoinNodeBase {
             outputType = null; // derived from probeResult.second below
         }
 
-        Pair<PlanNode, LocalExchangeType> probeResult = enforceChildExchange(
-                translatorContext, probeSideRequire, children.get(0), 0);
-        Pair<PlanNode, LocalExchangeType> buildResult = enforceChildExchange(
-                translatorContext, buildSideRequire, children.get(1), 1);
+        Pair<PlanNode, LocalExchangeType> probeResult = enforceRequire(
+                translatorContext, children.get(0), 0, probeSideRequire);
+        Pair<PlanNode, LocalExchangeType> buildResult = enforceRequire(
+                translatorContext, children.get(1), 1, buildSideRequire);
         this.children = Lists.newArrayList(probeResult.first, buildResult.first);
         if (outputType == null) {
             outputType = probeResult.second;
         }
         return Pair.of(this, outputType);
-    }
-
-    private boolean isSerialChildInThrift(PlanTranslatorContext translatorContext, PlanNode child) {
-        PlanFragment childFragment = child.getFragment();
-        boolean useSerialSource = childFragment != null
-                && childFragment.useSerialSource(translatorContext.getConnectContext());
-        if (!useSerialSource) {
-            return false;
-        }
-        // Only consider the child serial for LE decisions when it's an actual pooling
-        // ScanNode. For serial non-Scan children (Exchange, AGG, NLJ), useSerialSource()
-        // may return true due to serial operators in the fragment, but inserting
-        // PASSTHROUGH/PASS_TO_ONE creates pipeline splits with mismatched task counts
-        // → HashJoinBuildSink source_deps empty → crash in set_ready_to_read().
-        if (!(child instanceof ScanNode)) {
-            if (child instanceof ExchangeNode) {
-                return child.isSerialOperator() || childFragment.hasSerialScanNode();
-            }
-            return false;
-        }
-        return child.isSerialOperator();
     }
 
     @Override

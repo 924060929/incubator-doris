@@ -92,8 +92,8 @@ public class AssertNumRowsNode extends PlanNode {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
 
-        Pair<PlanNode, LocalExchangeType> enforceResult = enforceChild(
-                translatorContext, LocalExchangeTypeRequire.requirePassthrough(), children.get(0));
+        Pair<PlanNode, LocalExchangeType> enforceResult = enforceRequire(
+                translatorContext, children.get(0), 0, LocalExchangeTypeRequire.requirePassthrough());
         children = Lists.newArrayList(enforceResult.first);
         return Pair.of(this, LocalExchangeType.PASSTHROUGH);
     }

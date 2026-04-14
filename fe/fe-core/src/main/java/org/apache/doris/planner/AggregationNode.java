@@ -299,8 +299,9 @@ public class AggregationNode extends PlanNode {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else if (fragment != null && fragment.useSerialSource(connectContext)
                     && children.get(0).isSerialOperator()) {
-                // Mirrors BE StreamingAggOperatorX::required_data_distribution():
-                //   return _child->is_serial_operator() ? PASSTHROUGH : NOOP
+                // BE: _child->is_serial_operator() ? PASSTHROUGH : NOOP
+                // useSerialSource gate needed: ScanNode.isSerialOperator() can be true in
+                // non-pooling mode (scanRanges < pptn) but isn't serial on BE without useSerialSource.
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
@@ -312,8 +313,9 @@ public class AggregationNode extends PlanNode {
                     // Finalize agg, no group key: NOOP (single serial instance collects all)
                     requireChild = LocalExchangeTypeRequire.noRequire();
                 } else {
-                    // Serialize agg, no group key: base class → child serial → PASSTHROUGH, else NOOP
-                    if (fragment != null && fragment.useSerialSource(connectContext)) {
+                    // Serialize agg, no group key: BE → _child->is_serial_operator() ? PT : NOOP
+                    if (fragment != null && fragment.useSerialSource(connectContext)
+                            && children.get(0).isSerialOperator()) {
                         requireChild = LocalExchangeTypeRequire.requirePassthrough();
                     } else {
                         requireChild = LocalExchangeTypeRequire.noRequire();
@@ -337,7 +339,7 @@ public class AggregationNode extends PlanNode {
         }
 
         Pair<PlanNode, LocalExchangeType> enforceResult
-                = enforceChild(translatorContext, requireChild, children.get(0));
+                = enforceRequire(translatorContext, children.get(0), 0, requireChild);
         children = Lists.newArrayList(enforceResult.first);
         return Pair.of(this, enforceResult.second);
     }

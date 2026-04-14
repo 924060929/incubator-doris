@@ -139,8 +139,8 @@ public class TableFunctionNode extends PlanNode {
         // In BE, need_to_local_exchange() Step 4 treats non-hash exchanges (PASSTHROUGH)
         // as always needing insertion, so "PASSTHROUGH doesn't satisfy PASSTHROUGH" —
         // which is equivalent to our FE model of require=PASSTHROUGH, output=NOOP.
-        Pair<PlanNode, LocalExchangeType> enforceResult = enforceChild(
-                translatorContext, LocalExchangeTypeRequire.requirePassthrough(), children.get(0));
+        Pair<PlanNode, LocalExchangeType> enforceResult = enforceRequire(
+                translatorContext, children.get(0), 0, LocalExchangeTypeRequire.requirePassthrough());
         children = Lists.newArrayList(enforceResult.first);
         return Pair.of(this, LocalExchangeType.NOOP);
     }

@@ -232,7 +232,7 @@ public abstract class SetOperationNode extends PlanNode {
 
         ArrayList<PlanNode> newChildren = Lists.newArrayList();
         for (int i = 0; i < children.size(); i++) {
-            newChildren.add(enforceChildExchange(translatorContext, requireChild, children.get(i), i).first);
+            newChildren.add(enforceRequire(translatorContext, children.get(i), i, requireChild).first);
         }
         this.children = newChildren;
         return Pair.of(this, outputType);

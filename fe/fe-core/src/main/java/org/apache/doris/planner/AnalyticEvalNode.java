@@ -176,14 +176,12 @@ public class AnalyticEvalNode extends PlanNode {
             // Must NOT have any LocalExchange between AnalyticEval and its child.
             // On BE, AnalyticSink and AnalyticSource share state (source_deps/sink_deps).
             // A LocalExchange below would restore the AnalyticSink pipeline to _num_instances
-            // tasks while the serial AnalyticSource pipeline stays at 1 task. For instance_idx > 0,
-            // the AnalyticSource task is never created, leaving source_deps empty →
-            // crash when AnalyticSink calls set_ready_to_read(0).
+            // tasks while the serial AnalyticSource pipeline stays at 1 task.
             //
-            // We call enforceChild with noRequire to traverse children, then strip any
+            // Use enforceRequire with noRequire to traverse children, then strip any
             // LocalExchange the child inserted (e.g., Exchange wrapping itself with PASSTHROUGH).
             Pair<PlanNode, LocalExchangeType> enforceResult
-                    = enforceChild(translatorContext, LocalExchangeTypeRequire.noRequire(), children.get(0));
+                    = enforceRequire(translatorContext, children.get(0), 0, LocalExchangeTypeRequire.noRequire());
             PlanNode newChild = enforceResult.first;
             if (newChild instanceof LocalExchangeNode) {
                 newChild = newChild.getChild(0);
@@ -204,7 +202,9 @@ public class AnalyticEvalNode extends PlanNode {
                 outputType = LocalExchangeType.NOOP;
             }
         } else if (fragment.useSerialSource(translatorContext.getConnectContext())
-                && children.get(0) instanceof ScanNode) {
+                && children.get(0).isSerialOperator()) {
+            // BE base class: _child->is_serial_operator() ? PASSTHROUGH : NOOP
+            // useSerialSource gate: ScanNode.isSerialOperator() can be true in non-pooling mode
             requireChild = LocalExchangeTypeRequire.requirePassthrough();
             outputType = LocalExchangeType.PASSTHROUGH;
         } else {
@@ -213,7 +213,7 @@ public class AnalyticEvalNode extends PlanNode {
         }
 
         Pair<PlanNode, LocalExchangeType> enforceResult
-                = enforceChild(translatorContext, requireChild, children.get(0));
+                = enforceRequire(translatorContext, children.get(0), 0, requireChild);
         children = Lists.newArrayList(enforceResult.first);
         if (outputType == null) {
             outputType = enforceResult.second;

@@ -159,8 +159,19 @@ public class ExchangeNode extends PlanNode {
      */
     @Override
     public boolean isSerialOperator() {
-        return (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().isUseSerialExchange()
+        // Must match toThrift: (staticSerial || hasSerialScanNode) && useSerialSource.
+        // Without useSerialSource gate, non-pooling UNPARTITIONED exchanges would be treated
+        // as serial, causing incorrect PASS_TO_ONE insertion in broadcast joins.
+        ConnectContext ctx = ConnectContext.get();
+        if (ctx == null || fragment == null) {
+            return false;
+        }
+        if (!fragment.useSerialSource(ctx)) {
+            return false;
+        }
+        boolean staticSerial = (ctx.getSessionVariable().isUseSerialExchange()
                 || partitionType == TPartitionType.UNPARTITIONED) && mergeInfo == null;
+        return staticSerial || fragment.hasSerialScanNode();
     }
 
     @Override
@@ -176,16 +187,8 @@ public class ExchangeNode extends PlanNode {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        // Must match the BE serial condition in toThrift(): isSerialOperator() && useSerialSource().
-        // Only insert PASSTHROUGH when the exchange will actually be serial on the BE.
-        // Without useSerialSource() check, we'd insert PASSTHROUGH in non-pooling fragments
-        // where the exchange has N tasks, corrupting broadcast join data distribution
-        // (PASSTHROUGH round-robin splits complete-dataset sinks into 1/N subsets per source).
-        // Must match toThrift: include hasSerialScanNode() — when sibling scan is pooling,
-        // Exchange becomes serial on BE even if Exchange itself isn't inherently serial.
-        boolean willBeSerialOnBe = (isSerialOperator() || fragment.hasSerialScanNode())
-                && fragment != null
-                && fragment.useSerialSource(ConnectContext.get());
+        // isSerialOperator() now matches toThrift: (staticSerial || hasSerialScanNode) && useSerialSource
+        boolean willBeSerialOnBe = isSerialOperator();
         if (willBeSerialOnBe) {
             // If there is already a serial ancestor in the same pipeline (e.g., serial NLJ
             // for RIGHT_OUTER/FULL_OUTER join), don't insert any local exchange. The serial

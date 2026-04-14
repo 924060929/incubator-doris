@@ -179,15 +179,11 @@ public class NestedLoopJoinNode extends JoinNodeBase {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
 
-        // Only request APT/BROADCAST when the probe child is an actual serial ScanNode
-        // (pooling scan). For serial non-Scan children (Exchange, AGG, NLJ), the
-        // insertLocalExchange guard skips APT on probe side (serial non-Scan → no LE),
-        // but BROADCAST on build side would still be inserted → probe has 1 task but
-        // build has N tasks → NLJ source_deps empty for tasks 1..N-1 → crash.
-        // Original comment: nested NLJs need pooling handling — but that case is now
-        // covered by the serial NLJ branch (isSerialOperator) which skips both sides.
+        // Pooling scan: useSerialSource() AND actually has a pooling scan node in the fragment.
+        // Without hasSerialScanNode(), useSerialSource() can be true for fragments with only
+        // serial Exchanges (use_serial_exchange=true) but no pooling scan, causing false positives.
         boolean childUsePoolingScan = fragment.useSerialSource(translatorContext.getConnectContext())
-                && children.get(0) instanceof ScanNode;
+                && fragment.hasSerialScanNode();
 
         LocalExchangeTypeRequire probeSideRequire;
         LocalExchangeTypeRequire buildSideRequire;
@@ -196,14 +192,9 @@ public class NestedLoopJoinNode extends JoinNodeBase {
             probeSideRequire = buildSideRequire = LocalExchangeTypeRequire.noRequire();
             outputType = LocalExchangeType.NOOP;
         } else if (isSerialOperator()) {
-            // RIGHT_OUTER/RIGHT_SEMI/RIGHT_ANTI/FULL_OUTER: probe side must be serial (1 task)
-            // to avoid duplicate unmatched rows from build side. No exchange needed for probe.
-            // Build side: noRequire() regardless of pooling scan. The probe pipeline has 1 task
-            // (serial), so inserting BROADCAST on the build side would inflate build pipeline's
-            // num_tasks to _num_instances while probe stays at 1. This causes instance 1+ to
-            // create build tasks without corresponding probe tasks, leaving source_deps empty
-            // and crashing in set_ready_to_read(). BE-native avoids this via the
-            // num_tasks_of_parent()<=1 check in _add_local_exchange.
+            // RIGHT_OUTER/RIGHT_SEMI/RIGHT_ANTI/FULL_OUTER: probe side must be serial (1 task).
+            // Build side: noRequire() — inserting BROADCAST would inflate build pipeline's
+            // num_tasks while probe stays at 1, crashing in set_ready_to_read().
             probeSideRequire = LocalExchangeTypeRequire.noRequire();
             buildSideRequire = LocalExchangeTypeRequire.noRequire();
             outputType = LocalExchangeType.NOOP;
@@ -217,16 +208,29 @@ public class NestedLoopJoinNode extends JoinNodeBase {
             outputType = LocalExchangeType.ADAPTIVE_PASSTHROUGH;
         }
 
-        // NLJ creates a pipeline boundary in BE (build side splits into a separate
-        // pipeline).  BE's need_to_local_exchange Step 4 always inserts a local exchange
-        // for non-hash distribution types, even if the child already outputs the same
-        // type.  Use forceEnforceChildExchange for the probe side to match BE behavior
-        // — always insert ADAPTIVE_PASSTHROUGH even when the child (e.g., another NLJ)
-        // already outputs ADAPTIVE_PASSTHROUGH.
-        PlanNode probeSide = forceEnforceChildExchange(
-                translatorContext, probeSideRequire, children.get(0), 0).first;
-        PlanNode buildSide = enforceChildExchange(
-                translatorContext, buildSideRequire, children.get(1), 1).first;
+        // Probe side: force-enforce. NLJ creates a pipeline boundary in BE; Step 4 always
+        // inserts non-hash exchanges regardless of current distribution. Must always insert
+        // ADAPTIVE_PASSTHROUGH even when child already outputs it (e.g., nested NLJ).
+        // Manually propagate serial flag + recurse + force-insert (no enforceRequire —
+        // enforceRequire would skip insertion when child already satisfies the requirement).
+        boolean probeChildHasSerialAncestor = shouldResetSerialFlagForChild(0)
+                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator();
+        translatorContext.setHasSerialAncestorInPipeline(children.get(0), probeChildHasSerialAncestor);
+        Pair<PlanNode, LocalExchangeType> probeChildOutput = children.get(0)
+                .enforceAndDeriveLocalExchange(translatorContext, this, probeSideRequire);
+        PlanNode probeSide;
+        if (probeSideRequire.preferType() != LocalExchangeType.NOOP) {
+            LocalExchangeType preferType = AddLocalExchange.resolveExchangeType(
+                    probeSideRequire, translatorContext, this, probeChildOutput.first);
+            List<Expr> distributeExprs = getChildDistributeExprList(0);
+            probeSide = createLocalExchange(translatorContext, probeChildOutput.first, preferType, distributeExprs);
+        } else {
+            probeSide = probeChildOutput.first;
+        }
+
+        // Build side: normal enforce (enforceRequire handles satisfy + shouldSkipLE)
+        PlanNode buildSide = enforceRequire(
+                translatorContext, children.get(1), 1, buildSideRequire).first;
         this.children = Lists.newArrayList(probeSide, buildSide);
         return Pair.of(this, outputType);
     }

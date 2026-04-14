@@ -69,7 +69,7 @@ public class SelectNode extends PlanNode {
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(
             PlanTranslatorContext translatorContext, PlanNode parent, LocalExchangeTypeRequire parentRequire) {
         Pair<PlanNode, LocalExchangeType> enforceResult
-                = enforceChild(translatorContext, parentRequire, children.get(0));
+                = enforceRequire(translatorContext, children.get(0), 0, parentRequire);
         this.children = new ArrayList<>();
         this.children.add(enforceResult.first);
         return Pair.of(this, enforceResult.second);
