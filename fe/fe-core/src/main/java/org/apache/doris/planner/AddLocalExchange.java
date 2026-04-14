@@ -37,16 +37,22 @@ public class AddLocalExchange {
     }
 
     /** addLocalExchange with distributed plans, skipping single-instance fragments.
-     *  BE's _plan_local_exchange processes all pipelines regardless of _num_instances,
-     *  but with _num_instances==1 all pipelines have 1 task so local exchange is a no-op.
-     *  Skipping avoids inserting LOCAL_EXCHANGE_NODEs that change pipeline structure
-     *  without benefit and may cause sender/receiver count mismatches. */
+     *  BE's _plan_local_exchange checks _num_instances which is the per-BE instance count.
+     *  With _num_instances<=1 all pipelines on that BE have 1 task so local exchange is a no-op.
+     *  We must use the same per-BE semantics: skip when every BE has at most 1 instance.
+     *  Using global instanceCount would insert LE for fragments where 2 BEs each have 1 instance
+     *  (global=2, per-BE=1), causing pipeline task mismatch and deadlock. */
     public void addLocalExchange(FragmentIdMapping<DistributedPlan> distributedPlans,
             PlanTranslatorContext context) {
         for (DistributedPlan plan : distributedPlans.values()) {
             PipelineDistributedPlan pipePlan = (PipelineDistributedPlan) plan;
-            int instanceCount = pipePlan.getInstanceJobs().size();
-            if (instanceCount <= 1) {
+            // Use per-BE max instance count to match BE's _num_instances semantics.
+            // BE skips _plan_local_exchange when _num_instances <= 1 (per-BE check).
+            long maxPerBeInstances = pipePlan.getInstanceJobs().stream()
+                    .collect(java.util.stream.Collectors.groupingBy(
+                            j -> j.getAssignedWorker().id(), java.util.stream.Collectors.counting()))
+                    .values().stream().mapToLong(Long::longValue).max().orElse(0);
+            if (maxPerBeInstances <= 1) {
                 continue;
             }
             PlanFragment fragment = pipePlan.getFragmentJob().getFragment();

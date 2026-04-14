@@ -157,11 +157,14 @@ public class ExchangeNode extends PlanNode {
      *
      * So FRAGMENT 0 should not use serial source.
      */
+    /**
+     * Whether this Exchange will be serial on BE. Matches toThrift condition:
+     * (staticSerial || hasSerialScanNode) && useSerialSource.
+     * Without useSerialSource gate, non-pooling UNPARTITIONED exchanges would be treated
+     * as serial, causing incorrect PASS_TO_ONE insertion in broadcast joins.
+     */
     @Override
     public boolean isSerialOperator() {
-        // Must match toThrift: (staticSerial || hasSerialScanNode) && useSerialSource.
-        // Without useSerialSource gate, non-pooling UNPARTITIONED exchanges would be treated
-        // as serial, causing incorrect PASS_TO_ONE insertion in broadcast joins.
         ConnectContext ctx = ConnectContext.get();
         if (ctx == null || fragment == null) {
             return false;
@@ -169,14 +172,22 @@ public class ExchangeNode extends PlanNode {
         if (!fragment.useSerialSource(ctx)) {
             return false;
         }
-        boolean staticSerial = (ctx.getSessionVariable().isUseSerialExchange()
+        return isStaticSerialOperator() || fragment.hasSerialScanNode();
+    }
+
+    /** Static serial check without fragment context. Used by hasSerialChildren()
+     *  to avoid infinite recursion: isSerialOperator → useSerialSource → hasSerialChildren
+     *  → isSerialOperator. */
+    private boolean isStaticSerialOperator() {
+        ConnectContext ctx = ConnectContext.get();
+        return (ctx != null && ctx.getSessionVariable().isUseSerialExchange()
                 || partitionType == TPartitionType.UNPARTITIONED) && mergeInfo == null;
-        return staticSerial || fragment.hasSerialScanNode();
     }
 
     @Override
     public boolean hasSerialChildren() {
-        return isSerialOperator();
+        // Use static check to avoid recursion through useSerialSource → hasSerialScanNode
+        return isStaticSerialOperator();
     }
 
     @Override
