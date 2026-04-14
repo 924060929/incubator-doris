@@ -337,6 +337,9 @@ suite("test_local_shuffle_fe_be_consistency") {
 
     // 1-2c2: Same finalize agg with bucket key, but non-pooling (ignore_storage_data_distribution=false).
     //        No serial source → no heavy_ops PASSTHROUGH fan-out needed.
+    //        Known mismatch on clusters where ls_serial (2 BUCKETS) tablets land on different BEs:
+    //        FE sees global instanceCount=2 → inserts LE; each BE sees local _num_instances=1 → skips.
+    //        This is a pre-existing FE/BE instanceCount discrepancy, not a planner bug.
     checkConsistencyWithSql("agg_finalize_non_pooling_bucket",
         "SELECT ${sv} k1, count(*) AS cnt FROM ls_serial GROUP BY k1 ORDER BY k1")
 
@@ -809,8 +812,10 @@ suite("test_local_shuffle_fe_be_consistency") {
            ORDER BY cnt, a.v1""", true)
 
     // 12-2: Same nested NLJ but non-pooling (ignore_storage_data_distribution=false).
-    //       FE uses forceEnforceChildExchange to always insert ADAPTIVE_PASSTHROUGH
+    //       FE uses manual force-enforce to always insert ADAPTIVE_PASSTHROUGH
     //       on NLJ probe side, matching BE's need_to_local_exchange Step 4 behavior.
+    //       Known mismatch on clusters where ls_serial (2 BUCKETS) tablets span multiple BEs:
+    //       same FE/BE instanceCount discrepancy as agg_finalize_non_pooling_bucket.
     checkConsistencyWithSql("nested_nlj_non_pooling",
         """SELECT ${sv} count(a.k1) AS cnt, a.v1
            FROM ls_serial a
@@ -844,6 +849,9 @@ suite("test_local_shuffle_fe_be_consistency") {
     // 13-2: GROUPING SETS with pooling scan — generates REPEAT (union-like)
     //       operator internally.  Serial Exchange reduces num_tasks, causing
     //       "must set shared state, in UNION_OPERATOR / SORT_OPERATOR".
+    //       Known issue: deadlocks on clusters where ls_serial (2 BUCKETS) tablets span
+    //       multiple BEs — FE inserts LE (global instanceCount=2) but each BE has
+    //       _num_instances=1 causing pipeline task mismatch. Pre-existing FE/BE discrepancy.
     checkConsistencyWithSql("grouping_sets_pooling_scan",
         """SELECT ${svSerialSource} k1, k2, SUM(v1) AS sv
            FROM ls_serial
@@ -853,6 +861,7 @@ suite("test_local_shuffle_fe_be_consistency") {
     // 13-3: Window function + GROUPING SETS with pooling scan.
     //       Combines analytic (Sort shared state) and GROUPING SETS (Repeat/Union)
     //       — both need correct num_tasks for shared state injection.
+    //       Same instanceCount discrepancy as grouping_sets_pooling_scan.
     checkConsistencyWithSql("window_grouping_sets_pooling_scan",
         """SELECT ${svSerialSource} k1, SUM(v1),
                   ROW_NUMBER() OVER (ORDER BY k1) AS rn

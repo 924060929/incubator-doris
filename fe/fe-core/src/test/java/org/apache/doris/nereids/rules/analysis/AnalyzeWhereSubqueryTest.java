@@ -57,6 +57,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import mockit.Mock;
 import mockit.MockUp;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -147,6 +148,12 @@ public class AnalyzeWhereSubqueryTest extends TestWithFeService implements MemoP
                 throw new IllegalStateException("Test sql failed: " + t.getMessage() + ", sql:\n" + sql, t);
             }
         }
+    }
+
+    @Test
+    public void testSimpleCaseWithExistsSubqueryCanAnalyze() {
+        String sql = "select case exists(select k1 from t7) when true then 2 when false then 4 else 5 end a3 from t6";
+        Assertions.assertDoesNotThrow(() -> PlanChecker.from(connectContext).analyze(sql));
     }
 
     @Test

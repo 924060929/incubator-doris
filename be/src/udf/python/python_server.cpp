@@ -25,7 +25,6 @@
 #include <sys/stat.h>
 
 #include <boost/asio.hpp>
-#include <boost/process.hpp>
 #include <fstream>
 
 #include "arrow/flight/client.h"
