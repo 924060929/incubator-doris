@@ -261,6 +261,10 @@ Status PipelineFragmentContext::_build_and_prepare_full_pipeline(ThreadPool* thr
         RETURN_IF_ERROR(_build_pipelines(_runtime_state->obj_pool(), *_query_ctx->desc_tbl,
                                          &_root_op, root_pipeline));
 
+        // Propagate _num_instances from LOCAL_EXCHANGE pipelines to ancestor pipelines
+        // that inherited reduced num_tasks from a serial operator.
+        _propagate_local_exchange_num_tasks();
+
         // Create deferred local exchangers now that all pipelines have final num_tasks.
         RETURN_IF_ERROR(_create_deferred_local_exchangers());
 
@@ -727,6 +731,52 @@ Status PipelineFragmentContext::_create_deferred_local_exchangers() {
     }
     _deferred_exchangers.clear();
     return Status::OK();
+}
+
+void PipelineFragmentContext::_propagate_local_exchange_num_tasks() {
+    if (_deferred_exchangers.empty()) {
+        return;
+    }
+    // When FE inserts LOCAL_EXCHANGE_NODE below a pipeline-splitting operator (AGG, SORT,
+    // JOIN), LOCAL_EXCHANGE_NODE processing restores its immediate pipeline to
+    // _num_instances.  However, ancestor pipelines created earlier by the splitting
+    // operators still carry the reduced num_tasks inherited from a serial operator.
+    //
+    // Walk the DAG: for each downstream pipeline whose num_tasks < _num_instances, if any
+    // upstream dependency already has _num_instances tasks, raise the downstream too —
+    // unless its source operator is serial (it legitimately has 1 task).  Iterate until
+    // stable.
+    std::unordered_map<PipelineId, PipelinePtr> id_to_pipe;
+    for (auto& p : _pipelines) {
+        id_to_pipe[p->id()] = p;
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& [downstream_id, upstream_ids] : _dag) {
+            auto dit = id_to_pipe.find(downstream_id);
+            if (dit == id_to_pipe.end()) {
+                continue;
+            }
+            auto& downstream = dit->second;
+            if (downstream->num_tasks() >= _num_instances) {
+                continue;
+            }
+            if (!downstream->operators().empty() &&
+                downstream->operators().front()->is_serial_operator()) {
+                continue;
+            }
+            for (auto upstream_id : upstream_ids) {
+                auto uit = id_to_pipe.find(upstream_id);
+                if (uit != id_to_pipe.end() && uit->second->num_tasks() >= _num_instances) {
+                    downstream->set_num_tasks(_num_instances);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 Status PipelineFragmentContext::_create_tree_helper(

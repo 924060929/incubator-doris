@@ -345,6 +345,10 @@ private:
     };
     std::vector<DeferredExchangerInfo> _deferred_exchangers;
     Status _create_deferred_local_exchangers();
+    // After _build_pipelines, propagate _num_instances from FE-planned LOCAL_EXCHANGE
+    // pipelines upward through the DAG to ancestor pipelines that inherited reduced
+    // num_tasks from a serial operator.
+    void _propagate_local_exchange_num_tasks();
 
     //Here are two types of runtime states:
     //    - _runtime state is at the Fragment level.
