@@ -183,8 +183,8 @@ public class ExchangeNode extends PlanNode {
         // (PASSTHROUGH round-robin splits complete-dataset sinks into 1/N subsets per source).
         // Must match toThrift: include hasSerialScanNode() — when sibling scan is pooling,
         // Exchange becomes serial on BE even if Exchange itself isn't inherently serial.
-        boolean willBeSerialOnBe = (isSerialOperator() || fragment.hasSerialScanNode())
-                && fragment != null
+        boolean willBeSerialOnBe = fragment != null
+                && (isSerialOperator() || fragment.hasSerialScanNode())
                 && fragment.useSerialSource(ConnectContext.get());
         if (willBeSerialOnBe) {
             // If there is already a serial ancestor in the same pipeline (e.g., serial NLJ
