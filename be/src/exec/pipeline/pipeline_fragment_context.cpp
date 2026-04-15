@@ -734,23 +734,25 @@ Status PipelineFragmentContext::_create_deferred_local_exchangers() {
 }
 
 void PipelineFragmentContext::_propagate_local_exchange_num_tasks() {
-    if (_deferred_exchangers.empty()) {
-        return;
-    }
-    // When FE inserts LOCAL_EXCHANGE_NODE below a pipeline-splitting operator (AGG, SORT,
-    // JOIN), LOCAL_EXCHANGE_NODE processing restores its immediate pipeline to
-    // _num_instances.  However, ancestor pipelines created earlier by the splitting
-    // operators still carry the reduced num_tasks inherited from a serial operator.
+    // Fix num_tasks mismatches between paired pipelines created by pipeline-splitting
+    // operators (AGG, SORT, JOIN).  These pairs share state via inject_shared_state and
+    // must have consistent num_tasks; otherwise instance 1+ tasks access null shared_state.
     //
-    // Walk the DAG: for each downstream pipeline whose num_tasks < _num_instances, if any
-    // upstream dependency already has _num_instances tasks, raise the downstream too —
-    // unless its source operator is serial (it legitimately has 1 task).  Iterate until
-    // stable.
+    // Pass 1 (upward): when FE inserts LOCAL_EXCHANGE_NODE below a splitting operator,
+    // the LE pipeline gets _num_instances but ancestor pipelines still have the reduced
+    // count.  Raise them to _num_instances (skip serial source operators).
+    //
+    // Pass 2 (downward): when a serial Exchange feeds a splitting operator (e.g., scalar
+    // merge-finalize AGG), the sink pipeline has 1 task but the source pipeline may have
+    // been raised (by LE or by inheriting _num_instances from add_pipeline).  Lower it
+    // to match, unless it contains LocalExchangeSource (deliberately raised by LE).
     std::unordered_map<PipelineId, PipelinePtr> id_to_pipe;
     for (auto& p : _pipelines) {
         id_to_pipe[p->id()] = p;
     }
 
+    // Pass 1 (upward): raise downstream pipelines to _num_instances when any upstream
+    // dependency was already raised by LOCAL_EXCHANGE.
     bool changed = true;
     while (changed) {
         changed = false;
@@ -771,6 +773,61 @@ void PipelineFragmentContext::_propagate_local_exchange_num_tasks() {
                 auto uit = id_to_pipe.find(upstream_id);
                 if (uit != id_to_pipe.end() && uit->second->num_tasks() >= _num_instances) {
                     downstream->set_num_tasks(_num_instances);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Pass 2 (downward): when a pipeline-splitting operator (AGG, SORT, JOIN) creates
+    // paired pipelines (source + sink), they share state via inject_shared_state and must
+    // have consistent num_tasks.  If the sink pipeline has a serial source (Exchange) with
+    // num_tasks < _num_instances, but the source pipeline was raised (by inheriting from
+    // an LE-fixed parent during add_pipeline), lower the source pipeline to match.
+    // Skip pipelines containing LocalExchangeSource — they were deliberately raised.
+    //
+    // Example: serial Exchange → AGG(merge finalize) → LOCAL_EXCHANGE → NLJ
+    //   P_sink  = [Exchange, AGGSink]   num_tasks=1  (serial)
+    //   P_source = [AGGSource]          num_tasks=_num_instances (inherited)
+    //   → lower P_source to 1; the LE above fans out the 1 result to N NLJ tasks.
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& [downstream_id, upstream_ids] : _dag) {
+            auto dit = id_to_pipe.find(downstream_id);
+            if (dit == id_to_pipe.end()) {
+                continue;
+            }
+            auto& downstream = dit->second;
+            if (downstream->num_tasks() <= 1) {
+                continue;
+            }
+            // Don't lower pipelines that contain LocalExchangeSource — they were
+            // deliberately raised to _num_instances by LOCAL_EXCHANGE processing.
+            bool has_le_source = false;
+            for (auto& op : downstream->operators()) {
+                if (dynamic_cast<LocalExchangeSourceOperatorX*>(op.get())) {
+                    has_le_source = true;
+                    break;
+                }
+            }
+            if (has_le_source) {
+                continue;
+            }
+            for (auto upstream_id : upstream_ids) {
+                auto uit = id_to_pipe.find(upstream_id);
+                if (uit != id_to_pipe.end() &&
+                    uit->second->num_tasks() < downstream->num_tasks() &&
+                    !uit->second->operators().empty() &&
+                    uit->second->operators().front()->is_serial_operator()) {
+                    LOG(INFO) << "propagate pass2: lower pipeline " << downstream_id
+                             << " (" << downstream->debug_string() << ") from "
+                             << downstream->num_tasks() << " to "
+                             << uit->second->num_tasks()
+                             << " to match serial upstream " << upstream_id
+                             << " (" << uit->second->debug_string() << ")";
+                    downstream->set_num_tasks(uit->second->num_tasks());
                     changed = true;
                     break;
                 }

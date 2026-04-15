@@ -60,13 +60,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Consumer;
 
 /** DistributePlanner */
@@ -247,21 +245,12 @@ public class DistributePlanner {
         boolean useLocalShuffle = receiverPlan.getInstanceJobs().stream()
                 .anyMatch(LocalShuffleAssignedJob.class::isInstance);
         if (useLocalShuffle) {
+            // For BUCKET_SHUFFLE with local shuffle, each instance handles specific buckets.
+            // The exchange must route data to each instance individually, not just the first
+            // per worker. Otherwise instances 1..N-1 create ExchangeSource tasks that never
+            // receive data or EOS, causing a hang.
             if (linkNode.getPartitionType() == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
-                // When Exchange is serial on BE (1 task per worker), only instance 0
-                // creates VDataStreamRecvr. Data sent to other instances is silently
-                // dropped (EOF). Route all data to the first instance per worker;
-                // the FE-planned local exchange (BUCKET_HASH_SHUFFLE) redistributes
-                // locally to the correct join build tasks.
-                // When Exchange is non-serial, each instance has its own Exchange task,
-                // so route specific bucket data to each instance directly.
-                PlanFragment receiverFragment = receiverPlan.getFragmentJob().getFragment();
-                boolean exchangeWillBeSerial = (linkNode.isSerialOperator()
-                        || receiverFragment.hasSerialScanNode())
-                        && receiverFragment.useSerialSource(ConnectContext.get());
-                if (!exchangeWillBeSerial) {
-                    return receiverPlan.getInstanceJobs();
-                }
+                return receiverPlan.getInstanceJobs();
             }
             return getFirstInstancePerWorker(receiverPlan.getInstanceJobs());
         } else if (enableShareHashTableForBroadcastJoin && linkNode.isRightChildOfBroadcastHashJoin()) {
@@ -273,20 +262,15 @@ public class DistributePlanner {
 
     private List<AssignedJob> sortDestinationInstancesByBuckets(
             PipelineDistributedPlan plan, List<AssignedJob> unsorted, int bucketNum) {
-        // Detect first-instance-per-worker mode: if each worker appears at most once,
-        // we must use scan-level buckets (all buckets on that worker) instead of
-        // join-level buckets (only this instance's assigned subset).
-        boolean firstPerWorkerOnly = isFirstPerWorkerOnly(unsorted);
-
         AssignedJob[] instances = new AssignedJob[bucketNum];
         for (AssignedJob instanceJob : unsorted) {
-            // When multiple instances per worker (non-serial exchange), use
-            // assignedJoinBucketIndexes to avoid collisions — each instance handles
-            // only its specific join buckets.
-            // When first-per-worker (serial exchange), use scan-level buckets so
-            // all buckets on the worker map to this single receiver instance.
+            // For LocalShuffleBucketJoinAssignedJob, use assignedJoinBucketIndexes which
+            // gives the specific join bucket(s) this instance handles. The scanSource
+            // buckets include ALL buckets on this worker (shared via pooling scan),
+            // which would cause collisions when multiple instances on the same worker
+            // each handle different join buckets.
             Iterable<Integer> bucketIndices;
-            if (instanceJob instanceof LocalShuffleBucketJoinAssignedJob && !firstPerWorkerOnly) {
+            if (instanceJob instanceof LocalShuffleBucketJoinAssignedJob) {
                 bucketIndices = ((LocalShuffleBucketJoinAssignedJob) instanceJob)
                         .getAssignedJoinBucketIndexes();
             } else {
@@ -315,16 +299,6 @@ public class DistributePlanner {
             }
         }
         return Arrays.asList(instances);
-    }
-
-    private boolean isFirstPerWorkerOnly(List<AssignedJob> instances) {
-        Set<DistributedPlanWorker> seen = new HashSet<>();
-        for (AssignedJob instance : instances) {
-            if (!seen.add(instance.getAssignedWorker())) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private List<AssignedJob> getFirstInstancePerWorker(List<AssignedJob> instances) {
