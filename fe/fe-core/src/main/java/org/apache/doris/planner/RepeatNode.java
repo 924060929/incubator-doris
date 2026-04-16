@@ -90,8 +90,8 @@ public class RepeatNode extends PlanNode {
 
     // Determined by its child.
     @Override
-    public boolean isSerialOperator() {
-        return children.get(0).isSerialOperator();
+    public boolean isSerialNode() {
+        return children.get(0).isSerialNode();
     }
 
     public GroupingInfo getGroupingInfo() {

@@ -705,7 +705,7 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
     }
 
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         ConnectContext context = ConnectContext.get();
         if (context == null) {
             return numScanBackends() <= 0;
@@ -719,7 +719,7 @@ public abstract class ScanNode extends PlanNode implements SplitGenerator {
 
     @Override
     public boolean hasSerialScanChildren() {
-        return isSerialOperator();
+        return isSerialNode();
     }
 
     @Override

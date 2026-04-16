@@ -245,7 +245,7 @@ public class AggregationNode extends PlanNode {
 
     // If `GroupingExprs` is empty and agg need to finalize, the result must be output by single instance
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return aggInfo.getGroupingExprs().isEmpty() && needsFinalize;
     }
 
@@ -297,11 +297,8 @@ public class AggregationNode extends PlanNode {
             if (children.get(0) instanceof HashJoinNode
                     && sessionVariable.enableStreamingAggHashJoinForcePassthrough) {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
-            } else if (fragment != null && fragment.useSerialSource(connectContext)
-                    && children.get(0).isSerialOperator()) {
+            } else if (children.get(0).isSerialOperatorOnBe(connectContext)) {
                 // BE: _child->is_serial_operator() ? PASSTHROUGH : NOOP
-                // useSerialSource gate needed: ScanNode.isSerialOperator() can be true in
-                // non-pooling mode (scanRanges < pptn) but isn't serial on BE without useSerialSource.
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
@@ -314,8 +311,7 @@ public class AggregationNode extends PlanNode {
                     requireChild = LocalExchangeTypeRequire.noRequire();
                 } else {
                     // Serialize agg, no group key: BE → _child->is_serial_operator() ? PT : NOOP
-                    if (fragment != null && fragment.useSerialSource(connectContext)
-                            && children.get(0).isSerialOperator()) {
+                    if (children.get(0).isSerialOperatorOnBe(connectContext)) {
                         requireChild = LocalExchangeTypeRequire.requirePassthrough();
                     } else {
                         requireChild = LocalExchangeTypeRequire.noRequire();

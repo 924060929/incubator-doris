@@ -230,7 +230,7 @@ public class MaterializationNode extends PlanNode {
     }
 
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return true;
     }
 

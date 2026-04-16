@@ -157,7 +157,7 @@ public class AnalyticEvalNode extends PlanNode {
      * all data should be input in this node to ensure the global ordering by colB.
      */
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return partitionExprs.isEmpty();
     }
 
@@ -201,10 +201,8 @@ public class AnalyticEvalNode extends PlanNode {
                 requireChild = LocalExchangeTypeRequire.noRequire();
                 outputType = LocalExchangeType.NOOP;
             }
-        } else if (fragment.useSerialSource(translatorContext.getConnectContext())
-                && children.get(0).isSerialOperator()) {
+        } else if (children.get(0).isSerialOperatorOnBe(translatorContext.getConnectContext())) {
             // BE base class: _child->is_serial_operator() ? PASSTHROUGH : NOOP
-            // useSerialSource gate: ScanNode.isSerialOperator() can be true in non-pooling mode
             requireChild = LocalExchangeTypeRequire.requirePassthrough();
             outputType = LocalExchangeType.PASSTHROUGH;
         } else {

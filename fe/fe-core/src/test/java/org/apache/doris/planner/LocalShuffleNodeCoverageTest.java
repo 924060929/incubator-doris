@@ -145,7 +145,7 @@ public class LocalShuffleNodeCoverageTest {
         TupleDescriptor tupleDescriptor = new TupleDescriptor(new TupleId(NEXT_ID.getAndIncrement()));
         TestMaterializationNode node = new TestMaterializationNode(nextPlanNodeId(), tupleDescriptor, childNoop);
 
-        // MaterializationNode.isSerialOperator() returns true → enforceChild skips exchange.
+        // MaterializationNode.isSerialNode() returns true → enforceChild skips exchange.
         // Output is still PASSTHROUGH (hardcoded in MaterializationNode).
         Pair<PlanNode, LocalExchangeType> output = node.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
@@ -390,7 +390,7 @@ public class LocalShuffleNodeCoverageTest {
         Mockito.when(assertElement.getAssertion()).thenReturn(AssertNumRowsElement.Assertion.EQ);
         AssertNumRowsNode assertNode = new AssertNumRowsNode(nextPlanNodeId(), assertChild,
                 assertElement, new TupleDescriptor(new TupleId(NEXT_ID.getAndIncrement())));
-        // AssertNumRowsNode.isSerialOperator()=true → enforceChild skips exchange.
+        // AssertNumRowsNode.isSerialNode()=true → enforceChild skips exchange.
         Pair<PlanNode, LocalExchangeType> assertOutput = assertNode.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
         Assertions.assertEquals(LocalExchangeType.PASSTHROUGH, assertOutput.second);
@@ -410,7 +410,7 @@ public class LocalShuffleNodeCoverageTest {
         Assertions.assertEquals(LocalExchangeType.PASSTHROUGH, mergeOutput.second);
         assertChildLocalExchangeType(mergeSort, 0, LocalExchangeType.PASSTHROUGH);
 
-        // Non-merge, non-analytic SortNode: isSerialOperator()=true → enforceChild skips exchange.
+        // Non-merge, non-analytic SortNode: isSerialNode()=true → enforceChild skips exchange.
         // Output is still PASSTHROUGH (hardcoded for useSerialSource + ScanNode child).
         SerialTrackingScanNode serialScan = new SerialTrackingScanNode(nextPlanNodeId(), LocalExchangeType.NOOP);
         SortNode scanSort = new SortNode(nextPlanNodeId(), serialScan, sortInfo, false);
@@ -418,7 +418,7 @@ public class LocalShuffleNodeCoverageTest {
         Mockito.when(scanSort.fragment.useSerialSource(Mockito.any())).thenReturn(true);
         Pair<PlanNode, LocalExchangeType> scanOutput = scanSort.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.noRequire());
-        // Non-merge, non-analytic SortNode: isSerialOperator()=true, requireChild=noRequire,
+        // Non-merge, non-analytic SortNode: isSerialNode()=true, requireChild=noRequire,
         // outputType=NOOP. enforceRequire shouldSkipLE skips because Sort itself is serial.
         Assertions.assertEquals(LocalExchangeType.NOOP, scanOutput.second);
         // SortNode is serial → enforceRequire skips exchange → child unchanged.
@@ -435,7 +435,7 @@ public class LocalShuffleNodeCoverageTest {
         analyticChild.fragment = Mockito.mock(PlanFragment.class);
         Mockito.when(analyticChild.fragment.useSerialSource(Mockito.any())).thenReturn(false);
         SortNode analyticSort = new SortNode(nextPlanNodeId(), analyticChild, sortInfo, false);
-        analyticSort.setIsAnalyticSort(true);  // Must set for isSerialOperator() to return false
+        analyticSort.setIsAnalyticSort(true);  // Must set for isSerialNode() to return false
         Pair<PlanNode, LocalExchangeType> analyticOutput = analyticSort.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
         Assertions.assertEquals(LocalExchangeType.LOCAL_EXECUTION_HASH_SHUFFLE, analyticOutput.second);
@@ -464,7 +464,7 @@ public class LocalShuffleNodeCoverageTest {
         AnalyticEvalNode noPartition = new AnalyticEvalNode(nextPlanNodeId(), noPartitionChild,
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 null, new TupleDescriptor(new TupleId(NEXT_ID.getAndIncrement())));
-        // No partition → isSerialOperator()=true → enforceChild skips exchange.
+        // No partition → isSerialNode()=true → enforceChild skips exchange.
         // Output is still PASSTHROUGH (hardcoded for empty partitions).
         Pair<PlanNode, LocalExchangeType> noPartitionOutput = noPartition.enforceAndDeriveLocalExchange(
                 ctx, null, LocalExchangeTypeRequire.requireHash());
@@ -574,7 +574,7 @@ public class LocalShuffleNodeCoverageTest {
         }
 
         @Override
-        public boolean isSerialOperator() {
+        public boolean isSerialNode() {
             return true;
         }
     }
@@ -620,7 +620,7 @@ public class LocalShuffleNodeCoverageTest {
         }
 
         @Override
-        public boolean isSerialOperator() {
+        public boolean isSerialNode() {
             return true;
         }
     }

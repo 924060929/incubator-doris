@@ -71,7 +71,7 @@ public class RecursiveCteScanNode extends PlanNode {
     }
 
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return true;
     }
 

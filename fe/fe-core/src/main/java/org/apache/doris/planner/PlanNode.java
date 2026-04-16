@@ -472,7 +472,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         TPlanNode msg = new TPlanNode();
         msg.node_id = id.asInt();
         msg.setNereidsId(nereidsId);
-        msg.setIsSerialOperator(isSerialOperator() && fragment.useSerialSource(ConnectContext.get()));
+        msg.setIsSerialOperator(isSerialOperatorOnBe(ConnectContext.get()));
         msg.num_children = children.size();
         msg.limit = limit;
         for (TupleId tid : tupleIds) {
@@ -830,13 +830,20 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     }
 
     // Operators need to be executed serially. (e.g. finalized agg without key)
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return false;
+    }
+
+    // Whether this node will have is_serial_operator=true on BE.
+    // Must match the condition in toThrift()/treeToThriftHelper().
+    // Subclasses (ExchangeNode) override to add hasSerialScanNode().
+    public boolean isSerialOperatorOnBe(ConnectContext context) {
+        return fragment != null && isSerialNode() && fragment.useSerialSource(context);
     }
 
     public boolean hasSerialChildren() {
         if (children.isEmpty()) {
-            return isSerialOperator();
+            return isSerialNode();
         }
         return children.stream().allMatch(PlanNode::hasSerialChildren);
     }
@@ -978,7 +985,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
             LocalExchangeTypeRequire require) {
         // 1. Propagate serial-ancestor flag to child
         boolean childHasSerialAncestor = shouldResetSerialFlagForChild(childIndex)
-                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator();
+                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialNode();
         translatorContext.setHasSerialAncestorInPipeline(child, childHasSerialAncestor);
 
         // 2. Recurse child (Layer 2: child declares its own require/output)
@@ -992,7 +999,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
 
         // 4. Layer 1: skip LE when serial operator or ancestor in same pipeline
         // Equivalent to BE's need_to_local_exchange: any_of(operators[idx..end], is_serial) → skip
-        if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator()) {
+        if (translatorContext.hasSerialAncestorInPipeline(this) || isSerialNode()) {
             return childOutput;
         }
 
@@ -1017,7 +1024,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     protected PlanNode createLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode child, LocalExchangeType exchangeType, List<Expr> distributeExprs) {
         if (translatorContext.isLocalShuffleFragment()
-                && exchangeType.isHeavyOperation() && child.isSerialOperator()) {
+                && exchangeType.isHeavyOperation() && child.isSerialNode()) {
             PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
                     child, LocalExchangeType.PASSTHROUGH, null);
             return new LocalExchangeNode(translatorContext.nextPlanNodeId(), ptNode,

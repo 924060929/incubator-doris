@@ -307,13 +307,10 @@ public class HashJoinNode extends JoinNodeBase {
             outputType = LocalExchangeType.NOOP;
         } else if (distrMode == DistributionMode.BROADCAST) {
             // BE: _child->is_serial_operator() ? PASSTHROUGH/PASS_TO_ONE : NOOP
-            // useSerialSource gate: ScanNode.isSerialOperator() can be true in non-pooling
-            // (scanRanges < pptn) but isn't serial on BE. ExchangeNode.isSerialOperator()
-            // already includes useSerialSource, so the gate is harmless for Exchange children.
-            boolean useSerialSource = fragment != null
-                    && fragment.useSerialSource(translatorContext.getConnectContext());
-            boolean probeChildSerial = useSerialSource && children.get(0).isSerialOperator();
-            boolean buildChildSerial = useSerialSource && children.get(1).isSerialOperator();
+            boolean probeChildSerial = children.get(0).isSerialOperatorOnBe(
+                    translatorContext.getConnectContext());
+            boolean buildChildSerial = children.get(1).isSerialOperatorOnBe(
+                    translatorContext.getConnectContext());
             probeSideRequire = probeChildSerial
                     ? LocalExchangeTypeRequire.requirePassthrough()
                     : LocalExchangeTypeRequire.noRequire();

@@ -84,12 +84,42 @@ public class AddLocalExchange {
         // after enforceAndDeriveLocalExchange(), any serial children deeper in the tree
         // are already handled by LocalExchangeNodes inserted during the tree walk.
         // Those LocalExchangeNodes create pipeline boundaries with _num_instances tasks.
-        if (isLocalShuffle && newRoot.isSerialOperator()) {
+        if (isLocalShuffle && newRoot.isSerialNode()) {
             newRoot = new LocalExchangeNode(context.nextPlanNodeId(), newRoot,
                     LocalExchangeType.PASSTHROUGH, null);
         }
         if (newRoot != root) {
             fragment.setPlanRoot(newRoot);
+        }
+        if (isLocalShuffle) {
+            validateNoSerialWithoutLocalExchange(fragment.getPlanRoot(), context.getConnectContext());
+        }
+    }
+
+    /**
+     * In a local-shuffle fragment, the root check above guarantees the root pipeline
+     * has N tasks. Any serial operator reduces its pipeline to 1 task. If this serial
+     * operator feeds into a non-serial parent without LocalExchangeNode in between,
+     * some pipelines have 1 task while others have N → shared_state mismatch, data loss.
+     *
+     * Serial→serial chains are fine (all at 1 task, consistent). Only the transition
+     * from serial to non-serial needs LE to restore parallelism.
+     */
+    private void validateNoSerialWithoutLocalExchange(PlanNode node,
+            org.apache.doris.qe.ConnectContext context) {
+        for (PlanNode child : node.getChildren()) {
+            validateNoSerialWithoutLocalExchange(child, context);
+            if (child.isSerialOperatorOnBe(context)
+                    && !(child instanceof LocalExchangeNode)
+                    && !(node instanceof LocalExchangeNode)
+                    && !node.isSerialOperatorOnBe(context)) {
+                throw new RuntimeException(
+                        "Serial " + child.getClass().getSimpleName() + "(id=" + child.getId()
+                        + ") feeds into non-serial " + node.getClass().getSimpleName()
+                        + "(id=" + node.getId() + ") without LocalExchangeNode"
+                        + " in fragment " + node.getFragment().getFragmentId()
+                        + ". FE should insert LocalExchangeNode to restore parallelism.");
+            }
         }
     }
 

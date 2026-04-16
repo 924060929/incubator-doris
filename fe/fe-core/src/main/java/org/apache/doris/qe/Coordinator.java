@@ -2868,7 +2868,7 @@ public class Coordinator implements CoordInterface {
                             Optional<ScanNode> node = scanNodes.stream().filter(
                                     scanNode -> scanNode.getId().asInt() == scanId).findFirst();
                             Preconditions.checkArgument(node.isPresent());
-                            FInstanceExecParam instanceParamToScan = node.get().isSerialOperator()
+                            FInstanceExecParam instanceParamToScan = node.get().isSerialNode()
                                     ? firstInstanceParam : instanceParam;
                             if (!instanceParamToScan.perNodeScanRanges.containsKey(nodeScanRange.getKey())) {
                                 range.put(nodeScanRange.getKey(), Lists.newArrayList());

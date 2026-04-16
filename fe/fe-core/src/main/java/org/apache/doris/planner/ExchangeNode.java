@@ -102,12 +102,8 @@ public class ExchangeNode extends PlanNode {
 
     @Override
     protected void toThrift(TPlanNode msg) {
-        // BE local shuffle only supports two modes: 1 instance or all instances receiving data.
-        // hasSerialScanNode() ensures Exchange is serial when sibling scan is pooling,
-        // avoiding a middle-ground where some but not all instances receive data
-        // (EOS count mismatch → hang).
-        msg.setIsSerialOperator((isSerialOperator() || fragment.hasSerialScanNode())
-                && fragment.useSerialSource(ConnectContext.get()));
+        // Reuse isSerialOperatorOnBe() — single source of truth for BE serial condition.
+        msg.setIsSerialOperator(isSerialOperatorOnBe(ConnectContext.get()));
         msg.node_type = TPlanNodeType.EXCHANGE_NODE;
         msg.exchange_node = new TExchangeNode();
         for (TupleId tid : tupleIds) {
@@ -158,14 +154,21 @@ public class ExchangeNode extends PlanNode {
      * So FRAGMENT 0 should not use serial source.
      */
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().isUseSerialExchange()
                 || partitionType == TPartitionType.UNPARTITIONED) && mergeInfo != null;
     }
 
     @Override
+    public boolean isSerialOperatorOnBe(ConnectContext context) {
+        return fragment != null
+                && (isSerialNode() || fragment.hasSerialScanNode())
+                && fragment.useSerialSource(context);
+    }
+
+    @Override
     public boolean hasSerialChildren() {
-        return isSerialOperator();
+        return isSerialNode();
     }
 
     @Override
@@ -176,17 +179,12 @@ public class ExchangeNode extends PlanNode {
     @Override
     public Pair<PlanNode, LocalExchangeType> enforceAndDeriveLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode parent, LocalExchangeTypeRequire parentRequire) {
-        // Must match the BE serial condition in toThrift(): isSerialOperator() && useSerialSource().
+        // Must match the BE serial condition in toThrift(): isSerialNode() && useSerialSource().
         // Only insert PASSTHROUGH when the exchange will actually be serial on the BE.
         // Without useSerialSource() check, we'd insert PASSTHROUGH in non-pooling fragments
         // where the exchange has N tasks, corrupting broadcast join data distribution
-        // (PASSTHROUGH round-robin splits complete-dataset sinks into 1/N subsets per source).
-        // Must match toThrift: include hasSerialScanNode() — when sibling scan is pooling,
-        // Exchange becomes serial on BE even if Exchange itself isn't inherently serial.
-        boolean willBeSerialOnBe = fragment != null
-                && (isSerialOperator() || fragment.hasSerialScanNode())
-                && fragment.useSerialSource(ConnectContext.get());
-        if (willBeSerialOnBe) {
+        // Use the unified isSerialOperatorOnBe() which matches toThrift serial condition.
+        if (isSerialOperatorOnBe(ConnectContext.get())) {
             // If there is already a serial ancestor in the same pipeline (e.g., serial NLJ
             // for RIGHT_OUTER/FULL_OUTER join), don't insert any local exchange. The serial
             // ancestor already constrains the pipeline to 1 task. Inserting a PASSTHROUGH LE

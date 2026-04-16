@@ -170,7 +170,7 @@ public class NestedLoopJoinNode extends JoinNodeBase {
      * Probe-side must have full data so join is a serial operator.
      */
     @Override
-    public boolean isSerialOperator() {
+    public boolean isSerialNode() {
         return joinOp == JoinOperator.RIGHT_OUTER_JOIN || joinOp == JoinOperator.RIGHT_ANTI_JOIN
                 || joinOp == JoinOperator.RIGHT_SEMI_JOIN || joinOp == JoinOperator.FULL_OUTER_JOIN;
     }
@@ -189,7 +189,7 @@ public class NestedLoopJoinNode extends JoinNodeBase {
         if (joinOp == JoinOperator.NULL_AWARE_LEFT_ANTI_JOIN) {
             probeSideRequire = buildSideRequire = LocalExchangeTypeRequire.noRequire();
             outputType = LocalExchangeType.NOOP;
-        } else if (isSerialOperator()) {
+        } else if (isSerialNode()) {
             // RIGHT_OUTER/RIGHT_SEMI/RIGHT_ANTI/FULL_OUTER: probe side must be serial (1 task).
             // Build side: noRequire() — inserting BROADCAST would inflate build pipeline's
             // num_tasks while probe stays at 1, crashing in set_ready_to_read().
@@ -212,7 +212,7 @@ public class NestedLoopJoinNode extends JoinNodeBase {
         // Manually propagate serial flag + recurse + force-insert (no enforceRequire —
         // enforceRequire would skip insertion when child already satisfies the requirement).
         boolean probeChildHasSerialAncestor = shouldResetSerialFlagForChild(0)
-                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialOperator();
+                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialNode();
         translatorContext.setHasSerialAncestorInPipeline(children.get(0), probeChildHasSerialAncestor);
         Pair<PlanNode, LocalExchangeType> probeChildOutput = children.get(0)
                 .enforceAndDeriveLocalExchange(translatorContext, this, probeSideRequire);
@@ -243,6 +243,6 @@ public class NestedLoopJoinNode extends JoinNodeBase {
         // _num_instances), creating more build tasks than probe tasks.  The
         // extra build tasks have a NLJ shared state with empty source_deps,
         // crashing in set_ready_to_read().
-        return childIndex == 1 && !isSerialOperator();
+        return childIndex == 1 && !isSerialNode();
     }
 }
