@@ -734,6 +734,9 @@ Status PipelineFragmentContext::_create_deferred_local_exchangers() {
 }
 
 void PipelineFragmentContext::_propagate_local_exchange_num_tasks() {
+    if (_deferred_exchangers.empty()) {
+        return;
+    }
     // Fix num_tasks mismatches between paired pipelines created by pipeline-splitting
     // operators (AGG, SORT, JOIN).  These pairs share state via inject_shared_state and
     // must have consistent num_tasks; otherwise instance 1+ tasks access null shared_state.
