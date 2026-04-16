@@ -821,12 +821,6 @@ void PipelineFragmentContext::_propagate_local_exchange_num_tasks() {
                     uit->second->num_tasks() < downstream->num_tasks() &&
                     !uit->second->operators().empty() &&
                     uit->second->operators().front()->is_serial_operator()) {
-                    LOG(INFO) << "propagate pass2: lower pipeline " << downstream_id
-                             << " (" << downstream->debug_string() << ") from "
-                             << downstream->num_tasks() << " to "
-                             << uit->second->num_tasks()
-                             << " to match serial upstream " << upstream_id
-                             << " (" << uit->second->debug_string() << ")";
                     downstream->set_num_tasks(uit->second->num_tasks());
                     changed = true;
                     break;

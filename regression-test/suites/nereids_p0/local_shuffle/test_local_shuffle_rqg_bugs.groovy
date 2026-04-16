@@ -1221,5 +1221,120 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 21: Multi-distinct COUNT COREDUMP: ${t.message}")
     }
 
+    // ============================================================
+    //  Bug 22: AGG/SORT above FE-planned LOCAL_EXCHANGE → COREDUMP
+    //  (set_ready_to_read DCHECK failure with empty source_deps)
+    //
+    //  Root cause: when FE inserts LOCAL_EXCHANGE_NODE below a pipeline-
+    //  splitting operator (AGG, SORT), LOCAL_EXCHANGE restores its immediate
+    //  pipeline to _num_instances tasks, but ancestor pipelines (e.g.,
+    //  AggSource) still carry the reduced num_tasks from the serial operator.
+    //  This causes instance 1+ to create AggSink tasks but not AggSource
+    //  tasks, leaving source_deps uninitialized → DCHECK in set_ready_to_read.
+    //
+    //  Fix: _propagate_local_exchange_num_tasks() walks the DAG upward from
+    //  LOCAL_EXCHANGE and raises ancestor pipeline num_tasks to _num_instances.
+    // ============================================================
+    try {
+        logger.info("Bug 22: Testing AGG/SORT above LOCAL_EXCHANGE num_tasks propagation")
+        for (int ppt : [4, 6]) {
+            // 22a: Simple AGG with GROUP BY over pooling scan
+            def bug22a_baseline = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    col_int_undef_signed, COUNT(*), SUM(col_int_undef_signed2)
+                FROM rqg_t1
+                GROUP BY col_int_undef_signed
+                ORDER BY 1
+            """
+            def bug22a_result = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    col_int_undef_signed, COUNT(*), SUM(col_int_undef_signed2)
+                FROM rqg_t1
+                GROUP BY col_int_undef_signed
+                ORDER BY 1
+            """
+            assertEquals(bug22a_baseline, bug22a_result,
+                "Bug 22a pptn=${ppt}: AGG GROUP BY result mismatch (was COREDUMP)")
+
+            // 22b: SORT + AGG (two pipeline splits above LOCAL_EXCHANGE)
+            def bug22b_baseline = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    col_int_undef_signed, COUNT(*) AS cnt
+                FROM rqg_t1
+                GROUP BY col_int_undef_signed
+                ORDER BY cnt DESC, col_int_undef_signed
+            """
+            def bug22b_result = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    col_int_undef_signed, COUNT(*) AS cnt
+                FROM rqg_t1
+                GROUP BY col_int_undef_signed
+                ORDER BY cnt DESC, col_int_undef_signed
+            """
+            assertEquals(bug22b_baseline, bug22b_result,
+                "Bug 22b pptn=${ppt}: SORT+AGG result mismatch (was COREDUMP)")
+
+            // 22c: JOIN + AGG (join probe pipeline also needs num_tasks propagation)
+            def bug22c_baseline = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    t1.col_int_undef_signed, COUNT(*)
+                FROM rqg_t1 t1 JOIN rqg_t2 t2 ON t1.pk = t2.pk
+                GROUP BY t1.col_int_undef_signed
+                ORDER BY 1
+            """
+            def bug22c_result = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    t1.col_int_undef_signed, COUNT(*)
+                FROM rqg_t1 t1 JOIN rqg_t2 t2 ON t1.pk = t2.pk
+                GROUP BY t1.col_int_undef_signed
+                ORDER BY 1
+            """
+            assertEquals(bug22c_baseline, bug22c_result,
+                "Bug 22c pptn=${ppt}: JOIN+AGG result mismatch (was COREDUMP)")
+
+            // 22d: AGG without GROUP BY (scalar agg, PASS_TO_ONE exchange)
+            def bug22d_baseline = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    COUNT(*), SUM(col_int_undef_signed), AVG(col_int_undef_signed2)
+                FROM rqg_t1
+            """
+            def bug22d_result = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=true,
+                                  parallel_pipeline_task_num=${ppt},
+                                  ignore_storage_data_distribution=true,
+                                  enable_sql_cache=false)*/
+                    COUNT(*), SUM(col_int_undef_signed), AVG(col_int_undef_signed2)
+                FROM rqg_t1
+            """
+            assertEquals(bug22d_baseline, bug22d_result,
+                "Bug 22d pptn=${ppt}: scalar AGG result mismatch")
+        }
+        logger.info("Bug 22: PASSED (no crash, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 22 FAILED: ${t.message}")
+        assertTrue(false, "Bug 22: AGG/SORT num_tasks propagation: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }
