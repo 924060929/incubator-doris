@@ -4624,6 +4624,10 @@ public class SessionVariable implements Serializable, Writable {
         this.enableLocalShuffle = enableLocalShuffle;
     }
 
+    public boolean isEnableLocalShuffle() {
+        return enableLocalShuffle;
+    }
+
     public boolean isEnableLocalShufflePlanner() {
         return enableLocalShufflePlanner;
     }

@@ -307,8 +307,11 @@ private:
 
     std::mutex _state_map_lock;
 
-    int _operator_id = 0;
-    int _sink_operator_id = 0;
+    // Start from -1 so all operator IDs are negative. This avoids collision with
+    // unpaired sinks (OlapTableSink etc.) whose hardcoded dest_id=0 would otherwise
+    // match the first operator's ID when FE-planned LocalExchangeNode is the root.
+    int _operator_id = -1;
+    int _sink_operator_id = -1;
     /**
      * Some states are shared by tasks in different pipeline task (e.g. local exchange , broadcast join).
      *

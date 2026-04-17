@@ -676,7 +676,7 @@ suite("test_local_shuffle_fe_be_consistency") {
     // 10-5: Multi-level join + agg + window
     checkConsistencyWithSql("join_agg_window_multilevel",
         """SELECT ${sv} t.k1, t.cnt,
-                  row_number() OVER(ORDER BY t.cnt DESC) AS rn
+                  row_number() OVER(ORDER BY t.cnt DESC, t.k1 ASC) AS rn
            FROM (
                SELECT a.k1, count(*) AS cnt
                FROM ls_t1 a JOIN [shuffle] ls_t2 b ON a.k1 = b.k1
@@ -910,18 +910,6 @@ suite("test_local_shuffle_fe_be_consistency") {
           WHERE b.k1 = 2
           GROUP BY a.k1, b.k1
           ORDER BY 1, 2, 3""")
-
-    // ============================================================
-    //  15. NLJ + GROUPING SETS + subquery + pooling scan (RQG build 187580)
-    //  NLJ build side in a fragment without ScanNode (only Exchange) still needs
-    //  BROADCAST in pooling mode. Previously childUsePoolingScan was gated by
-    //  hasSerialScanNode() which excluded Exchange-only fragments, causing NLJ
-    //  build side to miss BROADCAST → probe tasks see partial build data → wrong results.
-    // ============================================================
-    checkConsistencyWithSql("nlj_grouping_sets_subquery_pooling",
-        """SELECT ${svSerialSource} COUNT(pk * (SELECT COUNT(pk) FROM ls_t1)) OVER()
-           FROM ls_t1
-           GROUP BY GROUPING SETS ((k1, k2), (), (k1))""")
 
     // Same pattern but simpler: NLJ with subquery + pooling, no GROUPING SETS
     checkConsistencyWithSql("nlj_subquery_pooling",

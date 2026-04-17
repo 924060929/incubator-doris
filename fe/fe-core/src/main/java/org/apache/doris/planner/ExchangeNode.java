@@ -203,9 +203,11 @@ public class ExchangeNode extends PlanNode {
             // pipeline num_tasks to 1, matching BE-native behavior. Inserting LE in
             // non-pooling fragments creates a pipeline split where downstream has
             // _num_instances tasks but only 1 sender, causing shared-state mismatch.
+            boolean useSerial = fragment != null
+                    && fragment.useSerialSource(translatorContext.getConnectContext());
             if (partitionType == TPartitionType.HASH_PARTITIONED
                     || partitionType == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED) {
-                if (translatorContext.isLocalShuffleFragment()) {
+                if (useSerial) {
                     return Pair.of(this, LocalExchangeType.NOOP);
                 }
                 LocalExchangeType outputType = partitionType == TPartitionType.HASH_PARTITIONED
@@ -213,11 +215,9 @@ public class ExchangeNode extends PlanNode {
                         : LocalExchangeType.BUCKET_HASH_SHUFFLE;
                 return Pair.of(this, outputType);
             }
-            // For UNPARTITIONED (broadcast): in pooling fragments, PASSTHROUGH fan-out is
-            // needed because the exchange has 1 task but downstream needs N tasks.
-            // In non-pooling fragments, don't insert PASSTHROUGH — BE-native handles
-            // this via _plan_local_exchange which checks serial operators in the pipeline.
-            if (translatorContext.isLocalShuffleFragment()) {
+            // For UNPARTITIONED (broadcast): PASSTHROUGH fan-out is needed because
+            // the exchange has 1 task but downstream needs N tasks.
+            if (useSerial) {
                 PlanNode pt = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
                         this, LocalExchangeType.PASSTHROUGH, null);
                 return Pair.of(pt, LocalExchangeType.PASSTHROUGH);

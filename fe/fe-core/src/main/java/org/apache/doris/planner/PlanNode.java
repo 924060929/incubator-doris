@@ -992,7 +992,18 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
         Pair<PlanNode, LocalExchangeType> childOutput =
                 child.enforceAndDeriveLocalExchange(translatorContext, this, require);
 
-        // 3. Satisfy check: child output meets requirement → done
+        // 3. Framework-level serial child check (mirrors BE base class required_data_distribution):
+        //    If child will be serial on BE but this node is not serial, the pipeline has a
+        //    1-task serial child feeding an N-task non-serial parent. Without LE, pipeline
+        //    splits (AGG/JOIN) create paired pipelines with mismatched num_tasks → crash.
+        //    Upgrade noRequire to requirePassthrough so LE is inserted to restore parallelism.
+        if (require instanceof LocalExchangeNode.NoRequire
+                && childOutput.first.isSerialOperatorOnBe(translatorContext.getConnectContext())
+                && !isSerialOperatorOnBe(translatorContext.getConnectContext())) {
+            require = LocalExchangeTypeRequire.requirePassthrough();
+        }
+
+        // 4. Satisfy check: child output meets requirement → done
         if (require.satisfy(childOutput.second)) {
             return childOutput;
         }
@@ -1023,7 +1034,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
      */
     protected PlanNode createLocalExchange(PlanTranslatorContext translatorContext,
             PlanNode child, LocalExchangeType exchangeType, List<Expr> distributeExprs) {
-        if (translatorContext.isLocalShuffleFragment()
+        if (fragment != null && fragment.useSerialSource(translatorContext.getConnectContext())
                 && exchangeType.isHeavyOperation() && child.isSerialNode()) {
             PlanNode ptNode = new LocalExchangeNode(translatorContext.nextPlanNodeId(),
                     child, LocalExchangeType.PASSTHROUGH, null);

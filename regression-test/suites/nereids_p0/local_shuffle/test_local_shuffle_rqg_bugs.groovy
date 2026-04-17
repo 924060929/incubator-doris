@@ -1336,5 +1336,47 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 22: AGG/SORT num_tasks propagation: ${t.message}")
     }
 
+    // ==================== Bug 23 ====================
+    // canUseDistinctStreamingAgg + GROUPING SETS + serial scan → missing LE
+    // When enable_distinct_streaming_aggregation=true, AggregationNode's
+    // canUseDistinctStreamingAgg path set requireChild=noRequire() without
+    // checking child serial status → serial RepeatNode feeds directly into
+    // non-serial AggregationNode → shared_state mismatch on multi-BE.
+    // Fix: add isSerialOperatorOnBe check in the noRequire branch.
+    try {
+        for (def pptn : [2, 4]) {
+            def bug23_baseline = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=false,
+                                   parallel_pipeline_task_num=${pptn},
+                                   ignore_storage_data_distribution=true,
+                                   enable_sql_cache=false,
+                                   disable_streaming_preaggregations=false,
+                                   enable_distinct_streaming_aggregation=true)*/
+                    col_int_undef_signed, count(*)
+                FROM rqg_t1
+                GROUP BY GROUPING SETS ((col_int_undef_signed), (pk), ())
+                ORDER BY 1, 2
+            """
+            def bug23_result = sql """
+                SELECT /*+SET_VAR(enable_local_shuffle_planner=true,
+                                   parallel_pipeline_task_num=${pptn},
+                                   ignore_storage_data_distribution=true,
+                                   enable_sql_cache=false,
+                                   disable_streaming_preaggregations=false,
+                                   enable_distinct_streaming_aggregation=true)*/
+                    col_int_undef_signed, count(*)
+                FROM rqg_t1
+                GROUP BY GROUPING SETS ((col_int_undef_signed), (pk), ())
+                ORDER BY 1, 2
+            """
+            assertEquals(bug23_baseline, bug23_result,
+                "Bug 23 pptn=${pptn}: GROUPING SETS + distinct streaming agg result mismatch")
+        }
+        logger.info("Bug 23: PASSED (no crash, correct results)")
+    } catch (Throwable t) {
+        logger.error("Bug 23 FAILED: ${t.message}")
+        assertTrue(false, "Bug 23: canUseDistinctStreamingAgg + GROUPING SETS: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }

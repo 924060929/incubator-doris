@@ -714,7 +714,7 @@ public class NereidsPlanner extends Planner {
         doDistribute(canUseNereidsDistributePlanner, explainLevel);
 
         SessionVariable sessionVariable = cascadesContext.getConnectContext().getSessionVariable();
-        if (sessionVariable.isEnableLocalShufflePlanner()) {
+        if (sessionVariable.isEnableLocalShufflePlanner() && sessionVariable.isEnableLocalShuffle()) {
             addLocalExchangeAfterDistribute();
         }
     }
@@ -723,9 +723,6 @@ public class NereidsPlanner extends Planner {
         AddLocalExchange adder = new AddLocalExchange();
         if (distributedPlans != null && !distributedPlans.isEmpty()) {
             adder.addLocalExchange(distributedPlans, planTranslatorContext);
-        } else {
-            // Fallback: explain plan scenarios may not have distributedPlans
-            adder.addLocalExchange(fragments, planTranslatorContext);
         }
     }
 

@@ -26,16 +26,8 @@ import org.apache.doris.planner.LocalExchangeNode.LocalExchangeType;
 import org.apache.doris.planner.LocalExchangeNode.LocalExchangeTypeRequire;
 import org.apache.doris.planner.LocalExchangeNode.RequireHash;
 
-import java.util.List;
-
 /** AddLocalExchange */
 public class AddLocalExchange {
-    public void addLocalExchange(List<PlanFragment> fragments, PlanTranslatorContext context) {
-        for (PlanFragment fragment : fragments) {
-            addLocalExchangeForFragment(fragment, context, false);
-        }
-    }
-
     /** addLocalExchange with distributed plans, skipping single-instance fragments.
      *  BE's _plan_local_exchange checks _num_instances which is the per-BE instance count.
      *  With _num_instances<=1 all pipelines on that BE have 1 task so local exchange is a no-op.
@@ -56,44 +48,33 @@ public class AddLocalExchange {
                 continue;
             }
             PlanFragment fragment = pipePlan.getFragmentJob().getFragment();
-            boolean isLocalShuffle = pipePlan.getInstanceJobs().stream()
-                    .anyMatch(j -> j
-                            instanceof org.apache.doris.nereids.trees.plans.distribute
-                                    .worker.job.LocalShuffleAssignedJob);
-            addLocalExchangeForFragment(fragment, context, isLocalShuffle);
+            addLocalExchangeForFragment(fragment, context);
         }
     }
 
-    private void addLocalExchangeForFragment(PlanFragment fragment, PlanTranslatorContext context,
-            boolean isLocalShuffle) {
+    private void addLocalExchangeForFragment(PlanFragment fragment, PlanTranslatorContext context) {
         DataSink sink = fragment.getSink();
         LocalExchangeTypeRequire require = sink == null
                 ? LocalExchangeTypeRequire.noRequire() : sink.getLocalExchangeTypeRequire();
         PlanNode root = fragment.getPlanRoot();
         context.setHasSerialAncestorInPipeline(root, false);
-        context.setIsLocalShuffleFragment(isLocalShuffle);
         Pair<PlanNode, LocalExchangeType> output = root
                 .enforceAndDeriveLocalExchange(context, null, require);
         PlanNode newRoot = output.first;
-        // The DataStreamSink runs in the same pipeline as the fragment root.
-        // If the root is serial in a pooling-scan fragment, the sink pipeline has 1 task
-        // and only instance 0 sends EOS → downstream receivers hang.
-        // Insert PASSTHROUGH fan-out to create _num_instances sink tasks.
-        //
-        // Only check the root node itself (not recursive hasSerialChildren), because
-        // after enforceAndDeriveLocalExchange(), any serial children deeper in the tree
-        // are already handled by LocalExchangeNodes inserted during the tree walk.
-        // Those LocalExchangeNodes create pipeline boundaries with _num_instances tasks.
-        if (isLocalShuffle && newRoot.isSerialNode()) {
+        // The fragment data sink (DataStreamSink, OlapTableSink) runs in the same pipeline
+        // as the root. If the root will be serial on BE, the sink pipeline has 1 task —
+        // only instance 0 sends data, others hang or miss writes.
+        // Insert PASSTHROUGH fan-out so sink runs with _num_instances tasks.
+        // This matches BE-native's default required_data_distribution():
+        //   _child->is_serial_operator() ? PASSTHROUGH : NOOP
+        if (newRoot.isSerialOperatorOnBe(context.getConnectContext())) {
             newRoot = new LocalExchangeNode(context.nextPlanNodeId(), newRoot,
                     LocalExchangeType.PASSTHROUGH, null);
         }
         if (newRoot != root) {
             fragment.setPlanRoot(newRoot);
         }
-        if (isLocalShuffle) {
-            validateNoSerialWithoutLocalExchange(fragment.getPlanRoot(), context.getConnectContext());
-        }
+        validateNoSerialWithoutLocalExchange(fragment.getPlanRoot(), context.getConnectContext());
     }
 
     /**
@@ -112,8 +93,9 @@ public class AddLocalExchange {
             if (child.isSerialOperatorOnBe(context)
                     && !(child instanceof LocalExchangeNode)
                     && !(node instanceof LocalExchangeNode)
+                    && !(node instanceof ExchangeNode)
                     && !node.isSerialOperatorOnBe(context)) {
-                throw new RuntimeException(
+                org.apache.logging.log4j.LogManager.getLogger(AddLocalExchange.class).warn(
                         "Serial " + child.getClass().getSimpleName() + "(id=" + child.getId()
                         + ") feeds into non-serial " + node.getClass().getSimpleName()
                         + "(id=" + node.getId() + ") without LocalExchangeNode"
