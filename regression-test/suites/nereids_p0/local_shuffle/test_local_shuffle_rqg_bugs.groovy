@@ -1378,5 +1378,107 @@ suite("test_local_shuffle_rqg_bugs") {
         assertTrue(false, "Bug 23: canUseDistinctStreamingAgg + GROUPING SETS: ${t.message}")
     }
 
+    // ============================================================
+    //  Bug 24: BUCKET_SHUFFLE join + pooling scan + local shuffle
+    //          causes data loss when destination routing uses all
+    //          instances instead of firstInstancePerWorker.
+    //
+    //  Root cause: filterInstancesWhichCanReceiveDataFromRemote() had
+    //  a special branch for BUCKET_SHUFFLE that returned all instances
+    //  (40) as destinations, but BE native local exchange creates only
+    //  4 receiver tasks (one per BE). Destination mismatch causes rows
+    //  sent to non-existent receivers to be lost.
+    //
+    //  Trigger conditions:
+    //    - BUCKET_SHUFFLE join plan (requires multi-BE + specific pptn)
+    //    - ignore_storage_data_distribution=true (pooling scan)
+    //    - enable_local_shuffle=true
+    //    - pptn that makes scan serial (scanRanges < pptn * numBE)
+    // ============================================================
+    try {
+        logger.info("Bug 24: BUCKET_SHUFFLE + pooling scan destination routing")
+        sql "DROP TABLE IF EXISTS bug24_t1"
+        sql "DROP TABLE IF EXISTS bug24_t2"
+
+        sql """
+            CREATE TABLE bug24_t1 (
+                pk INT NOT NULL,
+                val VARCHAR(64),
+                INDEX idx_val (val) USING INVERTED
+            ) ENGINE=OLAP
+            DUPLICATE KEY(pk)
+            DISTRIBUTED BY HASH(pk) BUCKETS 10
+            PROPERTIES ("replication_num" = "1")
+        """
+
+        sql """
+            CREATE TABLE bug24_t2 (
+                pk INT NOT NULL,
+                val VARCHAR(64),
+                INDEX idx_val (val) USING INVERTED
+            ) ENGINE=OLAP
+            DUPLICATE KEY(pk)
+            DISTRIBUTED BY HASH(pk) BUCKETS 10
+            PROPERTIES ("replication_num" = "1")
+        """
+
+        // Insert 20 rows into t1, 50 into t2
+        for (int i = 1; i <= 20; i++) {
+            sql "INSERT INTO bug24_t1 VALUES (${i}, 'row_${i}')"
+        }
+        for (int i = 1; i <= 50; i++) {
+            sql "INSERT INTO bug24_t2 VALUES (${i}, 'row_${i}')"
+        }
+
+        // Baseline: no local shuffle
+        def bug24_baseline = sql """
+            SELECT /*+SET_VAR(enable_local_shuffle=false,enable_sql_cache=false)*/
+            count(*) FROM (
+                SELECT * FROM bug24_t1 AS t1
+                LEFT JOIN (SELECT * FROM bug24_t2) AS t2 ON t1.pk = t2.pk
+                ORDER BY t2.pk DESC, t1.pk DESC LIMIT 21
+            ) t
+        """
+
+        // Test with multiple pptn values to catch the specific trigger
+        for (int pptn : [1, 2, 3, 4, 5, 8, 10]) {
+            def result = sql """
+                SELECT /*+SET_VAR(
+                    parallel_pipeline_task_num=${pptn},
+                    ignore_storage_data_distribution=true,
+                    enable_local_shuffle=true,
+                    enable_local_shuffle_planner=false,
+                    enable_sql_cache=false
+                )*/ count(*) FROM (
+                    SELECT * FROM bug24_t1 AS t1
+                    LEFT JOIN (SELECT * FROM bug24_t2) AS t2 ON t1.pk = t2.pk
+                    ORDER BY t2.pk DESC, t1.pk DESC LIMIT 21
+                ) t
+            """
+            assertEquals(bug24_baseline, result,
+                "Bug 24 pptn=${pptn} planner=false: BUCKET_SHUFFLE+pooling result mismatch")
+
+            def result2 = sql """
+                SELECT /*+SET_VAR(
+                    parallel_pipeline_task_num=${pptn},
+                    ignore_storage_data_distribution=true,
+                    enable_local_shuffle=true,
+                    enable_local_shuffle_planner=true,
+                    enable_sql_cache=false
+                )*/ count(*) FROM (
+                    SELECT * FROM bug24_t1 AS t1
+                    LEFT JOIN (SELECT * FROM bug24_t2) AS t2 ON t1.pk = t2.pk
+                    ORDER BY t2.pk DESC, t1.pk DESC LIMIT 21
+                ) t
+            """
+            assertEquals(bug24_baseline, result2,
+                "Bug 24 pptn=${pptn} planner=true: BUCKET_SHUFFLE+pooling result mismatch")
+        }
+        logger.info("Bug 24: PASSED")
+    } catch (Throwable t) {
+        logger.error("Bug 24 FAILED: ${t.message}")
+        assertTrue(false, "Bug 24: BUCKET_SHUFFLE+pooling destination routing: ${t.message}")
+    }
+
     logger.info("=== All RQG bug reproduction tests completed ===")
 }

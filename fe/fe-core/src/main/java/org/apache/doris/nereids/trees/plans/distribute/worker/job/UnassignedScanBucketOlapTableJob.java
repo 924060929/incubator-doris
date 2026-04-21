@@ -539,27 +539,6 @@ public class UnassignedScanBucketOlapTableJob extends AbstractUnassignedScanJob 
         }
 
         int maxParallelism = (int) Math.max(tabletNum, fragment.getParallelExecNum());
-        int result = Math.min(maxParallelism, colocateMaxParallelNum);
-
-        // When the fragment has a non-serial exchange, the BE won't insert local exchange
-        // for the exchange pipeline (distribution matches BUCKET_HASH_SHUFFLE). Instances
-        // beyond per-BE bucket count are "padding" with no bucket assignment — they create
-        // VDataStreamRecvrs that never receive data and hang. Cap at per-BE bucket count.
-        if (useLocalShuffleToAddParallel && hasNonSerialExchangeInFragment()) {
-            result = Math.min(result, maxParallel);
-        }
-
-        return result;
-    }
-
-    private boolean hasNonSerialExchangeInFragment() {
-        List<ExchangeNode> exchanges = fragment.getPlanRoot()
-                .collectInCurrentFragment(ExchangeNode.class::isInstance);
-        for (ExchangeNode exchange : exchanges) {
-            if (!exchange.isSerialNode()) {
-                return true;
-            }
-        }
-        return false;
+        return Math.min(maxParallelism, colocateMaxParallelNum);
     }
 }
