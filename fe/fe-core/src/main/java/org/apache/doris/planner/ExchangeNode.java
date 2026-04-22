@@ -156,7 +156,7 @@ public class ExchangeNode extends PlanNode {
     @Override
     public boolean isSerialNode() {
         return (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().isUseSerialExchange()
-                || partitionType == TPartitionType.UNPARTITIONED) && mergeInfo != null;
+                || partitionType == TPartitionType.UNPARTITIONED) && mergeInfo == null;
     }
 
     @Override
