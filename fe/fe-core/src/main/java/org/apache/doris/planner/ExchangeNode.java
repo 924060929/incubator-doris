@@ -102,7 +102,6 @@ public class ExchangeNode extends PlanNode {
 
     @Override
     protected void toThrift(TPlanNode msg) {
-        // Reuse isSerialOperatorOnBe() — single source of truth for BE serial condition.
         msg.setIsSerialOperator(isSerialOperatorOnBe(ConnectContext.get()));
         msg.node_type = TPlanNodeType.EXCHANGE_NODE;
         msg.exchange_node = new TExchangeNode();

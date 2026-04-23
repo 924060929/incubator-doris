@@ -1177,10 +1177,11 @@ Status PipelineFragmentContext::_plan_local_exchange(
         do_local_exchange = false;
         // Plan local exchange for each operator.
         for (; idx < ops.size();) {
-            if (ops[idx]->required_data_distribution(_runtime_state.get()).need_local_exchange()) {
+            auto _le_req = ops[idx]->required_data_distribution(_runtime_state.get());
+            if (_le_req.need_local_exchange()) {
                 RETURN_IF_ERROR(_add_local_exchange(
                         pip_idx, idx, ops[idx]->node_id(), _runtime_state->obj_pool(), pip,
-                        ops[idx]->required_data_distribution(_runtime_state.get()),
+                        _le_req,
                         &do_local_exchange, num_buckets, bucket_seq_to_instance_idx,
                         shuffle_idx_to_instance_idx));
             }

@@ -287,6 +287,9 @@ public class AggregationNode extends PlanNode {
                 }
             } else if (sessionVariable.enableDistinctStreamingAggForcePassthrough) {
                 requireChild = LocalExchangeTypeRequire.requirePassthrough();
+            } else if (children.get(0).isSerialOperatorOnBe(connectContext)) {
+                // BE base class: _child->is_serial_operator() ? PASSTHROUGH : NOOP
+                requireChild = LocalExchangeTypeRequire.requirePassthrough();
             } else {
                 requireChild = LocalExchangeTypeRequire.noRequire();
             }
@@ -352,6 +355,10 @@ public class AggregationNode extends PlanNode {
 
     @Override
     protected boolean shouldResetSerialFlagForChild(int childIndex) {
+        // Non-streaming AGG is a pipeline breaker: child is in AGG_Sink pipeline,
+        // parent is in AGG_Source pipeline. Reset inherited serial flag from parent
+        // (different pipeline), but enforceRequire still adds this node's own
+        // isSerialNode() so the child sees AGG_Sink's serial status correctly.
         return !useStreamingPreagg;
     }
 }

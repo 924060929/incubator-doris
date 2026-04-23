@@ -983,9 +983,16 @@ public abstract class PlanNode extends TreeNode<PlanNode> {
     protected Pair<PlanNode, LocalExchangeType> enforceRequire(
             PlanTranslatorContext translatorContext, PlanNode child, int childIndex,
             LocalExchangeTypeRequire require) {
-        // 1. Propagate serial-ancestor flag to child
-        boolean childHasSerialAncestor = shouldResetSerialFlagForChild(childIndex)
-                ? false : translatorContext.hasSerialAncestorInPipeline(this) || isSerialNode();
+        // 1. Propagate serial-ancestor flag to child.
+        // For pipeline-splitting operators (shouldReset=true, e.g. non-streaming AGG):
+        //   Drop inherited serial flag from parent (parent is in a different pipeline),
+        //   but keep this node's own serial status (child is in the same pipeline as this
+        //   node's sink, e.g. Exchange is in AGG_Sink pipeline).
+        // For non-splitting operators (shouldReset=false, e.g. streaming AGG):
+        //   Inherit parent's serial flag + this node's own.
+        boolean inheritedSerial = shouldResetSerialFlagForChild(childIndex)
+                ? false : translatorContext.hasSerialAncestorInPipeline(this);
+        boolean childHasSerialAncestor = inheritedSerial || isSerialNode();
         translatorContext.setHasSerialAncestorInPipeline(child, childHasSerialAncestor);
 
         // 2. Recurse child (Layer 2: child declares its own require/output)
