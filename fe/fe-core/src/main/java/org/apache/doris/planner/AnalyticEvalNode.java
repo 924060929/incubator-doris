@@ -187,7 +187,10 @@ public class AnalyticEvalNode extends PlanNode {
                 newChild = newChild.getChild(0);
             }
             children = Lists.newArrayList(newChild);
-            return Pair.of(this, LocalExchangeType.PASSTHROUGH);
+            // Return NOOP: the serial AnalyticSource pipeline has 1 task, we don't provide
+            // fan-out ourselves. The parent's enforceRequire framework-level serial check
+            // will see our serial status and insert PASSTHROUGH LE above us if needed.
+            return Pair.of(this, LocalExchangeType.NOOP);
         } else if (orderByElements.isEmpty()) {
             if (AddLocalExchange.isColocated(this)) {
                 requireChild = LocalExchangeTypeRequire.requireHash();
