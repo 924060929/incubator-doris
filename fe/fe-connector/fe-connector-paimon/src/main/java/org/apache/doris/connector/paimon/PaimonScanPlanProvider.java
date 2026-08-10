@@ -2233,4 +2233,87 @@ public class PaimonScanPlanProvider implements ConnectorScanPlanProvider {
     private ConnectorStorageContext storage() {
         return context.getStorageContext();
     }
+ 
+
+    /**
+     * Statement-scoped cache key for one Paimon scan.
+     *
+     * <p>Includes every input that changes the planned split list: table identity, the branch pin,
+     * the whole scan-options map (snapshot / tag / incremental / options pins), the projected
+     * columns in order, the pushed filter and the COUNT pushdown flag. System tables are excluded
+     * upstream, and session variables are statement-constant, so both stay out of the key.
+     */
+    private static final class PaimonScanReuseKey {
+        private final long catalogId;
+        private final String queryId;
+        private final String databaseName;
+        private final String tableName;
+        private final String branchName;
+        private final Map<String, String> scanOptions;
+        private final List<String> columnNames;
+        private final List<ConnectorExpression> filterConjuncts;
+        private final boolean countPushdown;
+
+        private PaimonScanReuseKey(long catalogId, String queryId, PaimonTableHandle handle,
+                ConnectorScanRequest request) {
+            // The catalog id and query id isolate same-named tables across a cross-catalog
+            // statement and executions of a reused prepared statement (see
+            // ConnectorStatementScopes.resolveInStatement). System tables are bypassed in planScan
+            // before this key is built, so sysTableName is always null here; if the system-table
+            // bypass is ever relaxed, add it back.
+            this.catalogId = catalogId;
+            this.queryId = queryId;
+            this.databaseName = handle.getDatabaseName();
+            this.tableName = handle.getTableName();
+            this.branchName = handle.getBranchName();
+            this.scanOptions = handle.getScanOptions() == null
+                    ? Collections.emptyMap()
+                    : Collections.unmodifiableMap(new HashMap<>(handle.getScanOptions()));
+            this.columnNames = request.getColumns().stream()
+                    .map(PaimonScanPlanProvider::toPaimonColumnName)
+                    .collect(Collectors.toList());
+            this.filterConjuncts = ConnectorScanKeyUtils.canonicalFilterConjuncts(request.getFilter());
+            this.countPushdown = request.isCountPushdown();
+        }
+
+        private static String toPaimonColumnName(ConnectorColumnHandle column) {
+            if (!(column instanceof PaimonColumnHandle)) {
+                throw new IllegalArgumentException(
+                        "Paimon scan reuse key requires PaimonColumnHandle, got: " + column.getClass().getName());
+            }
+            return ((PaimonColumnHandle) column).getName().toLowerCase(Locale.ROOT);
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (!(object instanceof PaimonScanReuseKey)) {
+                return false;
+            }
+            PaimonScanReuseKey that = (PaimonScanReuseKey) object;
+            return catalogId == that.catalogId
+                    && countPushdown == that.countPushdown
+                    && Objects.equals(queryId, that.queryId)
+                    && Objects.equals(databaseName, that.databaseName)
+                    && Objects.equals(tableName, that.tableName)
+                    && Objects.equals(branchName, that.branchName)
+                    && Objects.equals(scanOptions, that.scanOptions)
+                    && Objects.equals(columnNames, that.columnNames)
+                    && Objects.equals(filterConjuncts, that.filterConjuncts);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(catalogId, queryId, databaseName, tableName, branchName,
+                    scanOptions, columnNames, filterConjuncts, countPushdown);
+        }
+
+        @Override
+        public String toString() {
+            return "PaimonScanReuseKey{catalog=" + catalogId + ", query=" + queryId
+                    + ", table=" + databaseName + "." + tableName + "}";
+        }
+    }
 }

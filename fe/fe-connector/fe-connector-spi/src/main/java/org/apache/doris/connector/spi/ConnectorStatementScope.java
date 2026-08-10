@@ -45,6 +45,19 @@ public interface ConnectorStatementScope {
     <T> T computeIfAbsent(String key, Supplier<T> loader);
 
     /**
+     * Backward compatible bridge for SPI API level 1 callers that still compile
+     * against {@code ConnectorStatementScope#computeIfAbsent(String, Supplier)}.
+     *
+     * <p>Kept as a default method to avoid NoSuchMethodError on API-5/older
+     * plugin classpath where call sites are still wired to the String overload.
+     * Runtime behavior is identical to {@link #computeIfAbsent(Object, Supplier)}.
+     */
+    @Deprecated
+    default <T> T computeIfAbsent(String key, Supplier<T> loader) {
+        return computeIfAbsent((Object) key, loader);
+    }
+
+    /**
      * Typed convenience over {@link #computeIfAbsent} for the ONE {@link ConnectorMetadata} a statement uses per
      * {@code key}. The engine's metadata funnel builds {@code key} (as {@code "metadata:" + catalogId}, plus the
      * owning connector's label for a heterogeneous gateway) and passes a {@code factory} that calls
@@ -54,6 +67,18 @@ public interface ConnectorStatementScope {
      */
     default ConnectorMetadata getOrCreateMetadata(String key, Supplier<ConnectorMetadata> factory) {
         return computeIfAbsent(key, factory);
+    }
+
+    /**
+     * Backward compatible bridge for API level 1 call sites.
+     *
+     * <p>Kept for the same reason as {@link #computeIfAbsent(String, Supplier)}:
+     * API-5/older plugins may still dispatch via the String overload and must keep
+     * functioning on newer FE builds.</p>
+     */
+    @Deprecated
+    default ConnectorMetadata getOrCreateMetadata(String key, Supplier<ConnectorMetadata> factory) {
+        return getOrCreateMetadata((Object) key, factory);
     }
 
     /**

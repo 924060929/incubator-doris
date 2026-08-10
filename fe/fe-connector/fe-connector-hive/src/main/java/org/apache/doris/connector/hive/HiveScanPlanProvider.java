@@ -226,6 +226,20 @@ public class HiveScanPlanProvider implements ConnectorScanPlanProvider {
             ConnectorSession session,
             ConnectorScanRequest request,
             List<String> partitionBatch) {
+        if (session == null) {
+            return doPlanScanForPartitionBatch(session, request, partitionBatch);
+        }
+        HiveScanReuseKey reuseKey = new HiveScanReuseKey(session.getCatalogId(), session.getQueryId(),
+                (HiveTableHandle) request.getTableHandle(), partitionBatch);
+        return session.getStatementScope().computeIfAbsent(reuseKey,
+                () -> Collections.unmodifiableList(doPlanScanForPartitionBatch(
+                        session, request, partitionBatch)));
+    }
+
+    private List<ConnectorScanRange> doPlanScanForPartitionBatch(
+            ConnectorSession session,
+            ConnectorScanRequest request,
+            List<String> partitionBatch) {
         HiveTableHandle hiveHandle = (HiveTableHandle) request.getTableHandle();
         String dbName = hiveHandle.getDbName();
         String tableName = hiveHandle.getTableName();
@@ -713,5 +727,107 @@ public class HiveScanPlanProvider implements ConnectorScanPlanProvider {
     /** This catalog's engine-owned storage services (see {@link ConnectorContext#getStorageContext()}). */
     private ConnectorStorageContext storage() {
         return context.getStorageContext();
+    }
+ 
+
+    /**
+     * Statement-scoped cache key for one Hive scan.
+     *
+     * <p>Includes every input that changes the planned split list: table identity, the file formats
+     * (input format / serialization lib / JSON single-column gate), the partition keys and the
+     * pruned partition set (each partition's location and values). ACID tables are excluded
+     * upstream, and session variables are statement-constant, so both stay out of the key.
+     */
+    private static final class HiveScanReuseKey {
+        private final long catalogId;
+        private final String queryId;
+        private final String dbName;
+        private final String tableName;
+        private final String location;
+        private final String inputFormat;
+        private final String serializationLib;
+        private final boolean firstColumnIsString;
+        private final List<String> partitionKeyNames;
+        private final List<HmsPartitionInfo> prunedPartitions;
+        private final List<String> partitionBatch;
+
+        private HiveScanReuseKey(long catalogId, String queryId, HiveTableHandle handle) {
+            // The catalog id and query id isolate same-named tables across a cross-catalog
+            // statement and executions of a reused prepared statement (see
+            // ConnectorStatementScopes.resolveInStatement); the table location identifies the data
+            // source of unpartitioned tables, whose prunedPartitions is null.
+            this.catalogId = catalogId;
+            this.queryId = queryId;
+            this.dbName = handle.getDbName();
+            this.tableName = handle.getTableName();
+            this.location = handle.getLocation();
+            this.inputFormat = handle.getInputFormat();
+            this.serializationLib = handle.getSerializationLib();
+            this.firstColumnIsString = handle.isFirstColumnString();
+            this.partitionKeyNames = handle.getPartitionKeyNames() == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(handle.getPartitionKeyNames()));
+            this.prunedPartitions = handle.getPrunedPartitions() == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(handle.getPrunedPartitions()));
+            this.partitionBatch = Collections.emptyList();
+        }
+
+        private HiveScanReuseKey(long catalogId, String queryId, HiveTableHandle handle,
+                List<String> partitionBatch) {
+            // The catalog id and query id isolate same-named tables across cross-catalog executions.
+            this.catalogId = catalogId;
+            this.queryId = queryId;
+            this.dbName = handle.getDbName();
+            this.tableName = handle.getTableName();
+            this.location = handle.getLocation();
+            this.inputFormat = handle.getInputFormat();
+            this.serializationLib = handle.getSerializationLib();
+            this.firstColumnIsString = handle.isFirstColumnString();
+            this.partitionKeyNames = handle.getPartitionKeyNames() == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(handle.getPartitionKeyNames()));
+            this.prunedPartitions = handle.getPrunedPartitions() == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(handle.getPrunedPartitions()));
+            this.partitionBatch = partitionBatch == null
+                    ? Collections.emptyList()
+                    : Collections.unmodifiableList(new ArrayList<>(partitionBatch));
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (!(object instanceof HiveScanReuseKey)) {
+                return false;
+            }
+            HiveScanReuseKey that = (HiveScanReuseKey) object;
+            return catalogId == that.catalogId
+                    && firstColumnIsString == that.firstColumnIsString
+                    && Objects.equals(queryId, that.queryId)
+                    && Objects.equals(dbName, that.dbName)
+                    && Objects.equals(tableName, that.tableName)
+                    && Objects.equals(location, that.location)
+                    && Objects.equals(inputFormat, that.inputFormat)
+                    && Objects.equals(serializationLib, that.serializationLib)
+                    && Objects.equals(partitionKeyNames, that.partitionKeyNames)
+                    && Objects.equals(prunedPartitions, that.prunedPartitions)
+                    && Objects.equals(partitionBatch, that.partitionBatch);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(catalogId, queryId, dbName, tableName, location,
+                    inputFormat, serializationLib, firstColumnIsString,
+                    partitionKeyNames, prunedPartitions, partitionBatch);
+        }
+
+        @Override
+        public String toString() {
+            return "HiveScanReuseKey{catalog=" + catalogId + ", query=" + queryId
+                    + ", table=" + dbName + "." + tableName + "}";
+        }
     }
 }

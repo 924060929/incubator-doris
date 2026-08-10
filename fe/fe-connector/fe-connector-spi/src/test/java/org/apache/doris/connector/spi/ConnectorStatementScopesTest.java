@@ -55,6 +55,27 @@ public class ConnectorStatementScopesTest {
     }
 
     @Test
+    public void sameCoordinateResolvesOncePerStatementWithOldStringApi() {
+        // API compatibility: even plugins still calling String overloads must keep the same
+        // once-per-coordinate memo semantics.
+        RecordingMemoScope scope = new RecordingMemoScope();
+        TestSession session = new TestSession(7L, "q1", scope);
+        AtomicInteger loads = new AtomicInteger();
+        Object a = scope.computeIfAbsent("metadata:7:q1:db1:t",
+                () -> {
+                    loads.incrementAndGet();
+                    return new Object();
+                });
+        Object b = scope.computeIfAbsent("metadata:7:q1:db1:t",
+                () -> {
+                    loads.incrementAndGet();
+                    return new Object();
+                });
+        Assertions.assertSame(a, b, "old String overload must also resolve once");
+        Assertions.assertEquals(1, loads.get(), "string overload must stay memoized");
+    }
+
+    @Test
     public void differentQueryIdIsolatesTheLoad() {
         // A reused prepared statement runs each execution under its own queryId; the memo never crosses executions.
         RecordingMemoScope scope = new RecordingMemoScope();
